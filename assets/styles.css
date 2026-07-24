@@ -177,6 +177,18 @@ a { color: var(--sky); text-decoration: none; }
 .btn-danger { color: var(--bad); border-color: rgba(248,113,113,.35); background: var(--bad-bg); }
 .btn-sm { padding: 9px 13px; font-size: 13.5px; border-radius: 11px; width: auto; }
 .btn-row { display: flex; gap: 10px; }
+.btn-row-wrap { flex-wrap: wrap; }
+.btn-row-wrap .btn-sm { flex: 1 1 auto; min-width: 92px; }
+
+/* ==== אופטימיזציה למגע ==== */
+button, a, .btn, .slot, .day-chip, .svc-card, .tabbar button,
+[data-act], [data-tab], [data-otab], [data-svc], [data-day], [data-slot], [data-wait] {
+  touch-action: manipulation;           /* מבטל השהיית 300ms וזום בהקשה כפולה */
+  -webkit-tap-highlight-color: transparent;
+}
+.day-chip, .slot, .svc-card, .tabbar button { -webkit-user-select: none; user-select: none; }
+.day-chip:active { transform: scale(.96); }
+.tabbar button:active { transform: scale(.94); }
 
 /* ==== שדות טופס ==== */
 .field { margin-bottom: 14px; }

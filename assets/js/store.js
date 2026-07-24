@@ -316,9 +316,10 @@ UG.Store = (function () {
     if ((cur.blocks || []).includes(data.date + "|" + data.start)) {
       return { ok: false, reason: "השעה כבר אינה זמינה" };
     }
-    // בדיקת חפיפה מול תורים קיימים
+    // בדיקת חפיפה מול תורים קיימים (מדלגים על התור המקורי בעת שינוי מועד)
     const clash = cur.bookings.some((b) => {
       if (b.status === "cancelled" || b.date !== data.date) return false;
+      if (data.excludeBookingId && b.id === data.excludeBookingId) return false;
       const bs = u.toMin(b.start), be = u.toMin(b.end);
       return startMin < be && endMin > bs;
     });

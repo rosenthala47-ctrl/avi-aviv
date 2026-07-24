@@ -30,6 +30,7 @@
     selService: null,
     selDate: null,       // יום נבחר בצד הלקוח
     selSlot: null,
+    rescheduleId: null,  // מזהה תור בעת שינוי מועד (החלפת מועד לתור קיים)
     oDate: null,         // יום נבחר בצד הבעלים (תצוגת יומן)
     statMonth: null,     // חודש נבחר בדוח ("YYYY-MM")
     onboarding: false,   // מסך פתיחת מספרה
@@ -465,6 +466,10 @@
     if (!services.length) {
       return notifBanner() + emptyState("💈", "אין עדיין שירותים", "בעל העסק טרם הגדיר שירותים לקביעה");
     }
+    // בחירת שירות אוטומטית — פחות הקשות (חשוב במיוחד כשיש שירות אחד)
+    if (!view.selService || !services.some((s) => s.id === view.selService)) {
+      view.selService = services[0].id;
+    }
     // בורר שירות
     const svcCards = services.map((s) => `
       <button class="svc-card ${view.selService === s.id ? "selected" : ""}" data-svc="${s.id}">
@@ -519,6 +524,7 @@
       : "בחרו שעה לתור";
 
     return `
+      ${rescheduleBanner(st)}
       ${alertBanner(st)}
       ${notifBanner()}
       ${arrivalBanner(st)}
@@ -556,6 +562,24 @@
         </div>
         <button class="btn btn-primary btn-sm" data-act="share-app" style="width:100%;margin-top:13px">🔗 שיתוף</button>
       </div>`;
+  }
+
+  /* ---------- באנר "שינוי מועד" ---------- */
+  function rescheduleBanner(st) {
+    if (!view.rescheduleId) return "";
+    const b = st.bookings.find((x) => x.id === view.rescheduleId);
+    if (!b) { view.rescheduleId = null; return ""; }
+    return `
+    <div class="banner sky">
+      <span class="bn-ico">🔄</span>
+      <div class="bn-body">
+        <div class="bn-title">שינוי מועד לתור</div>
+        <div class="bn-sub">${esc(b.serviceName)} · כרגע ${esc(u.relativeDay(b.date))} ${esc(b.start)} — בחרו מועד חדש</div>
+      </div>
+      <div class="bn-actions">
+        <button class="btn btn-ghost btn-sm" data-act="cancel-reschedule">ביטול</button>
+      </div>
+    </div>`;
   }
 
   /* ---------- באנר "התפנה תור" (רשימת המתנה) ---------- */
@@ -655,8 +679,9 @@
         ? `<span class="status-tag status-confirmed">✓ אושר</span>`
         : `<span class="status-tag status-booked">ממתין</span>`;
       const actions = isPast ? "" : `
-        <div class="btn-row" style="margin-top:12px">
+        <div class="btn-row btn-row-wrap" style="margin-top:12px">
           ${b.status !== "confirmed" ? `<button class="btn btn-sm" data-act="confirm-arrival" data-id="${b.id}">אשר הגעה</button>` : ""}
+          <button class="btn btn-sm" data-act="reschedule" data-id="${b.id}">🔄 שינוי מועד</button>
           <button class="btn btn-sm" data-act="add-cal" data-id="${b.id}">📅 ליומן</button>
           <button class="btn btn-sm btn-danger" data-act="cancel-booking" data-id="${b.id}">ביטול</button>
         </div>`;
@@ -705,6 +730,18 @@
     return html;
   }
 
+  function confirmCancelBooking(id) {
+    const b = Store.get().bookings.find((x) => x.id === id);
+    if (!b) return;
+    openModal(`
+      <div class="m-title">ביטול תור</div>
+      <div class="m-sub">${esc(b.serviceName)} · ${esc(u.longDate(b.date))} בשעה ${esc(b.start)}</div>
+      <p style="font-size:14px;color:var(--muted);margin:6px 0 20px">האם לבטל את התור? לא ניתן לשחזר, אך ניתן לקבוע תור חדש.</p>
+      <button class="btn btn-danger" data-act="do-cancel-booking" data-id="${b.id}">כן, בטלו את התור</button>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">חזרה</button>
+    `);
+  }
+
   function confirmClearHistory() {
     openModal(`
       <div class="m-title">מחיקת היסטוריה</div>
@@ -720,8 +757,9 @@
     const st = Store.get();
     const service = st.services.find((s) => s.id === view.selService);
     if (!service || !view.selSlot) return;
+    const isResched = !!view.rescheduleId;
     openModal(`
-      <div class="m-title">אישור קביעת תור</div>
+      <div class="m-title">${isResched ? "אישור שינוי מועד" : "אישור קביעת תור"}</div>
       <div class="m-sub">בדקו את הפרטים לפני האישור</div>
       <div class="summary-row"><span class="sr-k">שירות</span><span class="sr-v">${esc(service.name)}</span></div>
       <div class="summary-row"><span class="sr-k">תאריך</span><span class="sr-v">${esc(u.longDate(view.selDate))}</span></div>
@@ -737,7 +775,7 @@
       </div>
       <div class="field"><label>טלפון נייד</label>
         <input class="input" id="cf-phone" type="tel" inputmode="tel" placeholder="050-0000000" value="${esc(identity.phone)}"></div>
-      <button class="btn btn-primary" data-act="do-book">אישור וקביעת התור</button>
+      <button class="btn btn-primary" data-act="do-book">${isResched ? "אישור המועד החדש" : "אישור וקביעת התור"}</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
     `);
   }
@@ -761,22 +799,26 @@
     const contact = readContact();
     if (!contact) return;
     const bookedDate = view.selDate, bookedStart = view.selSlot;
-    const btn = $("[data-act='do-book']"); if (btn) { btn.disabled = true; btn.textContent = "קובע תור…"; }
+    const reschedId = view.rescheduleId;
+    const btn = $("[data-act='do-book']"); if (btn) { btn.disabled = true; btn.textContent = reschedId ? "מעדכן…" : "קובע תור…"; }
     const res = await Store.createBooking({
       serviceId: view.selService, date: bookedDate, start: bookedStart,
       userId: identity.userId, userName: contact.name, phone: contact.phone,
+      excludeBookingId: reschedId || undefined,   // אל תתנגש עם התור המקורי בעת שינוי מועד
     });
     if (!res.ok) {
       closeModal();
       toast(res.reason || "לא ניתן לקבוע את התור", "", "⚠️");
       view.selSlot = null;
-      render();
+      render();   // התור המקורי נשמר — אפשר לבחור מועד אחר
       return;
     }
+    // שינוי מועד: המועד החדש נקבע בהצלחה — כעת מבטלים את התור הישן
+    if (reschedId) { await Store.setBookingStatus(reschedId, "cancelled"); view.rescheduleId = null; }
     closeModal();
     view.selSlot = null;
     view.clientTab = "mine";
-    toast("התור נקבע בהצלחה!", "good", "🎉");
+    toast(reschedId ? "המועד עודכן ✓" : "התור נקבע בהצלחה!", "good", reschedId ? "🔄" : "🎉");
     // אם ההזמנה הגיעה מהתראת "התפנה תור" — נקה את ההתראה
     const stale = (Store.get().alerts || [])
       .filter((a) => a.userId === identity.userId && a.date === bookedDate && a.start === bookedStart)
@@ -1560,7 +1602,8 @@
 
       // בורר שירות
       if (t.dataset.svc) { view.selService = t.dataset.svc; view.selSlot = null; render(); return; }
-      if (t.dataset.slot) { view.selSlot = t.dataset.slot; render(); return; }
+      // הקשה על שעה פנויה פותחת ישירות את אישור ההזמנה — פחות הקשות
+      if (t.dataset.slot) { view.selSlot = t.dataset.slot; render(); openConfirm(); return; }
       if (t.dataset.wait) { const [dk, tm] = t.dataset.wait.split("|"); openWaitlist(dk, tm); return; }
       if (t.dataset.day && t.classList.contains("day-chip")) { view.selDate = t.dataset.day; view.selSlot = null; render(); return; }
       if (t.dataset.oday) { view.oDate = t.dataset.oday; render(); return; }
@@ -1581,10 +1624,32 @@
           await Store.setBookingStatus(t.dataset.id, "confirmed");
           toast("הגעתך אושרה ✓", "good", "📍"); render(); break;
 
-        case "cancel-booking":
         case "owner-cancel":
           await Store.setBookingStatus(t.dataset.id, "cancelled");
           toast("התור בוטל", "", "🗑️"); render(); break;
+
+        // ביטול תור ע״י הלקוח — עם אישור למניעת ביטול בטעות
+        case "cancel-booking": confirmCancelBooking(t.dataset.id); break;
+        case "do-cancel-booking":
+          await Store.setBookingStatus(t.dataset.id, "cancelled");
+          closeModal(); toast("התור בוטל", "", "🗑️"); render(); break;
+
+        // שינוי מועד — טעינת התור לזרימת ההזמנה לבחירת מועד חדש
+        case "reschedule": {
+          const bk = Store.get().bookings.find((x) => x.id === t.dataset.id);
+          if (!bk) break;
+          view.rescheduleId = bk.id;
+          view.selService = bk.serviceId;
+          view.selSlot = null;
+          view.selDate = null;   // clientBook יבחר יום פתוח כברירת מחדל
+          view.clientTab = "book";
+          toast("בחרו מועד חדש לתור", "sky", "🔄");
+          render();
+          break;
+        }
+        case "cancel-reschedule":
+          view.rescheduleId = null; view.selSlot = null; view.clientTab = "mine";
+          toast("שינוי המועד בוטל", "", "↩️"); render(); break;
 
         case "enable-notif": handleEnableNotif(); break;
         case "toggle-theme": toggleTheme(); break;
