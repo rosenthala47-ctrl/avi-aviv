@@ -18,8 +18,30 @@
   const SHOP = resolveShopId();
   const AUTHKEY = "ug_owner_auth__" + SHOP;
   const ROUTEKEY = "ug_route__" + SHOP;
+
+  /* ---------- תאימות למעטפת אפליקציה (Capacitor / Cordova / WebView) ---------- */
+  // האם רצים בתוך מעטפת אפליקציה נייטיב (ולא בדפדפן רגיל)
+  function isNativeShell() {
+    return !!(window.Capacitor || window.cordova) || !/^https?:$/.test(location.protocol);
+  }
+  // מעטפת Cordova בלבד (לא Capacitor) — פתיחת קישורים חיצוניים דורשת "_system"
+  function isCordovaOnly() {
+    return !!window.cordova && !window.Capacitor;
+  }
+  // בסיס הכתובת לשיתוף: מעדיף publicBaseUrl מה-config (חובה במעטפת אפליקציה),
+  // אחרת הכתובת הנוכחית (דפדפן רגיל).
+  function shareBase() {
+    const cfg = ((window.UG_CONFIG && UG_CONFIG.publicBaseUrl) || "").trim().replace(/\/+$/, "");
+    if (cfg) return cfg + "/";
+    return location.origin + location.pathname;
+  }
   function clientLink() {
-    return location.origin + location.pathname + (SHOP === "main" ? "" : "#" + SHOP);
+    return shareBase() + (SHOP === "main" ? "" : "#" + SHOP);
+  }
+  // פתיחת כתובת חיצונית בצורה שתעבוד בדפדפן ובכל מעטפת (מפה/יומן/וואטסאפ)
+  function openExternal(url) {
+    try { if (isCordovaOnly()) { window.open(url, "_system"); return; } } catch (e) {}
+    window.open(url, "_blank", "noopener");
   }
 
   /* ---------- מצב תצוגה מקומי (לא נשמר בשרת) ---------- */
@@ -131,7 +153,7 @@
       "&dates=" + dates +
       "&details=" + encodeURIComponent(details) +
       (st.shop.address ? "&location=" + encodeURIComponent(st.shop.address) : "");
-    window.open(url, "_blank", "noopener");
+    openExternal(url);
     toast("נפתח Google Calendar עם התור 📅", "sky", "📅");
   }
 
@@ -148,7 +170,7 @@
     try {
       if (navigator.clipboard) { await navigator.clipboard.writeText(text + " " + url); toast("הקישור הועתק — הדביקו בצ׳אט", "good", "🔗"); return; }
     } catch (e) {}
-    window.open("https://wa.me/?text=" + encodeURIComponent(text + " " + url), "_blank");
+    openExternal("https://wa.me/?text=" + encodeURIComponent(text + " " + url));
   }
 
   /* ---------- כרטיס ביקורת (משותף למנהל וללקוח) ---------- */
@@ -1521,7 +1543,7 @@
      פתיחת מספרה חדשה (רישום ספר) + "מספרה לא נמצאה"
      =======================================================================*/
   function renderOnboarding() {
-    const base = location.origin + location.pathname + "#";
+    const base = shareBase() + "#";
     return `
     <div class="screen active">
       <div class="role-wrap">
@@ -1587,6 +1609,13 @@
      חיווט אירועים (delegation)
      =======================================================================*/
   function wire() {
+    // מעטפת Cordova: פתיחת קישורים חיצוניים (Waze / מפות) בדפדפן המערכת במקום בתוך האפליקציה
+    if (isCordovaOnly()) {
+      document.addEventListener("click", (e) => {
+        const a = e.target.closest && e.target.closest('a[href^="http"],a[href^="tel:"],a[href^="mailto:"]');
+        if (a && a.href) { e.preventDefault(); window.open(a.href, "_system"); }
+      });
+    }
     document.addEventListener("click", async (e) => {
       // כניסת מנהל נסתרת: 3 הקשות רצופות על הלוגו (בתצוגת לקוח בלבד)
       if (e.target.closest(".logo-dot") && view.route === "client") { onLogoTap(); return; }
@@ -1785,7 +1814,7 @@
       if (e.target && e.target.id === "ob-handle") {
         const h = e.target.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
         const prev = $("#ob-linkPrev");
-        if (prev) prev.textContent = "הקישור שלך: " + location.origin + location.pathname + "#" + (h || "הכתובת-שלך");
+        if (prev) prev.textContent = "הקישור שלך: " + shareBase() + "#" + (h || "הכתובת-שלך");
       }
     });
   }

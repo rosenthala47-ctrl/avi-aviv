@@ -13,6 +13,9 @@ UG.Notify = (function () {
 
   function registerSW() {
     if (!("serviceWorker" in navigator)) return;
+    // במעטפת אפליקציה (Capacitor/Cordova/WebView) אין צורך ב-Service Worker,
+    // הוא אינו נתמך בסכמה הפנימית ועלול לגרום לרענון חוזר — מדלגים.
+    if (window.Capacitor || window.cordova || !/^https?:$/.test(location.protocol)) return;
     navigator.serviceWorker.register("sw.js").then((r) => {
       swReg = r;
       try { r.update(); } catch (e) {}

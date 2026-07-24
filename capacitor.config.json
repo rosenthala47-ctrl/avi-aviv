@@ -1,0 +1,16 @@
+{
+  "appId": "com.origrushko.booking",
+  "appName": "אורי גרושקו",
+  "webDir": ".",
+  "backgroundColor": "#0a0c10",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false
+  },
+  "ios": {
+    "contentInset": "always",
+    "limitsNavigationsToAppBoundDomains": false
+  }
+}
