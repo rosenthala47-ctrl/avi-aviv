@@ -318,7 +318,7 @@
     <div class="screen active">
       ${topbar("קביעת תור", {})}
       <div class="content" id="cscroll">${body}</div>
-      <div class="tabbar scroll">
+      <div class="tabbar">
         <button data-tab="book" class="${view.clientTab === "book" ? "active" : ""}">
           <span class="tb-ico">🗓️</span>קביעת תור</button>
         <button data-tab="gallery" class="${view.clientTab === "gallery" ? "active" : ""}">
@@ -355,17 +355,47 @@
     const st = Store.get();
     const reviews = (st.reviews || []).slice().sort((a, z) => (z.createdAt || 0) - (a.createdAt || 0));
     const avg = reviews.length ? reviews.reduce((s, r) => s + Number(r.rating || 0), 0) / reviews.length : 0;
-    const b = reviewableBooking(st);
     let html = `
       <div class="reviews-hero">
         <div class="rh-avg">${reviews.length ? avg.toFixed(1) : "—"}</div>
         ${starsRow(Math.round(avg))}
         <div class="rh-count">${reviews.length} ${reviews.length === 1 ? "ביקורת" : "ביקורות"}</div>
-      </div>`;
-    if (b) html += `<button class="btn btn-primary" data-act="open-review" data-id="${b.id}" style="margin-bottom:16px">⭐ דרג את התספורת שלך</button>`;
-    if (!reviews.length) html += emptyState("⭐", "אין עדיין ביקורות", "היו הראשונים לדרג אחרי התספורת הבאה!");
+      </div>
+      <button class="btn btn-primary" data-act="add-review" style="margin-bottom:16px">＋ כתיבת ביקורת</button>`;
+    if (!reviews.length) html += emptyState("⭐", "אין עדיין ביקורות", "היו הראשונים לכתוב ביקורת!");
     else html += reviews.map((r) => reviewCardHtml(r)).join("");
     return html;
+  }
+
+  /* מודאל כתיבת ביקורת חופשית (ללא צורך בתור) — גלוי לכל הלקוחות */
+  function openNewReview() {
+    const st = Store.get();
+    const svcOptions = ['<option value="">כללי</option>']
+      .concat((st.services || []).map((s) => `<option value="${esc(s.name)}">${esc(s.name)}</option>`)).join("");
+    const preName = (identity.name || ((identity.firstName || "") + " " + (identity.lastName || "")).trim());
+    openModal(`
+      <div class="m-title">כתיבת ביקורת ⭐</div>
+      <div class="m-sub">הביקורת תופיע לכל הלקוחות</div>
+      <div class="field"><label>השם שלך</label>
+        <input class="input" id="nrv-name" placeholder="השם שלך" value="${esc(preName)}"></div>
+      <div class="field"><label>על איזה שירות? (לא חובה)</label>
+        <select class="input" id="nrv-svc">${svcOptions}</select></div>
+      <div class="stars" id="nrv-stars">
+        ${[1, 2, 3, 4, 5].map((n) => `<button class="star on" data-star="${n}">★</button>`).join("")}
+      </div>
+      <div class="field" style="margin-top:16px"><label>הביקורת שלך (לא חובה)</label>
+        <textarea class="input" id="nrv-text" rows="3" placeholder="ספרו לנו איך היה…"></textarea></div>
+      <button class="btn btn-primary" data-act="send-new-review">פרסום הביקורת</button>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
+    `);
+    let rating = 5;
+    const wrap = $("#nrv-stars");
+    const paint = () => [...wrap.children].forEach((c, i) => c.classList.toggle("on", i < rating));
+    wrap.addEventListener("click", (e) => {
+      const s = e.target.closest("[data-star]"); if (!s) return;
+      rating = Number(s.dataset.star); paint();
+    });
+    $("#modal").__rating = () => rating;
   }
 
   /* ---------- תצוגת תמונה מוגדלת עם זום (צביטה / הקשה כפולה / כפתורים) ---------- */
@@ -670,9 +700,10 @@
             <div class="hint" style="margin-top:1px">לחצו לפתיחת ניווט</div>
           </div>
         </div>
-        <div class="btn-row" style="margin-top:13px">
+        <div class="btn-row btn-row-wrap" style="margin-top:13px">
           <a class="btn btn-sm nav-btn" target="_blank" rel="noopener" href="https://waze.com/ul?q=${q}&navigate=yes">🚗 Waze</a>
           <a class="btn btn-sm nav-btn" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${q}">🗺️ Google Maps</a>
+          <a class="btn btn-sm nav-btn" target="_blank" rel="noopener" href="https://moovit.com/?to=${q}">🚌 Moovit</a>
         </div>
       </div>`;
   }
@@ -1210,7 +1241,8 @@
     const upcoming = list.filter((x) => x.ts > now - 30 * 60000);
     const past = list.filter((x) => x.ts <= now - 30 * 60000).reverse();
 
-    if (!list.length) return emptyState("🎟️", "אין תורים עדיין", "כשלקוח יקבע תור הוא יופיע כאן");
+    const addBtn = `<button class="btn btn-primary" data-act="add-booking" style="margin-bottom:14px">＋ הוספת תור ידני</button>`;
+    if (!list.length) return addBtn + emptyState("🎟️", "אין תורים עדיין", "כשלקוח יקבע תור הוא יופיע כאן — או הוסיפו תור ידני");
 
     const row = (x, isPast) => {
       const b = x.b;
@@ -1234,10 +1266,63 @@
         </div>
       </div>`;
     };
-    let html = "";
+    let html = addBtn;
     if (upcoming.length) html += `<div class="section-title">תורים קרובים (${upcoming.length})</div>` + upcoming.map((x) => row(x, false)).join("");
     if (past.length) html += `<div class="section-title">היסטוריה</div>` + past.map((x) => row(x, true)).join("");
     return html;
+  }
+
+  /* מודאל הוספת תור ידנית ע״י הבעלים — בכל שעה מ-00:00 עד 23:45 (גם מחוץ לשעות הפעילות) */
+  function ownerAddBooking() {
+    const st = Store.get();
+    if (!st.services.length) { toast("צריך להגדיר שירות אחד לפחות", "", "✂️"); return; }
+    const today = u.dateKey(new Date());
+    const svcOptions = st.services.map((s) => `<option value="${s.id}">${esc(s.name)} · ${u.fmtDuration(s.durationMin)}</option>`).join("");
+    const hourOptions = Array.from({ length: 24 }, (_, h) => { const v = String(h).padStart(2, "0"); return `<option value="${v}">${v}</option>`; }).join("");
+    const minOptions = ["00", "15", "30", "45"].map((m) => `<option value="${m}">${m}</option>`).join("");
+    openModal(`
+      <div class="m-title">הוספת תור ידני</div>
+      <div class="m-sub">אפשר לקבוע בכל שעה — גם מחוץ לשעות הפעילות</div>
+      <div class="field"><label>שירות</label>
+        <select class="input" id="ab-svc">${svcOptions}</select></div>
+      <div class="field"><label>תאריך</label>
+        <input class="input" id="ab-date" type="date" value="${today}"></div>
+      <div class="field"><label>שעה</label>
+        <div style="display:flex;gap:8px;align-items:center;direction:ltr;justify-content:flex-start">
+          <select class="input" id="ab-hour" style="flex:1">${hourOptions}</select>
+          <span style="font-weight:800">:</span>
+          <select class="input" id="ab-min" style="flex:1">${minOptions}</select>
+        </div></div>
+      <div class="field"><label>שם הלקוח</label>
+        <input class="input" id="ab-name" placeholder="שם הלקוח"></div>
+      <div class="field"><label>טלפון (לא חובה)</label>
+        <input class="input" id="ab-phone" type="tel" inputmode="tel" placeholder="050-0000000"></div>
+      <button class="btn btn-primary" data-act="save-add-booking">קביעת התור</button>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
+    `);
+    const hs = $("#ab-hour"); if (hs) hs.value = String(new Date().getHours()).padStart(2, "0");
+    setTimeout(() => $("#ab-name") && $("#ab-name").focus(), 100);
+  }
+
+  async function saveAddBooking() {
+    const svcId = ($("#ab-svc") && $("#ab-svc").value) || "";
+    const date = ($("#ab-date") && $("#ab-date").value) || "";
+    const hh = ($("#ab-hour") && $("#ab-hour").value) || "00";
+    const mm = ($("#ab-min") && $("#ab-min").value) || "00";
+    const name = ($("#ab-name") && $("#ab-name").value.trim()) || "";
+    const phoneRaw = ($("#ab-phone") && $("#ab-phone").value.trim()) || "";
+    if (!svcId) { toast("בחרו שירות", "", "✋"); return; }
+    if (!date) { toast("בחרו תאריך", "", "✋"); return; }
+    if (!name) { toast("הזינו שם לקוח", "", "✋"); return; }
+    const start = hh + ":" + mm;
+    const phone = phoneRaw ? u.fmtPhone(phoneRaw) : "";
+    const res = await Store.createBooking({
+      serviceId: svcId, date, start,
+      userId: "owner:" + (phone ? u.normalizePhone(phone) : u.uid()),
+      userName: name, phone,
+    });
+    if (!res.ok) { toast(res.reason || "לא ניתן לקבוע את התור", "", "⚠️"); return; }
+    closeModal(); toast("התור נוסף ✓", "good", "➕"); render();
   }
 
   /* ---------- רשימת לקוחות (CRM) ---------- */
@@ -1738,6 +1823,20 @@
           localStorage.setItem("ug_reviews_off__" + SHOP, "1");
           toast("לא נטריד אותך שוב 🙂", "good", "👍"); render(); break;
         case "open-review": openReview(t.dataset.id); break;
+        case "add-review": openNewReview(); break;
+        case "send-new-review": {
+          const name = ($("#nrv-name") && $("#nrv-name").value.trim()) || "";
+          if (!name) { toast("נא להזין שם", "", "✋"); break; }
+          const rating = $("#modal").__rating ? $("#modal").__rating() : 5;
+          const serviceName = ($("#nrv-svc") && $("#nrv-svc").value) || "";
+          const text = ($("#nrv-text") && $("#nrv-text").value.trim()) || "";
+          identity.name = name; saveIdentity();
+          await Store.addReview({
+            bookingId: "free-" + u.uid(), userId: identity.userId,
+            userName: name, serviceName, rating, text,
+          });
+          closeModal(); toast("תודה על הביקורת! ⭐", "good", "🙏"); render(); break;
+        }
         case "review-skip": {
           let skip; try { skip = JSON.parse(localStorage.getItem("ug_review_skip") || "[]"); } catch (e2) { skip = []; }
           skip.push(t.dataset.id);
@@ -1769,6 +1868,10 @@
           if (next <= ymNow()) view.statMonth = next;
           render(); break;
         }
+
+        // הוספת תור ידנית ע״י הבעלים (24 שעות)
+        case "add-booking": ownerAddBooking(); break;
+        case "save-add-booking": saveAddBooking(); break;
 
         // שירותים
         case "add-svc": svcModal(null); break;
