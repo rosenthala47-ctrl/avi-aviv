@@ -99,6 +99,10 @@ a { color: var(--sky); text-decoration: none; }
   position: relative;
 }
 
+/* #root חייב למתוח לכל הגובה כדי שסרגל הלשוניות יישאר תמיד למטה
+   (גם כשהתוכן קצר ולא ממלא את המסך) */
+#root { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
 .screen { display: none; flex: 1; flex-direction: column; }
 .screen.active { display: flex; animation: fade .35s ease; }
 
