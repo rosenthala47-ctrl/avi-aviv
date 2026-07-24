@@ -1725,7 +1725,57 @@
     });
   }
 
+  // כניסת מנהל — מספרה מאובטחת דורשת התחברות עם החשבון; אחרת קוד
   function promptOwner() {
+    const shop = (Store.get() && Store.get().shop) || {};
+    if (shop.ownerUid) {
+      if (UG.Auth && UG.Auth.currentUid && UG.Auth.currentUid() === shop.ownerUid) { go("owner"); return; }
+      if (UG.Auth) {
+        UG.Auth.available().then((ok) => { ok ? promptOwnerLogin(shop.ownerUid) : promptOwnerCode(); });
+        return;
+      }
+    }
+    promptOwnerCode();
+  }
+
+  function promptOwnerLogin(ownerUid) {
+    openModal(`
+      <div class="m-title">כניסת מנהל 🔒</div>
+      <div class="m-sub">התחברו עם חשבון המנהל</div>
+      <div class="field"><label>אימייל</label>
+        <input class="input" id="au-email" type="email" inputmode="email" autocomplete="username"></div>
+      <div class="field"><label>סיסמה</label>
+        <input class="input" id="au-pass" type="password" autocomplete="current-password"></div>
+      <p class="hint" id="au-err" style="min-height:15px;margin-top:0"></p>
+      <button class="btn btn-primary" data-act2="do-owner-login">התחברות</button>
+      <button class="btn btn-ghost" data-act2="do-owner-reset" style="margin-top:8px">שכחתי סיסמה</button>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:4px">ביטול</button>
+    `);
+    const err = (m, good) => { const e = $("#au-err"); if (e) { e.style.color = good ? "var(--good)" : "var(--bad)"; e.textContent = m; } };
+    const login = async () => {
+      const email = ($("#au-email") && $("#au-email").value.trim()) || "";
+      const pass = ($("#au-pass") && $("#au-pass").value) || "";
+      if (!email || !pass) { err("נא למלא אימייל וסיסמה"); return; }
+      err("רגע…", true);
+      try {
+        await UG.Auth.signIn(email, pass);
+        if (UG.Auth.currentUid() === ownerUid) { closeModal(); go("owner"); }
+        else { err("החשבון הזה אינו הבעלים של המספרה"); await UG.Auth.signOut(); }
+      } catch (e) { err(UG.Auth.humanError(e)); }
+    };
+    const reset = async () => {
+      const email = ($("#au-email") && $("#au-email").value.trim()) || "";
+      if (!email) { err("הזינו אימייל לשחזור"); return; }
+      try { await UG.Auth.reset(email); err("נשלח מייל לאיפוס סיסמה ✓", true); }
+      catch (e) { err(UG.Auth.humanError(e)); }
+    };
+    const lb = $("[data-act2='do-owner-login']"); if (lb) lb.addEventListener("click", login);
+    const rb = $("[data-act2='do-owner-reset']"); if (rb) rb.addEventListener("click", reset);
+    const pw = $("#au-pass"); if (pw) pw.addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
+    setTimeout(() => $("#au-email") && $("#au-email").focus(), 100);
+  }
+
+  function promptOwnerCode() {
     openModal(`
       <div class="m-title">כניסת מנהל</div>
       <div class="m-sub">הזן סיסמה</div>
@@ -1913,11 +1963,28 @@
         (view.route === "owner" && view.ownerTab === "settings");
       if (onGalleryView && !isEditingRoot()) render();
     });
-    if (view.route === "owner" && localStorage.getItem(AUTHKEY) !== "1") view.route = "client";
+    const bootShop = (Store.get() && Store.get().shop) || {};
+    const secured = !!bootShop.ownerUid;   // מספרה מאובטחת בחשבון אישי (Firebase Auth)
+    if (secured) {
+      // כניסה לניהול רק לאחר אימות מול החשבון — לא סומכים על סימון מקומי
+      view.route = "client";
+    } else if (view.route === "owner" && localStorage.getItem(AUTHKEY) !== "1") {
+      view.route = "client";
+    }
     render();
-    // בדיקת זמינות התחברות מאובטחת (Firebase Auth) — לרענון מסך ההגדרות
+    // בדיקת זמינות התחברות מאובטחת (Firebase Auth) — לרענון מסך ההגדרות + כניסה אוטומטית לבעלים
     if (UG.Auth) UG.Auth.available().then((a) => {
       authAvail = a;
+      if (secured && a) {
+        // ריענון סשן: אם המשתמש כבר מחובר כבעלים המספרה — כניסה אוטומטית לניהול
+        const promote = () => {
+          if (view.route !== "owner" && UG.Auth.currentUid && UG.Auth.currentUid() === bootShop.ownerUid) {
+            go("owner");
+          }
+        };
+        promote();
+        UG.Auth.onChange(promote);
+      }
       if (view.route === "owner" && view.ownerTab === "settings" && !isEditingRoot()) render();
     });
     // תזמון תזכורות ורישום פוש בעת עלייה
