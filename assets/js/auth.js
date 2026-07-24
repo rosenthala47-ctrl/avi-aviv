@@ -45,7 +45,7 @@ UG.Auth = (function () {
     if (c === "auth/invalid-email") return "אימייל לא תקין";
     if (c === "auth/missing-password" || c === "auth/weak-password") return "סיסמה חלשה מדי (לפחות 6 תווים)";
     if (c === "auth/email-already-in-use") return "האימייל כבר רשום — נסו להתחבר";
-    if (c === "auth/invalid-credential" || c === "auth/wrong-password" || c === "auth/user-not-found") return "אימייל או סיסמה שגויים";
+    if (c === "auth/invalid-credential" || c === "auth/wrong-password" || c === "auth/user-not-found") return "אימייל/סיסמה שגויים — אם זו הפעם הראשונה, לחצו ״הרשמה (חשבון חדש)״";
     if (c === "auth/operation-not-allowed") return "התחברות במייל עדיין לא הופעלה ב-Firebase";
     if (c === "auth/too-many-requests") return "יותר מדי ניסיונות — נסו שוב מאוחר יותר";
     return "שגיאת התחברות";
