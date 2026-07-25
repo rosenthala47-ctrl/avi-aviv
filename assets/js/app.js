@@ -2003,6 +2003,7 @@
       <p class="hint" id="au-err" style="min-height:15px;margin-top:0"></p>
       <button class="btn btn-primary" data-act2="do-owner-login">התחברות</button>
       <button class="btn btn-ghost" data-act2="do-owner-reset" style="margin-top:8px">שכחתי סיסמה</button>
+      <button class="btn btn-ghost" data-act2="do-owner-code" style="margin-top:4px">כניסה עם קוד סודי</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:4px">ביטול</button>
     `);
     const err = (m, good) => { const e = $("#au-err"); if (e) { e.style.color = good ? "var(--good)" : "var(--bad)"; e.textContent = m; } };
@@ -2025,6 +2026,7 @@
     };
     const lb = $("[data-act2='do-owner-login']"); if (lb) lb.addEventListener("click", login);
     const rb = $("[data-act2='do-owner-reset']"); if (rb) rb.addEventListener("click", reset);
+    const cb = $("[data-act2='do-owner-code']"); if (cb) cb.addEventListener("click", promptOwnerCode);  // מסלול גיבוי: כניסה עם הקוד הסודי
     const pw = $("#au-pass"); if (pw) pw.addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
     setTimeout(() => $("#au-email") && $("#au-email").focus(), 100);
   }
