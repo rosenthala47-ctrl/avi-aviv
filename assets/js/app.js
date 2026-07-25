@@ -1654,9 +1654,12 @@
      רינדור ראשי
      =======================================================================*/
   function render() {
-    if (view.onboarding) { $("#root").innerHTML = renderOnboarding(); return; }
-    if (view.notFound) { $("#root").innerHTML = renderNotFound(); return; }
+    if (view.onboarding) { document.title = "BarberTor — תורים לספרים"; $("#root").innerHTML = renderOnboarding(); return; }
+    if (view.notFound) { document.title = "BarberTor"; $("#root").innerHTML = renderNotFound(); return; }
     if (!Store.get()) return;
+    // כותרת לשונית דינמית — שם המספרה של הספר, עם מיתוג BarberTor
+    const shopName = (Store.get().shop && Store.get().shop.name) || "BarberTor";
+    document.title = shopName + " · BarberTor";
     $("#root").innerHTML = view.route === "owner" ? renderOwner() : renderClient();
   }
 
@@ -1669,10 +1672,12 @@
     <div class="screen active">
       <div class="role-wrap">
         <div class="role-hero">
-          <div class="rh-logo">✂️</div>
-          <h1>פתיחת מספרה</h1>
-          <p>הקימו מערכת תורים משלכם — בחינם, תוך דקה</p>
+          <div class="rh-logo">💈</div>
+          <h1>BarberTor</h1>
+          <p>מערכת התורים לספרים — פתחו מערכת משלכם בחינם, תוך דקה</p>
         </div>
+
+        <div class="section-title">פתיחת מערכת חדשה</div>
         <div class="card">
           <div class="field"><label>שם המספרה</label>
             <input class="input" id="ob-name" placeholder="למשל: מספרת דני"></div>
@@ -1682,10 +1687,16 @@
           </div>
           <div class="field"><label>סיסמת ניהול (רק אתם תדעו)</label>
             <input class="input" id="ob-pass" type="text" placeholder="בחרו סיסמה"></div>
-          <button class="btn btn-primary" data-act="create-shop">יצירת המספרה</button>
-          <button class="btn btn-ghost" data-act="ob-cancel" style="margin-top:8px">חזרה</button>
+          <button class="btn btn-primary" data-act="create-shop">🚀 פתחו את המערכת</button>
         </div>
-        <p class="hint" style="text-align:center;margin-top:16px">אחרי היצירה תקבלו קישור אישי לשלוח ללקוחות שלכם.</p>
+        <p class="hint" style="text-align:center;margin-top:10px">אחרי היצירה תקבלו קישור אישי לשלוח ללקוחות שלכם.</p>
+
+        <div class="section-title" style="margin-top:26px">כבר יש לך מערכת?</div>
+        <div class="card">
+          <div class="field"><label>הכתובת האישית שלך</label>
+            <input class="input" id="ob-existing" placeholder="dani" autocapitalize="off" autocomplete="off" spellcheck="false"></div>
+          <button class="btn" data-act="goto-shop">כניסה למערכת שלי ›</button>
+        </div>
       </div>
     </div>`;
   }
@@ -1819,6 +1830,11 @@
         case "do-exit": performExit(); break;
         // רב-משתמשי: פתיחת מספרה / ניווט להרשמה
         case "create-shop": doCreateShop(); break;
+        case "goto-shop": {
+          const h = (($("#ob-existing") && $("#ob-existing").value) || "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
+          if (!h) { toast("הזינו את הכתובת האישית שלכם", "", "✋"); break; }
+          location.hash = h; location.reload(); break;
+        }
         case "open-signup": location.hash = "new"; location.reload(); break;
         case "ob-cancel": location.hash = ""; location.reload(); break;
         case "copy-link":

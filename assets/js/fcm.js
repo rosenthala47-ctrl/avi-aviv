@@ -43,7 +43,7 @@ UG.FCM = (function () {
         messaging.__onmsg = true;
         messaging.onMessage((payload) => {
           const d = (payload && (payload.data || payload.notification)) || {};
-          if (UG.Notify) UG.Notify.show(d.title || "אורי גרושקו", d.body || "", { tag: d.tag });
+          if (UG.Notify) UG.Notify.show(d.title || "BarberTor", d.body || "", { tag: d.tag });
         });
       }
     } catch (e) {

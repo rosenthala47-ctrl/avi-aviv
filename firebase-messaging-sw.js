@@ -17,7 +17,7 @@ const messaging = firebase.messaging();
 // הודעות מגיעות כ-data-only; אנחנו מציגים אותן כאן
 messaging.onBackgroundMessage((payload) => {
   const d = (payload && payload.data) || {};
-  self.registration.showNotification(d.title || "אורי גרושקו", {
+  self.registration.showNotification(d.title || "BarberTor", {
     body: d.body || "",
     icon: "assets/img/icon-192.png",
     badge: "assets/img/icon-192.png",

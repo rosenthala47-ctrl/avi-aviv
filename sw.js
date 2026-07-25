@@ -1,6 +1,6 @@
-/* Service Worker — מספרת אורי גרושקו
+/* Service Worker — BarberTor
    מטרות: התקנת PWA + הצגת התראות פוש (תזכורות / תור חדש).            */
-const CACHE = "ug-barber-v26";
+const CACHE = "ug-barber-v27";
 const ASSETS = [
   "./",
   "./index.html",
