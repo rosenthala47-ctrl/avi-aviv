@@ -329,7 +329,7 @@ UG.Store = (function () {
       id: u.uid(),
       serviceId: svc.id, serviceName: svc.name, price: svc.price, durationMin: svc.durationMin,
       date: data.date, start: data.start, end: u.toHHMM(endMin),
-      userId: data.userId, userName: data.userName, phone: data.phone || "",
+      userId: data.userId, userName: data.userName, phone: data.phone || "", email: data.email || "",
       status: "booked", createdAt: Date.now(),
     };
     cur.bookings.push(booking);

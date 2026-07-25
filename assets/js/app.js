@@ -828,6 +828,9 @@
       </div>
       <div class="field"><label>טלפון נייד</label>
         <input class="input" id="cf-phone" type="tel" inputmode="tel" placeholder="050-0000000" value="${esc(identity.phone)}"></div>
+      ${(UG.Email && UG.Email.configured()) ? `
+      <div class="field"><label>אימייל (לקבלת אישור למייל · לא חובה)</label>
+        <input class="input" id="cf-email" type="email" inputmode="email" autocomplete="email" placeholder="name@email.com" value="${esc(identity.email || "")}"></div>` : ""}
       <button class="btn btn-primary" data-act="do-book">${isResched ? "אישור המועד החדש" : "אישור וקביעת התור"}</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
     `);
@@ -842,10 +845,32 @@
     if (!last) { toast("נא להזין שם משפחה", "", "✋"); return null; }
     if (!u.isValidPhone(phoneRaw)) { toast("מספר טלפון לא תקין", "", "📵"); return null; }
     const phone = u.fmtPhone(phoneRaw);
+    const emailEl = $("#cf-email");
+    const email = emailEl ? emailEl.value.trim() : (identity.email || "");
+    if (emailEl && email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("כתובת אימייל לא תקינה", "", "📧"); return null; }
     const name = first + " " + last;
     identity.firstName = first; identity.lastName = last; identity.name = name; identity.phone = phone;
+    identity.email = email;
     saveIdentity();
-    return { first, last, phone, name };
+    return { first, last, phone, name, email };
+  }
+
+  /* שליחת מייל אישור ללקוח (אם EmailJS מוגדר והוזן אימייל) — לא חוסם את הזרימה */
+  function sendBookingEmail(bk) {
+    if (!bk || !bk.email || !(UG.Email && UG.Email.configured())) return;
+    const shop = (Store.get() && Store.get().shop) || {};
+    UG.Email.sendBooking({
+      to_email: bk.email,
+      to_name: bk.userName || "",
+      service: bk.serviceName || "",
+      date: u.longDate(bk.date),
+      time: bk.start,
+      duration: u.fmtDuration(bk.durationMin),
+      price: u.fmtPrice(bk.price),
+      shop_name: shop.name || "",
+      shop_address: shop.address || "",
+      shop_phone: shop.phone || "",
+    }).then((sent) => { if (sent) toast("אישור נשלח למייל 📧", "sky", "📧"); });
   }
 
   async function doBook() {
@@ -856,7 +881,7 @@
     const btn = $("[data-act='do-book']"); if (btn) { btn.disabled = true; btn.textContent = reschedId ? "מעדכן…" : "קובע תור…"; }
     const res = await Store.createBooking({
       serviceId: view.selService, date: bookedDate, start: bookedStart,
-      userId: identity.userId, userName: contact.name, phone: contact.phone,
+      userId: identity.userId, userName: contact.name, phone: contact.phone, email: contact.email,
       excludeBookingId: reschedId || undefined,   // אל תתנגש עם התור המקורי בעת שינוי מועד
     });
     if (!res.ok) {
@@ -872,6 +897,7 @@
     view.selSlot = null;
     view.clientTab = "mine";
     toast(reschedId ? "המועד עודכן ✓" : "התור נקבע בהצלחה!", "good", reschedId ? "🔄" : "🎉");
+    sendBookingEmail(res.booking);   // מייל אישור ללקוח (אם מוגדר והוזן אימייל)
     // אם ההזמנה הגיעה מהתראת "התפנה תור" — נקה את ההתראה
     const stale = (Store.get().alerts || [])
       .filter((a) => a.userId === identity.userId && a.date === bookedDate && a.start === bookedStart)
@@ -1297,6 +1323,9 @@
         <input class="input" id="ab-name" placeholder="שם הלקוח"></div>
       <div class="field"><label>טלפון (לא חובה)</label>
         <input class="input" id="ab-phone" type="tel" inputmode="tel" placeholder="050-0000000"></div>
+      ${(UG.Email && UG.Email.configured()) ? `
+      <div class="field"><label>אימייל לאישור (לא חובה)</label>
+        <input class="input" id="ab-email" type="email" inputmode="email" placeholder="name@email.com"></div>` : ""}
       <button class="btn btn-primary" data-act="save-add-booking">קביעת התור</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
     `);
@@ -1316,13 +1345,17 @@
     if (!name) { toast("הזינו שם לקוח", "", "✋"); return; }
     const start = hh + ":" + mm;
     const phone = phoneRaw ? u.fmtPhone(phoneRaw) : "";
+    const email = ($("#ab-email") && $("#ab-email").value.trim()) || "";
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("כתובת אימייל לא תקינה", "", "📧"); return; }
     const res = await Store.createBooking({
       serviceId: svcId, date, start,
       userId: "owner:" + (phone ? u.normalizePhone(phone) : u.uid()),
-      userName: name, phone,
+      userName: name, phone, email,
     });
     if (!res.ok) { toast(res.reason || "לא ניתן לקבוע את התור", "", "⚠️"); return; }
-    closeModal(); toast("התור נוסף ✓", "good", "➕"); render();
+    closeModal(); toast("התור נוסף ✓", "good", "➕");
+    sendBookingEmail(res.booking);   // מייל אישור ללקוח (אם מוגדר והוזן אימייל)
+    render();
   }
 
   /* ---------- רשימת לקוחות (CRM) ---------- */

@@ -51,6 +51,24 @@ window.UG_CONFIG = {
     measurementId: "G-7JXW84Z5PW",
   },
 
+  /* ---------------------------------------------------------------------
+     שליחת מייל אישור הזמנה ללקוח (אופציונלי, חינם, ללא כרטיס אשראי) — EmailJS.
+     איך מפעילים:
+       1) נרשמים בחינם ב-https://www.emailjs.com
+       2) Email Services → מחברים חשבון (למשל Gmail) → מעתיקים Service ID
+       3) Email Templates → יוצרים תבנית עם המשתנים:
+          {{to_name}} {{service}} {{date}} {{time}} {{duration}} {{price}}
+          {{shop_name}} {{shop_address}} {{shop_phone}}
+          ובשדה "To email" של התבנית שמים: {{to_email}}
+          → מעתיקים Template ID
+       4) Account → API Keys → מעתיקים את ה-Public Key
+       5) מדביקים כאן את שלושת הערכים. אם ריק — התכונה פשוט כבויה. */
+  emailjs: {
+    publicKey: "",
+    serviceId: "",
+    templateId: "",
+  },
+
   /* מפתח Web Push (VAPID) — לשליחת התראות פוש גם כשהאפליקציה סגורה לגמרי (FCM).
      איפה משיגים: Firebase Console → Project Settings → Cloud Messaging →
      "Web Push certificates" → Generate key pair → להעתיק לכאן.
