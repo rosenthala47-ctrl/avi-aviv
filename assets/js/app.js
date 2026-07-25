@@ -829,7 +829,7 @@
       <div class="field"><label>טלפון נייד</label>
         <input class="input" id="cf-phone" type="tel" inputmode="tel" placeholder="050-0000000" value="${esc(identity.phone)}"></div>
       ${(UG.Email && UG.Email.configured()) ? `
-      <div class="field"><label>אימייל (לקבלת אישור למייל · לא חובה)</label>
+      <div class="field"><label>אימייל (לקבלת אישור למייל)</label>
         <input class="input" id="cf-email" type="email" inputmode="email" autocomplete="email" placeholder="name@email.com" value="${esc(identity.email || "")}"></div>` : ""}
       <button class="btn btn-primary" data-act="do-book">${isResched ? "אישור המועד החדש" : "אישור וקביעת התור"}</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
@@ -847,7 +847,10 @@
     const phone = u.fmtPhone(phoneRaw);
     const emailEl = $("#cf-email");
     const email = emailEl ? emailEl.value.trim() : (identity.email || "");
-    if (emailEl && email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("כתובת אימייל לא תקינה", "", "📧"); return null; }
+    if (emailEl) {   // כשהמייל פעיל — הוא חובה כדי שנוכל לשלוח אישור ללקוח
+      if (!email) { toast("נא להזין כתובת אימייל", "", "📧"); return null; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("כתובת אימייל לא תקינה", "", "📧"); return null; }
+    }
     const name = first + " " + last;
     identity.firstName = first; identity.lastName = last; identity.name = name; identity.phone = phone;
     identity.email = email;
