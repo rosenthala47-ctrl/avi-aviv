@@ -17,9 +17,9 @@ window.UG_CONFIG = {
      חשוב כשעוטפים את האפליקציה כאפליקציית מובייל (Capacitor/Cordova):
      בתוך המעטפת הכתובת הפנימית היא capacitor://localhost ואי אפשר לשתף אותה,
      לכן הקישורים לשיתוף/העתקה ייבנו מהכתובת כאן. בדפדפן רגיל — אם ריק,
-     משתמשים בכתובת הנוכחית. לדוגמה: "https://ori-grushko.web.app".
+     משתמשים בכתובת הנוכחית. לדוגמה: "https://barbertor.web.app".
      חשוב: ללא סלאש בסוף. */
-  publicBaseUrl: "https://ori-grushko.web.app",
+  publicBaseUrl: "https://barbertor.web.app",
 
   /* ברירות מחדל של מספרה חדשה — כל ספר קובע את הפרטים שלו במסך "הגדרות" */
   defaults: {
