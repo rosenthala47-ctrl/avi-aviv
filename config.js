@@ -19,7 +19,7 @@ window.UG_CONFIG = {
      לכן הקישורים לשיתוף/העתקה ייבנו מהכתובת כאן. בדפדפן רגיל — אם ריק,
      משתמשים בכתובת הנוכחית. לדוגמה: "https://ori-grushko.web.app".
      חשוב: ללא סלאש בסוף. */
-  publicBaseUrl: "",
+  publicBaseUrl: "https://ori-grushko.web.app",
 
   /* ברירות מחדל של העסק — ניתן לשנות הכל מתוך מסך "הגדרות" של הבעלים */
   defaults: {
