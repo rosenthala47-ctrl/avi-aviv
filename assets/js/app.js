@@ -11,9 +11,13 @@
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
     let h = (location.hash || "").replace(/^#/, "").trim().toLowerCase();
-    if (h === "new" || h === "signup") return "__new__";   // מסך פתיחת מספרה
+    if (h === "new" || h === "signup") return "__new__";   // מסך הרשמה/פתיחה
     h = h.replace(/[^a-z0-9-]/g, "");
-    return h || "main";                                     // ברירת מחדל: המספרה הקיימת
+    if (h) return h;                                        // מספרה לפי כתובת אישית (כולל #main = אורי)
+    // בלי כתובת אישית: בדומיין הישן של אורי מציגים את המספרה שלו (תאימות לקישורים קיימים);
+    // בדומיין של המוצר (barbertor וכו') מציגים את מסך הפתיחה של BarberTor.
+    if ((location.hostname || "").toLowerCase().indexOf("ori-grushko") !== -1) return "main";
+    return "__new__";
   }
   const SHOP = resolveShopId();
   const AUTHKEY = "ug_owner_auth__" + SHOP;
@@ -36,7 +40,8 @@
     return location.origin + location.pathname;
   }
   function clientLink() {
-    return shareBase() + (SHOP === "main" ? "" : "#" + SHOP);
+    // כולל #main גם למספרה של אורי — כדי שהקישור יעבוד גם בדומיין המוצר (שם הכתובת הריקה = מסך פתיחה)
+    return shareBase() + "#" + SHOP;
   }
   // פתיחת כתובת חיצונית בצורה שתעבוד בדפדפן ובכל מעטפת (מפה/יומן/וואטסאפ)
   function openExternal(url) {
