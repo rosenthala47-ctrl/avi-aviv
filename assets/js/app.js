@@ -300,6 +300,7 @@
         </div>
       </div>
       <div class="spacer"></div>
+      ${view.route === "client" ? `<button class="icon-btn" data-act="owner-login" title="כניסת מנהל" aria-label="כניסת מנהל">🔑</button>` : ""}
       <button class="icon-btn" data-act="toggle-theme" title="מצב תצוגה">${themeIco}</button>
       ${opts.switch ? `<button class="icon-btn" data-act="logout" title="חזרה לתצוגת לקוח">⇋</button>` : ""}
     </div>`;
@@ -1840,6 +1841,7 @@
           toast("שינוי המועד בוטל", "", "↩️"); render(); break;
 
         case "enable-notif": handleEnableNotif(); break;
+        case "owner-login": promptOwner(); break;   // כניסת מנהל ייעודית (במקום 3 לחיצות על הלוגו)
         case "toggle-theme": toggleTheme(); break;
         case "toggle-pw": {
           const field = t.closest(".pw-field"); const inp = field && field.querySelector("input");
