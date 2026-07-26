@@ -1765,7 +1765,12 @@
   /* =======================================================================
      שאלון פתיחת מספרה — חוויית Onboarding (עמוד אחרי עמוד)
      =======================================================================*/
-  const wiz = { step: 0, busy: false, data: { owner: "", name: "", handle: "", phone: "", address: "", pass: "", pass2: "" } };
+  const wiz = { step: 0, busy: false, data: { owner: "", name: "", handle: "", phone: "", city: "", street: "", houseNo: "", address: "", pass: "", pass2: "" } };
+  // הרכבת כתובת מלאה מהשדות הנפרדים (רחוב + מספר, עיר)
+  function wizComposeAddress(d) {
+    const line1 = [d.street, d.houseNo].filter(Boolean).join(" ").trim();
+    return [line1, d.city].filter(Boolean).join(", ").trim();
+  }
   const WIZ_QUESTIONS = 5;   // שלבים 1..5 הם שאלות
 
   // רטט קצר למשוב מגע (נתמך באנדרואיד; באייפון פשוט מתעלם)
@@ -1801,7 +1806,11 @@
       case 4:
         return wizQ("📍", "פרטי המספרה", "כדי שהלקוחות ידעו איך להגיע ואיך להתקשר. אפשר לדלג ולמלא אחר כך.",
           `<input class="input wiz-input" id="wz-phone" type="tel" inputmode="tel" placeholder="טלפון · 050-0000000" value="${esc(d.phone)}">
-           <input class="input wiz-input" id="wz-address" placeholder="כתובת · רחוב, עיר" value="${esc(d.address)}" style="margin-top:10px">`);
+           <div class="field-row wiz-addr-row" style="margin-top:10px">
+             <input class="input wiz-input" id="wz-city" placeholder="עיר / יישוב" value="${esc(d.city)}" style="flex:1.1">
+             <input class="input wiz-input" id="wz-street" placeholder="רחוב" value="${esc(d.street)}" style="flex:1.3">
+             <input class="input wiz-input" id="wz-houseno" placeholder="מס׳" value="${esc(d.houseNo)}" style="flex:.6" inputmode="numeric">
+           </div>`);
       case 5:
         return wizQ("🔒", "סיסמת ניהול", "רק איתה נכנסים לנהל את המספרה. שמור/י אותה במקום בטוח!",
           `<div class="pw-field">
@@ -1879,6 +1888,16 @@
     });
   }
 
+  // שמירת שדות שלב 4 (טלפון + כתובת מפורקת) מתוך הטופס לתוך wiz.data
+  function wizCaptureStep4() {
+    const d = wiz.data;
+    if ($("#wz-phone")) d.phone = $("#wz-phone").value.trim();
+    if ($("#wz-city")) d.city = $("#wz-city").value.trim();
+    if ($("#wz-street")) d.street = $("#wz-street").value.trim();
+    if ($("#wz-houseno")) d.houseNo = $("#wz-houseno").value.trim();
+    d.address = wizComposeAddress(d);
+  }
+
   function wizGo(step) {
     wiz.step = step;
     haptic(14);
@@ -1917,11 +1936,7 @@
       d.handle = v;
       wizGo(4); return;
     }
-    if (wiz.step === 4) {
-      d.phone = ($("#wz-phone") && $("#wz-phone").value.trim()) || "";
-      d.address = ($("#wz-address") && $("#wz-address").value.trim()) || "";
-      wizGo(5); return;
-    }
+    if (wiz.step === 4) { wizCaptureStep4(); wizGo(5); return; }
     if (wiz.step === 5) {
       d.pass = ($("#wz-pass") && $("#wz-pass").value.trim()) || "";
       d.pass2 = ($("#wz-pass2") && $("#wz-pass2").value.trim()) || "";
@@ -1938,10 +1953,7 @@
     const m = map[wiz.step];
     if (m && $(m[1])) wiz.data[m[0]] = $(m[1]).value.trim();
     if (wiz.step === 5 && $("#wz-pass2")) wiz.data.pass2 = $("#wz-pass2").value.trim();
-    if (wiz.step === 4) {
-      if ($("#wz-phone")) wiz.data.phone = $("#wz-phone").value.trim();
-      if ($("#wz-address")) wiz.data.address = $("#wz-address").value.trim();
-    }
+    if (wiz.step === 4) wizCaptureStep4();
     wizGo(wiz.step - 1);
   }
 
@@ -2182,7 +2194,7 @@
         // שאלון פתיחת מספרה
         case "wiz-next": wizNext(); break;
         case "wiz-back": wizBack(); break;
-        case "wiz-skip": wizGo(5); break;
+        case "wiz-skip": wizCaptureStep4(); wizGo(5); break;
         case "wiz-existing": wizExisting(); break;
         case "goto-shop": {
           const h = (($("#ob-existing") && $("#ob-existing").value) || "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
