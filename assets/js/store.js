@@ -257,6 +257,8 @@ UG.Store = (function () {
     s.shop.tagline = (data && data.tagline) || "מספרה";
     s.shop.ownerPass = String((data && data.ownerPass) || "");
     s.shop.phone = (data && data.phone) || "";
+    s.shop.address = (data && data.address) || "";
+    s.shop.ownerName = (data && data.ownerName) || "";
     await b.write(s);
     return { ok: true, id: id };
   }

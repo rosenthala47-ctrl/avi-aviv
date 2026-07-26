@@ -55,7 +55,7 @@
   const view = {
     route: (function () { const r = localStorage.getItem(ROUTEKEY); return r === "owner" || r === "client" ? r : "client"; })(), // client | owner
     clientTab: "book",   // book | gallery | mine
-    ownerTab: "cal",     // cal | hours | services | bookings | report | settings
+    ownerTab: (function () { try { return localStorage.getItem("ug_otab__" + SHOP) || "cal"; } catch (e) { return "cal"; } })(),  // cal | hours | services | bookings | clients | report | publish | settings
     selService: null,
     selDate: null,       // יום נבחר בצד הלקוח
     selSlot: null,
@@ -302,7 +302,8 @@
         </div>
       </div>
       <div class="spacer"></div>
-      ${view.route === "client" ? `<button class="icon-btn" data-act="owner-login" title="כניסת מנהל" aria-label="כניסת מנהל">🔑</button>` : ""}
+      ${(view.route === "client" && localStorage.getItem(AUTHKEY) === "1")
+        ? `<button class="icon-btn" data-act="owner-login" title="כניסת מנהל" aria-label="כניסת מנהל">🔑</button>` : ""}
       <button class="icon-btn" data-act="toggle-theme" title="מצב תצוגה">${themeIco}</button>
       ${opts.switch ? `<button class="icon-btn" data-act="logout" title="חזרה לתצוגת לקוח">⇋</button>` : ""}
     </div>`;
@@ -1110,6 +1111,7 @@
     else if (view.ownerTab === "bookings") body = ownerBookings(st);
     else if (view.ownerTab === "clients") body = ownerClients(st);
     else if (view.ownerTab === "report") body = ownerReport(st);
+    else if (view.ownerTab === "publish") body = ownerPublish(st);
     else body = ownerSettings(st);
 
     const upcomingCount = st.bookings.filter((b) =>
@@ -1127,6 +1129,7 @@
           <span class="tb-ico" style="position:relative">🎟️${upcomingCount ? `<span class="badge-count" style="inset-inline-start:auto;inset-inline-end:-10px;top:-6px">${upcomingCount}</span>` : ""}</span>תורים</button>
         <button data-otab="clients" class="${view.ownerTab === "clients" ? "active" : ""}"><span class="tb-ico">👥</span>לקוחות</button>
         <button data-otab="report" class="${view.ownerTab === "report" ? "active" : ""}"><span class="tb-ico">📊</span>דוח</button>
+        <button data-otab="publish" class="${view.ownerTab === "publish" ? "active" : ""}"><span class="tb-ico">📣</span>פרסום</button>
         <button data-otab="settings" class="${view.ownerTab === "settings" ? "active" : ""}"><span class="tb-ico">⚙️</span>הגדרות</button>
       </div>
     </div>`;
@@ -1613,6 +1616,56 @@
     `);
   }
 
+  /* ---------- פרסום ללקוחות ---------- */
+  function ownerPublish(st) {
+    const link = clientLink();
+    const owner = (st.shop.ownerName || "").trim().split(/\s+/)[0];
+    const svcCount = (st.services || []).filter((s) => s.active !== false).length;
+    return `
+      <div class="pub-hero">
+        <div class="pub-ico">📣</div>
+        <h2>${owner ? esc(owner) + ", המספרה שלך מוכנה!" : "המספרה שלך מוכנה!"}</h2>
+        <p>שלח/י את הקישור הזה ללקוחות — הם יזמינו תור לבד, ישירות מהטלפון.</p>
+      </div>
+
+      <div class="section-title">🔗 הקישור האישי שלך</div>
+      <div class="card">
+        <div class="pub-link">${esc(link)}</div>
+        <div class="btn-row btn-row-wrap" style="margin-top:13px">
+          <button class="btn btn-primary btn-sm" data-act="copy-link">📋 העתקה</button>
+          <button class="btn btn-sm" data-act="share-app">🔗 שיתוף</button>
+          <button class="btn btn-sm" data-act="share-wa">💬 וואטסאפ</button>
+        </div>
+      </div>
+
+      <div class="section-title">איך זה עובד?</div>
+      <div class="card">
+        <div class="pub-step"><span class="ps-n">1</span><div><b>שולח/ת את הקישור</b><div class="hint">בוואטסאפ, אינסטגרם או סטטוס — לכל הלקוחות.</div></div></div>
+        <div class="pub-step"><span class="ps-n">2</span><div><b>הלקוח פותח ומזמין</b><div class="hint">בלי הרשמה ובלי סיסמה. הוא גם יכול להתקין את זה כאפליקציה בטלפון.</div></div></div>
+        <div class="pub-step"><span class="ps-n">3</span><div><b>אתה מקבל התראה</b><div class="hint">כל תור חדש מופיע מיד בלשונית ״תורים״ וביומן.</div></div></div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="font-size:26px">🔄</div>
+          <div style="flex:1;min-width:0">
+            <b style="font-size:15px">כל שינוי מתעדכן אצלם מיד</b>
+            <div class="hint" style="margin-top:2px">שירותים, מחירים, שעות ותמונות — מה שתשנה/י כאן, הלקוחות רואים בקישור בזמן אמת. אין צורך לשלוח קישור חדש.</div>
+          </div>
+        </div>
+      </div>
+
+      ${svcCount ? "" : `
+      <div class="banner good" style="margin-top:14px">
+        <span class="bn-ico">✂️</span>
+        <div class="bn-body">
+          <div class="bn-title">כדאי להוסיף שירותים</div>
+          <div class="bn-sub">הגדירו סוגי תספורת, מחירים ומשך — בלשונית ״שירותים״.</div>
+        </div>
+      </div>`}
+    `;
+  }
+
   function ownerSettings(st) {
     return `
       <div class="section-title">🔗 הקישור שלך ללקוחות</div>
@@ -1693,42 +1746,232 @@
   /* =======================================================================
      פתיחת מספרה חדשה (רישום ספר) + "מספרה לא נמצאה"
      =======================================================================*/
-  function renderOnboarding() {
+  /* =======================================================================
+     שאלון פתיחת מספרה — חוויית Onboarding (עמוד אחרי עמוד)
+     =======================================================================*/
+  const wiz = { step: 0, busy: false, data: { owner: "", name: "", handle: "", phone: "", address: "", pass: "" } };
+  const WIZ_QUESTIONS = 5;   // שלבים 1..5 הם שאלות
+
+  // רטט קצר למשוב מגע (נתמך באנדרואיד; באייפון פשוט מתעלם)
+  function haptic(ms) { try { if (navigator.vibrate) navigator.vibrate(ms || 12); } catch (e) {} }
+
+  function wizStepHtml() {
+    const d = wiz.data;
     const base = shareBase() + "#";
+    switch (wiz.step) {
+      case 0:
+        return `
+          <div class="wiz-hero">
+            <div class="wiz-logo">💈</div>
+            <h1 class="wiz-title">ברוך הבא ל-BarberTor</h1>
+            <p class="wiz-lead">מערכת התורים שלך — מוכנה תוך דקה.<br>נשאל אותך כמה שאלות קצרות ונבנה לך הכול.</p>
+          </div>
+          <div class="wiz-perks">
+            <div class="wiz-perk"><span>📅</span><div><b>יומן חכם</b><div class="hint">הלקוחות מזמינים לבד</div></div></div>
+            <div class="wiz-perk"><span>🔔</span><div><b>תזכורות אוטומטיות</b><div class="hint">פחות ביטולים</div></div></div>
+            <div class="wiz-perk"><span>🔗</span><div><b>קישור אישי</b><div class="hint">שולחים ללקוחות</div></div></div>
+          </div>`;
+      case 1:
+        return wizQ("👋", "איך קוראים לך?", "נעים להכיר! ככה נדע איך לפנות אליך.",
+          `<input class="input wiz-input" id="wz-owner" placeholder="השם שלך" value="${esc(d.owner)}" autocomplete="given-name">`);
+      case 2:
+        return wizQ("💈", "איך קוראים למספרה?", "השם שהלקוחות שלך יראו בראש מסך ההזמנה.",
+          `<input class="input wiz-input" id="wz-name" placeholder="למשל: מספרת דני" value="${esc(d.name)}">`);
+      case 3:
+        return wizQ("🔗", "בחר/י כתובת אישית", "זה הקישור שתשלח/י ללקוחות. באנגלית, קצר וקל לזכור.",
+          `<input class="input wiz-input" id="wz-handle" placeholder="dani" value="${esc(d.handle)}"
+                  autocapitalize="off" autocomplete="off" spellcheck="false" inputmode="latin">
+           <div class="wiz-link" id="wz-linkPrev">${esc(base)}<b>${esc(d.handle || "הכתובת-שלך")}</b></div>`);
+      case 4:
+        return wizQ("📍", "פרטי המספרה", "כדי שהלקוחות ידעו איך להגיע ואיך להתקשר. אפשר לדלג ולמלא אחר כך.",
+          `<input class="input wiz-input" id="wz-phone" type="tel" inputmode="tel" placeholder="טלפון · 050-0000000" value="${esc(d.phone)}">
+           <input class="input wiz-input" id="wz-address" placeholder="כתובת · רחוב, עיר" value="${esc(d.address)}" style="margin-top:10px">`);
+      case 5:
+        return wizQ("🔒", "סיסמת ניהול", "רק איתה נכנסים לנהל את המספרה. שמור/י אותה במקום בטוח!",
+          `<div class="pw-field">
+             <input class="input wiz-input" id="wz-pass" type="password" placeholder="בחר/י סיסמה" value="${esc(d.pass)}">
+             <button type="button" class="pw-eye" data-act="toggle-pw" aria-label="הצג סיסמה">👁️</button>
+           </div>`);
+      default:
+        return "";
+    }
+  }
+
+  function wizQ(emoji, title, sub, field) {
+    return `
+      <div class="wiz-q-wrap">
+        <div class="wiz-emoji">${emoji}</div>
+        <h2 class="wiz-q">${esc(title)}</h2>
+        <p class="wiz-sub">${esc(sub)}</p>
+        <div class="wiz-field">${field}</div>
+      </div>`;
+  }
+
+  function renderOnboarding() {
+    // מסך "בונים לך את המערכת"
+    if (wiz.step === 99) {
+      return `
+      <div class="screen active">
+        <div class="wiz-wrap building">
+          <div class="build-ring"><div class="build-emoji">✂️</div></div>
+          <h2 class="wiz-q" style="margin-top:26px">בונים לך את המספרה המושלמת…</h2>
+          <p class="wiz-sub" id="build-status">מכינים את היומן שלך</p>
+          <div class="build-bar"><div class="build-fill" id="build-fill"></div></div>
+        </div>
+      </div>`;
+    }
+
+    const first = (wiz.data.owner || "").trim().split(/\s+/)[0];
+    const greet = wiz.step > 1 && first ? `<div class="wiz-greet">ברוך הבא, ${esc(first)} 👋</div>` : "";
+    const dots = wiz.step >= 1
+      ? `<div class="wiz-dots">${Array.from({ length: WIZ_QUESTIONS }, (_, i) =>
+          `<span class="wd ${i + 1 < wiz.step ? "done" : ""}${i + 1 === wiz.step ? " on" : ""}"></span>`).join("")}</div>`
+      : "";
+
+    const isLast = wiz.step === WIZ_QUESTIONS;
+    const nav = wiz.step === 0
+      ? `<button class="btn btn-primary btn-lg" data-act="wiz-next">בוא נתחיל 🚀</button>
+         <button class="btn btn-ghost btn-sm" data-act="wiz-existing" style="margin-top:10px;width:100%">כבר יש לי מערכת</button>`
+      : `<button class="btn btn-primary btn-lg" data-act="wiz-next">${isLast ? "סיום ובניית המספרה ✨" : "המשך ›"}</button>
+         ${wiz.step === 4 ? `<button class="btn btn-ghost btn-sm" data-act="wiz-skip" style="margin-top:8px;width:100%">דלג/י על זה</button>` : ""}
+         <button class="btn btn-ghost btn-sm" data-act="wiz-back" style="margin-top:6px;width:100%">‹ חזרה</button>`;
+
     return `
     <div class="screen active">
-      <div class="role-wrap">
-        <div class="role-hero">
-          <div class="rh-logo">💈</div>
-          <h1>BarberTor</h1>
-          <p>מערכת התורים לספרים — פתחו מערכת משלכם בחינם, תוך דקה</p>
-        </div>
-
-        <div class="section-title">פתיחת מערכת חדשה</div>
-        <div class="card">
-          <div class="field"><label>שם המספרה</label>
-            <input class="input" id="ob-name" placeholder="למשל: מספרת דני">
-            <div class="hint" style="margin-top:5px">📛 השם שהלקוחות יראו בראש מסך ההזמנה.</div></div>
-          <div class="field"><label>כתובת אישית (אותיות באנגלית/מספרים)</label>
-            <input class="input" id="ob-handle" placeholder="dani" autocapitalize="off" autocomplete="off" spellcheck="false">
-            <div class="hint" style="margin-top:5px">🔗 זה הקישור האישי שתשלחו ללקוחות. בחרו משהו קצר וקל.</div>
-            <div class="hint" id="ob-linkPrev" style="margin-top:3px;color:var(--sky-2)">הקישור שלך: ${esc(base)}הכתובת-שלך</div>
-          </div>
-          <div class="field"><label>סיסמת ניהול (רק אתם תדעו)</label>
-            <input class="input" id="ob-pass" type="text" placeholder="בחרו סיסמה">
-            <div class="hint" style="margin-top:5px">🔒 איתה תיכנסו לנהל: 3 לחיצות על הלוגו ← הזנת הסיסמה. שמרו אותה!</div></div>
-          <button class="btn btn-primary" data-act="create-shop">🚀 פתחו את המערכת</button>
-        </div>
-        <p class="hint" style="text-align:center;margin-top:10px">אחרי היצירה תיכנסו ישר לניהול — שם תגדירו שירותים, שעות ומחירים.</p>
-
-        <div class="section-title" style="margin-top:26px">כבר יש לך מערכת?</div>
-        <div class="card">
-          <div class="field"><label>הכתובת האישית שלך</label>
-            <input class="input" id="ob-existing" placeholder="dani" autocapitalize="off" autocomplete="off" spellcheck="false"></div>
-          <button class="btn" data-act="goto-shop">כניסה למערכת שלי ›</button>
-        </div>
+      <div class="wiz-wrap">
+        ${greet}${dots}
+        <div class="wiz-body" id="wizBody">${wizStepHtml()}</div>
+        <div class="wiz-nav">${nav}</div>
       </div>
     </div>`;
+  }
+
+  function wizFocus() {
+    const el = $("#wizBody") && $("#wizBody").querySelector("input");
+    if (el) setTimeout(() => el.focus(), 120);
+    // תצוגה מקדימה חיה של הקישור + Enter להמשך
+    const h = $("#wz-handle");
+    if (h) h.addEventListener("input", () => {
+      const v = h.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
+      const p = $("#wz-linkPrev");
+      if (p) p.innerHTML = esc(shareBase() + "#") + "<b>" + esc(v || "הכתובת-שלך") + "</b>";
+    });
+    const body = $("#wizBody");
+    if (body) body.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); wizNext(); }
+    });
+  }
+
+  function wizGo(step) {
+    wiz.step = step;
+    haptic(14);
+    render();
+    wizFocus();
+  }
+
+  async function wizNext() {
+    if (wiz.busy) return;
+    const d = wiz.data;
+    if (wiz.step === 0) { wizGo(1); return; }
+    if (wiz.step === 1) {
+      d.owner = ($("#wz-owner") && $("#wz-owner").value.trim()) || "";
+      if (!d.owner) { toast("איך קוראים לך?", "", "✋"); haptic(40); return; }
+      wizGo(2); return;
+    }
+    if (wiz.step === 2) {
+      d.name = ($("#wz-name") && $("#wz-name").value.trim()) || "";
+      if (!d.name) { toast("נא להזין שם למספרה", "", "✋"); haptic(40); return; }
+      wizGo(3); return;
+    }
+    if (wiz.step === 3) {
+      const v = (($("#wz-handle") && $("#wz-handle").value) || "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
+      if (!/^[a-z0-9-]{3,20}$/.test(v)) { toast("כתובת: 3–20 אותיות באנגלית/מספרים", "", "✋"); haptic(40); return; }
+      if (["main", "new", "signup"].includes(v)) { toast("כתובת שמורה — בחרו אחרת", "", "✋"); haptic(40); return; }
+      wiz.busy = true;
+      const btn = $("[data-act='wiz-next']"); if (btn) { btn.disabled = true; btn.textContent = "בודקים…"; }
+      let taken = false;
+      try { taken = await Store.shopExists(v); } catch (e) {}
+      wiz.busy = false;
+      if (taken) {
+        toast("הכתובת הזו תפוסה — נסו אחרת", "", "🔁"); haptic(40);
+        if (btn) { btn.disabled = false; btn.textContent = "המשך ›"; }
+        return;
+      }
+      d.handle = v;
+      wizGo(4); return;
+    }
+    if (wiz.step === 4) {
+      d.phone = ($("#wz-phone") && $("#wz-phone").value.trim()) || "";
+      d.address = ($("#wz-address") && $("#wz-address").value.trim()) || "";
+      wizGo(5); return;
+    }
+    if (wiz.step === 5) {
+      d.pass = ($("#wz-pass") && $("#wz-pass").value.trim()) || "";
+      if (d.pass.length < 4) { toast("סיסמה קצרה מדי (לפחות 4 תווים)", "", "✋"); haptic(40); return; }
+      wizBuild(); return;
+    }
+  }
+
+  function wizBack() {
+    if (wiz.step <= 0) return;
+    // שמירת מה שהוקלד לפני חזרה
+    const map = { 1: ["owner", "#wz-owner"], 2: ["name", "#wz-name"], 3: ["handle", "#wz-handle"], 5: ["pass", "#wz-pass"] };
+    const m = map[wiz.step];
+    if (m && $(m[1])) wiz.data[m[0]] = $(m[1]).value.trim();
+    if (wiz.step === 4) {
+      if ($("#wz-phone")) wiz.data.phone = $("#wz-phone").value.trim();
+      if ($("#wz-address")) wiz.data.address = $("#wz-address").value.trim();
+    }
+    wizGo(wiz.step - 1);
+  }
+
+  // מסך "בונים לך את המספרה" + יצירה בפועל
+  async function wizBuild() {
+    wiz.step = 99;
+    haptic([18, 60, 18]);
+    render();
+    const steps = ["מכינים את היומן שלך", "מגדירים שירותים ראשוניים", "יוצרים את הקישור האישי", "כמעט מוכן…"];
+    let i = 0;
+    const fill = () => { const f = $("#build-fill"); if (f) f.style.width = (18 + i * 22) + "%"; };
+    fill();
+    const timer = setInterval(() => {
+      i++;
+      const s = $("#build-status");
+      if (s && steps[i]) s.textContent = steps[i];
+      fill();
+      if (i >= steps.length - 1) clearInterval(timer);
+    }, 620);
+
+    const d = wiz.data;
+    const res = await Store.createShop(d.handle, {
+      name: d.name, ownerPass: d.pass, phone: d.phone, address: d.address, ownerName: d.owner,
+    });
+    clearInterval(timer);
+    if (!res.ok) {
+      toast(res.reason || "שגיאה ביצירת המספרה", "", "⚠️");
+      wizGo(3);
+      return;
+    }
+    const f = $("#build-fill"); if (f) f.style.width = "100%";
+    const s = $("#build-status"); if (s) s.textContent = "מוכן! 🎉";
+    haptic([20, 70, 40]);
+    // נכנסים ישר לניהול המספרה החדשה
+    localStorage.setItem("ug_owner_auth__" + d.handle, "1");
+    localStorage.setItem("ug_route__" + d.handle, "owner");
+    localStorage.setItem("ug_otab__" + d.handle, "publish");
+    try { localStorage.setItem("ug_last_shop", d.handle); } catch (e) {}
+    setTimeout(() => { location.hash = d.handle; location.reload(); }, 800);
+  }
+
+  function wizExisting() {
+    openModal(`
+      <div class="m-title">כניסה למערכת שלי</div>
+      <div class="m-sub">הזינו את הכתובת האישית שלכם</div>
+      <div class="field"><input class="input" id="ob-existing" placeholder="dani" autocapitalize="off" autocomplete="off" spellcheck="false" style="text-align:center"></div>
+      <button class="btn btn-primary" data-act="goto-shop">כניסה ›</button>
+      <button class="btn btn-ghost btn-sm" data-act="close-modal" style="margin-top:8px;width:100%">ביטול</button>
+    `);
+    setTimeout(() => $("#ob-existing") && $("#ob-existing").focus(), 100);
   }
 
   function renderNotFound() {
@@ -1799,7 +2042,12 @@
       if (t.dataset.day && t.classList.contains("day-chip")) { view.selDate = t.dataset.day; view.selSlot = null; render(); return; }
       if (t.dataset.oday) { view.oDate = t.dataset.oday; render(); return; }
       if (t.dataset.tab) { if (view.clientTab !== t.dataset.tab) recordNav(); view.clientTab = t.dataset.tab; render(); return; }
-      if (t.dataset.otab) { if (view.ownerTab !== t.dataset.otab) recordNav(); view.ownerTab = t.dataset.otab; render(); return; }
+      if (t.dataset.otab) {
+        if (view.ownerTab !== t.dataset.otab) recordNav();
+        view.ownerTab = t.dataset.otab;
+        try { localStorage.setItem("ug_otab__" + SHOP, view.ownerTab); } catch (e2) {}
+        render(); return;
+      }
 
       const act = t.dataset.act;
       if (!act) return;
@@ -1862,10 +2110,21 @@
           setTimeout(maybeShowInstall, 400); break;
         case "add-cal": addToCalendar(t.dataset.id); break;
         case "share-app": shareApp(); break;
+        case "share-wa": {
+          const stw = Store.get();
+          const txt = "קביעת תור ל" + ((stw.shop && stw.shop.name) || "מספרה") + " 💈✂️\n" + clientLink();
+          openExternal("https://wa.me/?text=" + encodeURIComponent(txt));
+          break;
+        }
         case "stay": closeModal(); break;
         case "do-exit": performExit(); break;
         // רב-משתמשי: פתיחת מספרה / ניווט להרשמה
         case "create-shop": doCreateShop(); break;
+        // שאלון פתיחת מספרה
+        case "wiz-next": wizNext(); break;
+        case "wiz-back": wizBack(); break;
+        case "wiz-skip": wizGo(5); break;
+        case "wiz-existing": wizExisting(); break;
         case "goto-shop": {
           const h = (($("#ob-existing") && $("#ob-existing").value) || "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
           if (!h) { toast("הזינו את הכתובת האישית שלכם", "", "✋"); break; }
@@ -2251,7 +2510,7 @@
     initInstall();
     initCookies();
 
-    if (SHOP === "__new__") { view.onboarding = true; render(); return; }  // מסך פתיחת מספרה
+    if (SHOP === "__new__") { view.onboarding = true; render(); wizFocus(); return; }  // שאלון פתיחת מספרה
 
     await Store.init(SHOP);
     if (Store.notFound) { view.notFound = true; render(); return; }        // מספרה לא קיימת

@@ -469,6 +469,85 @@ select.input {
 /* ==== כפתורי ניווט (Waze / Google Maps) ==== */
 a.nav-btn { flex: 1; color: var(--text); text-decoration: none; }
 
+/* ==== שאלון פתיחת מספרה (Onboarding Wizard) ==== */
+.wiz-wrap {
+  flex: 1; display: flex; flex-direction: column;
+  padding: calc(22px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom));
+  max-width: 520px; margin-inline: auto; width: 100%;
+}
+.wiz-greet { text-align: center; font-size: 13.5px; color: var(--sky-2); font-weight: 700; margin-bottom: 12px; }
+.wiz-dots { display: flex; gap: 6px; justify-content: center; margin-bottom: 26px; }
+.wiz-dots .wd { width: 26px; height: 4px; border-radius: 3px; background: var(--surface-3); transition: background .25s, transform .25s; }
+.wiz-dots .wd.done { background: var(--sky-strong); }
+.wiz-dots .wd.on { background: var(--sky); transform: scaleY(1.6); }
+
+.wiz-body { flex: 1; display: flex; flex-direction: column; justify-content: center; animation: wizIn .32s cubic-bezier(.22,.9,.3,1); }
+@keyframes wizIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+.wiz-hero { text-align: center; }
+.wiz-logo {
+  width: 96px; height: 96px; margin: 0 auto 20px; border-radius: 28px;
+  display: grid; place-items: center; font-size: 46px;
+  background: linear-gradient(145deg, var(--sky), var(--sky-strong));
+  box-shadow: var(--shadow-sky); animation: pop .5s cubic-bezier(.2,1.3,.4,1);
+}
+@keyframes pop { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: none; } }
+.wiz-title { font-size: 27px; font-weight: 900; letter-spacing: -.5px; }
+.wiz-lead { color: var(--muted); font-size: 15px; margin-top: 10px; line-height: 1.6; }
+.wiz-perks { margin-top: 28px; display: grid; gap: 11px; }
+.wiz-perk {
+  display: flex; align-items: center; gap: 13px; padding: 13px 15px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.wiz-perk > span { font-size: 22px; }
+.wiz-perk b { font-size: 14.5px; }
+
+.wiz-q-wrap { text-align: center; }
+.wiz-emoji { font-size: 52px; line-height: 1; margin-bottom: 16px; animation: pop .45s cubic-bezier(.2,1.3,.4,1); }
+.wiz-q { font-size: 24px; font-weight: 900; letter-spacing: -.4px; }
+.wiz-sub { color: var(--muted); font-size: 14.5px; margin-top: 9px; line-height: 1.55; }
+.wiz-field { margin-top: 26px; text-align: start; }
+.input.wiz-input { height: 56px; font-size: 17px; text-align: center; border-radius: 16px; }
+.wiz-link {
+  margin-top: 12px; text-align: center; font-size: 13.5px; color: var(--muted);
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px;
+  word-break: break-all; direction: ltr;
+}
+.wiz-link b { color: var(--sky-2); }
+.wiz-nav { margin-top: 26px; }
+.btn.btn-lg { height: 56px; font-size: 16.5px; border-radius: 16px; }
+
+/* מסך "בונים לך את המספרה" */
+.wiz-wrap.building { justify-content: center; align-items: center; text-align: center; }
+.build-ring {
+  width: 118px; height: 118px; border-radius: 50%; display: grid; place-items: center;
+  border: 4px solid var(--surface-3); border-top-color: var(--sky);
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.build-emoji { font-size: 42px; animation: spin 1s linear infinite reverse; }
+.build-bar { width: 100%; max-width: 280px; height: 6px; border-radius: 4px; background: var(--surface-3); margin-top: 26px; overflow: hidden; }
+.build-fill { height: 100%; width: 10%; border-radius: 4px; background: linear-gradient(90deg, var(--sky), var(--sky-strong)); transition: width .55s ease; }
+
+/* ==== פרסום ללקוחות ==== */
+.pub-hero { text-align: center; padding: 8px 0 18px; }
+.pub-ico { font-size: 44px; }
+.pub-hero h2 { font-size: 21px; font-weight: 900; margin-top: 8px; letter-spacing: -.3px; }
+.pub-hero p { color: var(--muted); font-size: 14px; margin-top: 7px; line-height: 1.55; }
+.pub-link {
+  direction: ltr; text-align: center; word-break: break-all;
+  font-weight: 800; font-size: 14px; color: var(--sky-2);
+  background: var(--surface-2); border: 1px dashed var(--sky); border-radius: 12px; padding: 13px 12px;
+}
+.pub-step { display: flex; align-items: flex-start; gap: 12px; padding: 11px 0; }
+.pub-step + .pub-step { border-top: 1px solid var(--line-soft); }
+.pub-step .ps-n {
+  width: 26px; height: 26px; flex: none; border-radius: 50%; display: grid; place-items: center;
+  background: linear-gradient(145deg, var(--sky), var(--sky-strong)); color: var(--sky-ink);
+  font-weight: 800; font-size: 13px;
+}
+.pub-step b { font-size: 14.5px; }
+
 /* ==== כניסת מנהל (מודאל מקצועי) ==== */
 .auth-head { text-align: center; margin-bottom: 20px; }
 .auth-badge {
