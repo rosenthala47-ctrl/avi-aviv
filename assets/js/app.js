@@ -1749,7 +1749,7 @@
   /* =======================================================================
      שאלון פתיחת מספרה — חוויית Onboarding (עמוד אחרי עמוד)
      =======================================================================*/
-  const wiz = { step: 0, busy: false, data: { owner: "", name: "", handle: "", phone: "", address: "", pass: "" } };
+  const wiz = { step: 0, busy: false, data: { owner: "", name: "", handle: "", phone: "", address: "", pass: "", pass2: "" } };
   const WIZ_QUESTIONS = 5;   // שלבים 1..5 הם שאלות
 
   // רטט קצר למשוב מגע (נתמך באנדרואיד; באייפון פשוט מתעלם)
@@ -1791,7 +1791,8 @@
           `<div class="pw-field">
              <input class="input wiz-input" id="wz-pass" type="password" placeholder="בחר/י סיסמה" value="${esc(d.pass)}">
              <button type="button" class="pw-eye" data-act="toggle-pw" aria-label="הצג סיסמה">👁️</button>
-           </div>`);
+           </div>
+           <input class="input wiz-input" id="wz-pass2" type="password" placeholder="הקלד/י שוב לאימות" value="${esc(d.pass2 || "")}" style="margin-top:10px">`);
       default:
         return "";
     }
@@ -1907,7 +1908,9 @@
     }
     if (wiz.step === 5) {
       d.pass = ($("#wz-pass") && $("#wz-pass").value.trim()) || "";
+      d.pass2 = ($("#wz-pass2") && $("#wz-pass2").value.trim()) || "";
       if (d.pass.length < 4) { toast("סיסמה קצרה מדי (לפחות 4 תווים)", "", "✋"); haptic(40); return; }
+      if (d.pass !== d.pass2) { toast("הסיסמאות אינן תואמות", "", "🔁"); haptic(40); return; }
       wizBuild(); return;
     }
   }
@@ -1918,6 +1921,7 @@
     const map = { 1: ["owner", "#wz-owner"], 2: ["name", "#wz-name"], 3: ["handle", "#wz-handle"], 5: ["pass", "#wz-pass"] };
     const m = map[wiz.step];
     if (m && $(m[1])) wiz.data[m[0]] = $(m[1]).value.trim();
+    if (wiz.step === 5 && $("#wz-pass2")) wiz.data.pass2 = $("#wz-pass2").value.trim();
     if (wiz.step === 4) {
       if ($("#wz-phone")) wiz.data.phone = $("#wz-phone").value.trim();
       if ($("#wz-address")) wiz.data.address = $("#wz-address").value.trim();
@@ -1965,13 +1969,41 @@
 
   function wizExisting() {
     openModal(`
-      <div class="m-title">כניסה למערכת שלי</div>
-      <div class="m-sub">הזינו את הכתובת האישית שלכם</div>
-      <div class="field"><input class="input" id="ob-existing" placeholder="dani" autocapitalize="off" autocomplete="off" spellcheck="false" style="text-align:center"></div>
-      <button class="btn btn-primary" data-act="goto-shop">כניסה ›</button>
+      ${authHeader()}
+      <div class="field"><label>הכתובת האישית שלך</label>
+        <input class="input" id="lg-handle" placeholder="dani" autocapitalize="off" autocomplete="off" spellcheck="false"></div>
+      <div class="field pw-field"><label>סיסמת ניהול</label>
+        <input class="input" id="lg-pass" type="password" placeholder="הסיסמה שקבעת ברישום">
+        <button type="button" class="pw-eye" data-act="toggle-pw" style="bottom:0" aria-label="הצג סיסמה">👁️</button></div>
+      <p class="hint" id="lg-err" style="min-height:15px;margin-top:0"></p>
+      <button class="btn btn-primary" data-act2="do-existing-login">כניסה לניהול</button>
       <button class="btn btn-ghost btn-sm" data-act="close-modal" style="margin-top:8px;width:100%">ביטול</button>
     `);
-    setTimeout(() => $("#ob-existing") && $("#ob-existing").focus(), 100);
+    const err = (m) => { const e = $("#lg-err"); if (e) { e.style.color = "var(--bad)"; e.textContent = m; } };
+    const login = async () => {
+      const handle = (($("#lg-handle") && $("#lg-handle").value) || "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
+      const pass = ($("#lg-pass") && $("#lg-pass").value) || "";
+      if (!handle) { err("הזינו את הכתובת האישית"); return; }
+      if (!pass) { err("הזינו סיסמה"); return; }
+      const btn = $("[data-act2='do-existing-login']"); if (btn) { btn.disabled = true; btn.textContent = "בודקים…"; }
+      let data = null;
+      try { data = await Store.peekShop(handle); } catch (e) {}
+      if (btn) { btn.disabled = false; btn.textContent = "כניסה לניהול"; }
+      if (!data || !data.shop) { err("לא נמצאה מערכת בכתובת הזו"); return; }
+      const configCodes = [UG_CONFIG.ownerPasscode].concat(UG_CONFIG.ownerPasscodesExtra || []).map(String);
+      const ok = (data.shop.ownerPass && pass === String(data.shop.ownerPass)) ||
+        (handle === "main" && configCodes.includes(pass));   // סיסמאות אורי (config) עובדות למספרה הראשית
+      if (!ok) { err("סיסמה שגויה"); haptic(40); return; }
+      // כניסה מוצלחת — ישר לניהול
+      localStorage.setItem("ug_owner_auth__" + handle, "1");
+      localStorage.setItem("ug_route__" + handle, "owner");
+      try { localStorage.setItem("ug_last_shop", handle); } catch (e) {}
+      haptic(16);
+      location.hash = handle; location.reload();
+    };
+    const lb = $("[data-act2='do-existing-login']"); if (lb) lb.addEventListener("click", login);
+    const pw = $("#lg-pass"); if (pw) pw.addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
+    setTimeout(() => $("#lg-handle") && $("#lg-handle").focus(), 100);
   }
 
   function renderNotFound() {

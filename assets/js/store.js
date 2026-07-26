@@ -263,6 +263,8 @@ UG.Store = (function () {
     return { ok: true, id: id };
   }
   async function shopExists(id) { await connect(); return makeBackend(id).exists(); }
+  // קריאת נתוני מספרה לפי כתובת (לאימות סיסמה בהתחברות) — בלי לשנות את המספרה הפעילה
+  async function peekShop(id) { await connect(); try { return await makeBackend(id).read(); } catch (e) { return null; } }
 
   /* ---------- גלריה ---------- */
   function emitGallery() { gallerySubs.forEach((fn) => { try { fn(galleryCache); } catch (e) {} }); }
@@ -472,7 +474,7 @@ UG.Store = (function () {
     createBooking, setBookingStatus, setBlock, deleteBooking,
     joinWaitlist, leaveWaitlist, consumeAlert, addReview, savePushToken,
     subscribeGallery, getGallery, addPhoto, removePhoto,
-    createShop, shopExists,
+    createShop, shopExists, peekShop,
     get mode() { return backend ? backend.mode : "local"; },
     get shopId() { return shopId; },
     get notFound() { return notFound; },
