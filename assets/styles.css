@@ -469,6 +469,23 @@ select.input {
 /* ==== כפתורי ניווט (Waze / Google Maps) ==== */
 a.nav-btn { flex: 1; color: var(--text); text-decoration: none; }
 
+/* ==== כניסת מנהל (מודאל מקצועי) ==== */
+.auth-head { text-align: center; margin-bottom: 20px; }
+.auth-badge {
+  width: 64px; height: 64px; margin: 0 auto 14px; border-radius: 20px;
+  display: grid; place-items: center; font-size: 30px;
+  background: linear-gradient(145deg, var(--sky), var(--sky-strong));
+  box-shadow: var(--shadow-sky);
+}
+.pw-field { position: relative; }
+.pw-field > .input { padding-inline: 44px; }
+.pw-eye {
+  position: absolute; left: 10px; bottom: 0; height: 48px;
+  display: grid; place-items: center;
+  background: none; border: none; font-size: 18px; opacity: .6; padding: 0 6px; cursor: pointer;
+}
+.pw-eye:active { opacity: 1; }
+
 /* ==== דירוג כוכבים ==== */
 .stars { display: flex; justify-content: center; gap: 8px; direction: ltr; }
 .stars .star { font-size: 38px; line-height: 1; color: #3a4356; transition: transform .1s, color .15s; padding: 2px; }

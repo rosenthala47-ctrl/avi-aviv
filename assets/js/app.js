@@ -1841,6 +1841,11 @@
 
         case "enable-notif": handleEnableNotif(); break;
         case "toggle-theme": toggleTheme(); break;
+        case "toggle-pw": {
+          const field = t.closest(".pw-field"); const inp = field && field.querySelector("input");
+          if (inp) { inp.type = inp.type === "password" ? "text" : "password"; t.textContent = inp.type === "password" ? "👁️" : "🙈"; }
+          break;
+        }
         case "client-detail": clientDetail(t.dataset.key); break;
         case "secure-shop": openSecureShop(); break;
         case "auth-signout":
@@ -2014,19 +2019,29 @@
     promptOwnerCode();
   }
 
+  // כותרת ממותגת משותפת לחלונות הכניסה
+  function authHeader() {
+    const shop = (Store.get() && Store.get().shop) || {};
+    return `
+      <div class="auth-head">
+        <div class="auth-badge">🔐</div>
+        <div class="m-title" style="margin:0">כניסת מנהל</div>
+        <div class="m-sub" style="margin-top:3px">${esc(shop.name || "אזור הניהול")}</div>
+      </div>`;
+  }
+
   function promptOwnerLogin(ownerUid) {
     openModal(`
-      <div class="m-title">כניסת מנהל 🔒</div>
-      <div class="m-sub">התחברו עם חשבון המנהל</div>
+      ${authHeader()}
       <div class="field"><label>אימייל</label>
-        <input class="input" id="au-email" type="email" inputmode="email" autocomplete="username"></div>
+        <input class="input" id="au-email" type="email" inputmode="email" autocomplete="username" placeholder="name@email.com"></div>
       <div class="field"><label>סיסמה</label>
-        <input class="input" id="au-pass" type="password" autocomplete="current-password"></div>
+        <input class="input" id="au-pass" type="password" autocomplete="current-password" placeholder="הסיסמה שלכם"></div>
       <p class="hint" id="au-err" style="min-height:15px;margin-top:0"></p>
-      <button class="btn btn-primary" data-act2="do-owner-login">התחברות</button>
-      <button class="btn btn-ghost" data-act2="do-owner-reset" style="margin-top:8px">שכחתי סיסמה</button>
-      <button class="btn btn-ghost" data-act2="do-owner-code" style="margin-top:4px">כניסה עם קוד סודי</button>
-      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:4px">ביטול</button>
+      <button class="btn btn-primary" data-act2="do-owner-login">התחברות לניהול</button>
+      <button class="btn btn-ghost btn-sm" data-act2="do-owner-reset" style="margin-top:10px;width:100%">שכחתי סיסמה</button>
+      <button class="btn btn-ghost btn-sm" data-act2="do-owner-code" style="margin-top:4px;width:100%">כניסה עם קוד סודי</button>
+      <button class="btn btn-ghost btn-sm" data-act="close-modal" style="margin-top:4px;width:100%">ביטול</button>
     `);
     const err = (m, good) => { const e = $("#au-err"); if (e) { e.style.color = good ? "var(--good)" : "var(--bad)"; e.textContent = m; } };
     const login = async () => {
@@ -2055,11 +2070,13 @@
 
   function promptOwnerCode() {
     openModal(`
-      <div class="m-title">כניסת מנהל</div>
-      <div class="m-sub">הזן סיסמה</div>
-      <div class="field"><input class="input" id="own-code" type="password" autocomplete="off" placeholder="סיסמה" style="text-align:center;font-size:18px"></div>
-      <button class="btn btn-primary" data-act2="check-code">כניסה</button>
-      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
+      ${authHeader()}
+      <div class="field pw-field">
+        <input class="input" id="own-code" type="password" autocomplete="off" placeholder="סיסמת ניהול" style="text-align:center;font-size:17px">
+        <button type="button" class="pw-eye" data-act="toggle-pw" aria-label="הצג/הסתר סיסמה">👁️</button>
+      </div>
+      <button class="btn btn-primary" data-act2="check-code">כניסה לניהול</button>
+      <button class="btn btn-ghost btn-sm" data-act="close-modal" style="margin-top:8px;width:100%">ביטול</button>
     `);
     const check = () => {
       const v = (($("#own-code") && $("#own-code").value) || "").trim();
