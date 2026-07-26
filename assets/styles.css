@@ -247,6 +247,13 @@ a { color: var(--sky); text-decoration: none; }
 .btn-primary:disabled { box-shadow: none; }
 .btn-ghost { background: transparent; }
 .btn-danger { color: var(--bad); border-color: rgba(248,113,113,.35); background: var(--bad-bg); }
+.btn-wa {
+  background: #25D366; color: #ffffff; border-color: transparent;
+  box-shadow: 0 6px 16px rgba(37,211,102,.32);
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+}
+.btn-wa:active { background: #1fb457; }
+.wa-ico { width: 17px; height: 17px; flex: none; }
 .btn-sm { padding: 9px 13px; font-size: 13.5px; border-radius: 11px; width: auto; }
 .btn-row { display: flex; gap: 10px; }
 .btn-row-wrap { flex-wrap: wrap; }

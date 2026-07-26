@@ -81,13 +81,18 @@ function apptTs(date, start) {
     const alerts = Array.isArray(shop.alerts) ? shop.alerts : [];
     const bookings = Array.isArray(shop.bookings) ? shop.bookings : [];
 
-    const st = perShop[sid] || { alertIds: [], bookingIds: [] };
+    const st = perShop[sid] || { alertIds: [], bookingIds: [], cancelIds: [] };
     const doneAlerts = new Set(st.alertIds || []);
     const doneBookings = new Set(st.bookingIds || []);
+    const doneCancels = new Set(st.cancelIds || []);
 
     const newAlerts = alerts.filter((a) => a && a.id && !doneAlerts.has(a.id) && apptTs(a.date, a.start) > now);
     const newBookings = bookings.filter((b) =>
       b && b.id && !doneBookings.has(b.id) && b.status !== "cancelled" && apptTs(b.date, b.start) > now);
+    // ביטולים חדשים ע״י המנהל — התראה ללקוח שהתור שלו בוטל
+    const newCancels = bookings.filter((b) =>
+      b && b.id && b.userId && b.status === "cancelled" && b.cancelledBy === "owner" &&
+      !doneCancels.has(b.id) && apptTs(b.date, b.start) > now);
 
     if (!firstRun) {
       for (const a of newAlerts) {
@@ -98,12 +103,21 @@ function apptTs(date, start) {
         sent += await sendToUid("owner_" + sid, "📅 תור חדש נקבע",
           `${b.userName} — ${b.serviceName}, ${relDay(b.date)} בשעה ${b.start}`, "newbook-" + b.id);
       }
+      for (const b of newCancels) {
+        sent += await sendToUid(b.userId, "❌ התור שלך בוטל",
+          `${shopName}\n${b.serviceName} · ${relDay(b.date)} בשעה ${b.start}`, "cancel-" + b.id);
+      }
     }
 
     // סמן הכל כטופל
     alerts.forEach((a) => a && a.id && doneAlerts.add(a.id));
     bookings.forEach((b) => b && b.id && doneBookings.add(b.id));
-    perShop[sid] = { alertIds: [...doneAlerts].slice(-500), bookingIds: [...doneBookings].slice(-500) };
+    bookings.forEach((b) => b && b.id && b.status === "cancelled" && doneCancels.add(b.id));
+    perShop[sid] = {
+      alertIds: [...doneAlerts].slice(-500),
+      bookingIds: [...doneBookings].slice(-500),
+      cancelIds: [...doneCancels].slice(-500),
+    };
     totalNewA += newAlerts.length; totalNewB += newBookings.length;
   }
 

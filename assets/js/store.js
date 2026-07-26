@@ -405,12 +405,15 @@ UG.Store = (function () {
     if (backend.mode === "local") { const latest = backend.read(); if (latest) state = latest; }
   }
 
-  async function setBookingStatus(id, status) {
+  async function setBookingStatus(id, status, by) {
     refreshLocal();
     const b = state.bookings.find((x) => x.id === id);
     if (b) {
       b.status = status;
-      if (status === "cancelled") processFreed(state, b);
+      if (status === "cancelled") {
+        if (by) b.cancelledBy = by;
+        processFreed(state, b);
+      }
       await persist();
     }
     return b;
