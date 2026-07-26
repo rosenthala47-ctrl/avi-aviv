@@ -598,12 +598,31 @@
       <div style="height:14px"></div>
       <button class="btn btn-primary" data-act="open-confirm" ${view.selSlot ? "" : "disabled"}>${ctaLabel}</button>
 
+      ${installCard()}
       ${mapsCard(st)}
       ${shareCard()}
       <p class="hint" style="text-align:center;margin-top:22px">
         מנהלים מספרה? <a href="#new" data-act="open-signup" style="color:var(--sky)">פתחו מערכת תורים משלכם ›</a>
       </p>
     `;
+  }
+
+  /* כרטיס "התקן אפליקציה" בולט ללקוח — מוסתר אם כבר מותקן (מסך מלא) */
+  function installCard() {
+    if (isStandalone()) return "";
+    return `
+      <div class="section-title">📲 קבעו תור בקליק — התקינו כאפליקציה</div>
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:13px">
+          <div style="width:44px;height:44px;border-radius:12px;flex:none;display:grid;place-items:center;background:var(--surface-3);font-size:21px">📲</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:700;font-size:15px">אייקון על מסך הבית שלכם</div>
+            <div class="hint" style="margin-top:1px">גישה מהירה + תזכורת לפני התור</div>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-sm" data-act="install-app" style="width:100%;margin-top:13px">📲 התקנת האפליקציה</button>
+        ${isIOS() ? `<div class="hint" style="text-align:center;margin-top:8px">באייפון: לחצו על <b>שיתוף</b> ⬆️ ואז <b>״הוסף למסך הבית״</b></div>` : ""}
+      </div>`;
   }
 
   function shareCard() {
@@ -1685,16 +1704,19 @@
         <div class="section-title">פתיחת מערכת חדשה</div>
         <div class="card">
           <div class="field"><label>שם המספרה</label>
-            <input class="input" id="ob-name" placeholder="למשל: מספרת דני"></div>
+            <input class="input" id="ob-name" placeholder="למשל: מספרת דני">
+            <div class="hint" style="margin-top:5px">📛 השם שהלקוחות יראו בראש מסך ההזמנה.</div></div>
           <div class="field"><label>כתובת אישית (אותיות באנגלית/מספרים)</label>
             <input class="input" id="ob-handle" placeholder="dani" autocapitalize="off" autocomplete="off" spellcheck="false">
-            <div class="hint" id="ob-linkPrev">הקישור שלך: ${esc(base)}הכתובת-שלך</div>
+            <div class="hint" style="margin-top:5px">🔗 זה הקישור האישי שתשלחו ללקוחות. בחרו משהו קצר וקל.</div>
+            <div class="hint" id="ob-linkPrev" style="margin-top:3px;color:var(--sky-2)">הקישור שלך: ${esc(base)}הכתובת-שלך</div>
           </div>
           <div class="field"><label>סיסמת ניהול (רק אתם תדעו)</label>
-            <input class="input" id="ob-pass" type="text" placeholder="בחרו סיסמה"></div>
+            <input class="input" id="ob-pass" type="text" placeholder="בחרו סיסמה">
+            <div class="hint" style="margin-top:5px">🔒 איתה תיכנסו לנהל: 3 לחיצות על הלוגו ← הזנת הסיסמה. שמרו אותה!</div></div>
           <button class="btn btn-primary" data-act="create-shop">🚀 פתחו את המערכת</button>
         </div>
-        <p class="hint" style="text-align:center;margin-top:10px">אחרי היצירה תקבלו קישור אישי לשלוח ללקוחות שלכם.</p>
+        <p class="hint" style="text-align:center;margin-top:10px">אחרי היצירה תיכנסו ישר לניהול — שם תגדירו שירותים, שעות ומחירים.</p>
 
         <div class="section-title" style="margin-top:26px">כבר יש לך מערכת?</div>
         <div class="card">
@@ -2123,7 +2145,7 @@
   }
 
   async function doInstall() {
-    if (!deferredPrompt) { showInstallBar("generic"); return; }
+    if (!deferredPrompt) { showInstallBar(isIOS() ? "ios" : "generic"); return; }
     deferredPrompt.prompt();
     try { await deferredPrompt.userChoice; } catch (e) {}
     deferredPrompt = null;
@@ -2142,6 +2164,7 @@
     window.addEventListener("appinstalled", () => {
       hideInstallBar(); deferredPrompt = null;
       toast("האפליקציה הותקנה 🎉", "good", "📲");
+      try { render(); } catch (e) {}   // להסתיר את כרטיס ההתקנה
     });
     setTimeout(maybeShowInstall, 2200);
   }
