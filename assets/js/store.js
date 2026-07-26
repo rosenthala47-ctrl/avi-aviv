@@ -259,6 +259,18 @@ UG.Store = (function () {
     s.shop.phone = (data && data.phone) || "";
     s.shop.address = (data && data.address) || "";
     s.shop.ownerName = (data && data.ownerName) || "";
+    s.shop.style = (data && data.style) || "sky";
+    // שירותים שנבחרו בשאלון (אם יש) — אחרת ברירת המחדל
+    if (data && Array.isArray(data.services) && data.services.length) {
+      s.services = data.services
+        .filter((x) => x && x.name)
+        .map((x) => ({
+          id: u.uid(), name: String(x.name).trim(),
+          price: Number(x.price) || 0,
+          durationMin: Number(x.durationMin) || 30,
+          icon: x.icon || "✂️", active: true,
+        }));
+    }
     await b.write(s);
     return { ok: true, id: id };
   }

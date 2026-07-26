@@ -68,6 +68,74 @@
   --overlay: rgba(20, 30, 55, 0.4);
 }
 
+/* ==== סגנונות עיצוב (בחירת הספר — משפיע גם על מה שהלקוחות רואים) ==== */
+/* ברירת מחדל = תכלת (המוגדר למעלה). כאן שתי החלופות: */
+:root[data-style="gold"] {
+  --sky: #e3b341;
+  --sky-2: #f2d184;
+  --sky-strong: #c08a1e;
+  --sky-ink: #241a04;
+  --sky-glow: rgba(227, 179, 65, 0.24);
+  --tap: rgba(227, 179, 65, 0.14);
+}
+:root[data-style="royal"] {
+  --sky: #a78bfa;
+  --sky-2: #c4b5fd;
+  --sky-strong: #7c3aed;
+  --sky-ink: #17092e;
+  --sky-glow: rgba(167, 139, 250, 0.26);
+  --tap: rgba(167, 139, 250, 0.14);
+}
+:root[data-style="gold"] body,
+:root[data-style="royal"] body { background-image: none; }
+:root[data-style="gold"] body {
+  background:
+    radial-gradient(120% 60% at 100% 0%, rgba(227, 179, 65, 0.10) 0%, transparent 55%),
+    radial-gradient(120% 60% at 0% 0%, rgba(192, 138, 30, 0.07) 0%, transparent 50%),
+    var(--bg);
+}
+:root[data-style="royal"] body {
+  background:
+    radial-gradient(120% 60% at 100% 0%, rgba(167, 139, 250, 0.12) 0%, transparent 55%),
+    radial-gradient(120% 60% at 0% 0%, rgba(124, 58, 237, 0.08) 0%, transparent 50%),
+    var(--bg);
+}
+
+/* בורר סגנון (שאלון + הגדרות) */
+.style-picker { display: grid; gap: 11px; }
+.style-opt {
+  display: flex; align-items: center; gap: 13px; width: 100%; text-align: start;
+  padding: 13px 15px; border-radius: var(--radius);
+  background: var(--surface); border: 1px solid var(--line); transition: .15s;
+}
+.style-opt.selected { border-color: var(--sky); box-shadow: 0 0 0 3px var(--sky-glow); }
+.style-opt:active { transform: scale(.99); }
+.style-swatch {
+  width: 46px; height: 46px; border-radius: 13px; flex: none;
+  display: grid; place-items: center; font-size: 21px;
+}
+.style-opt .so-body { flex: 1; min-width: 0; }
+.style-opt .so-name { font-weight: 700; font-size: 15px; }
+.style-opt .so-check { font-size: 18px; color: var(--sky); opacity: 0; }
+.style-opt.selected .so-check { opacity: 1; }
+
+/* שורות שירותים בשאלון */
+.wiz-svc-row { display: flex; gap: 8px; align-items: center; margin-bottom: 9px; }
+.wiz-svc-row .input { height: 48px; font-size: 15px; text-align: start; }
+.wiz-svc-row .sv-name { flex: 1.6; }
+.wiz-svc-row .sv-price { flex: .8; text-align: center; }
+.wiz-svc-row .sv-dur { flex: .8; text-align: center; }
+.wiz-svc-row .sv-del {
+  flex: none; width: 38px; height: 38px; border-radius: 11px;
+  background: var(--bad-bg); color: var(--bad); border: 1px solid rgba(248,113,113,.35);
+  font-size: 15px; font-weight: 800; display: grid; place-items: center;
+}
+.wiz-svc-head { display: flex; gap: 8px; padding: 0 4px 6px; font-size: 11.5px; color: var(--muted-2); font-weight: 700; }
+.wiz-svc-head .h-name { flex: 1.6; }
+.wiz-svc-head .h-price { flex: .8; text-align: center; }
+.wiz-svc-head .h-dur { flex: .8; text-align: center; }
+.wiz-svc-head .h-sp { flex: none; width: 38px; }
+
 * , *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html { -webkit-text-size-adjust: 100%; }

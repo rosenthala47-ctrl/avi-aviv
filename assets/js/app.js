@@ -305,7 +305,6 @@
       ${(view.route === "client" && localStorage.getItem(AUTHKEY) === "1")
         ? `<button class="icon-btn" data-act="owner-login" title="כניסת מנהל" aria-label="כניסת מנהל">🔑</button>` : ""}
       <button class="icon-btn" data-act="toggle-theme" title="מצב תצוגה">${themeIco}</button>
-      ${opts.switch ? `<button class="icon-btn" data-act="logout" title="חזרה לתצוגת לקוח">⇋</button>` : ""}
     </div>`;
   }
 
@@ -1119,7 +1118,7 @@
 
     return `
     <div class="screen active">
-      ${topbar("ניהול העסק", { switch: true })}
+      ${topbar("ניהול העסק", {})}
       <div class="content" id="oscroll">${body}</div>
       <div class="tabbar scroll">
         <button data-otab="cal" class="${view.ownerTab === "cal" ? "active" : ""}"><span class="tb-ico">🗓️</span>יומן</button>
@@ -1677,6 +1676,16 @@
           <button class="btn btn-sm" data-act="share-app">🔗 שיתוף</button>
         </div>
       </div>
+      <div class="section-title">🎨 סגנון העיצוב</div>
+      <div class="card">
+        <p class="hint" style="margin-top:0;margin-bottom:12px">כך ייראה האתר — אצלכם ואצל הלקוחות.</p>
+        <div class="style-picker">${WIZ_STYLES.map((s) => `
+          <button type="button" class="style-opt ${((st.shop.style || "sky") === s.id) ? "selected" : ""}" data-act="set-style" data-style="${s.id}">
+            <span class="style-swatch" style="background:linear-gradient(145deg, ${s.c1}, ${s.c2})">${s.emoji}</span>
+            <span class="so-body"><span class="so-name">${esc(s.name)}</span><span class="hint" style="display:block">${esc(s.desc)}</span></span>
+            <span class="so-check">✓</span>
+          </button>`).join("")}</div>
+      </div>
       ${ownerSecuritySection(st)}
       ${ownerGallerySection()}
       <div class="section-title">פרטי העסק</div>
@@ -1753,6 +1762,8 @@
     if (view.onboarding) { document.title = "BarberTor — תורים לספרים"; $("#root").innerHTML = renderOnboarding(); return; }
     if (view.notFound) { document.title = "BarberTor"; $("#root").innerHTML = renderNotFound(); return; }
     if (!Store.get()) return;
+    // סגנון העיצוב שהספר בחר — חל גם על הלקוחות
+    applyShopStyle((Store.get().shop && Store.get().shop.style) || "sky");
     // כותרת לשונית דינמית — שם המספרה של הספר, עם מיתוג BarberTor
     const shopName = (Store.get().shop && Store.get().shop.name) || "BarberTor";
     document.title = shopName + " · BarberTor";
@@ -1765,13 +1776,31 @@
   /* =======================================================================
      שאלון פתיחת מספרה — חוויית Onboarding (עמוד אחרי עמוד)
      =======================================================================*/
-  const wiz = { step: 0, busy: false, data: { owner: "", name: "", handle: "", phone: "", city: "", street: "", houseNo: "", address: "", pass: "", pass2: "" } };
+  const WIZ_STYLES = [
+    { id: "sky", name: "תכלת מודרני", desc: "נקי, מודרני וקריא", emoji: "💧", c1: "#38bdf8", c2: "#0ea5e9" },
+    { id: "gold", name: "זהב יוקרתי", desc: "שחור וזהב — יוקרתי", emoji: "👑", c1: "#e3b341", c2: "#c08a1e" },
+    { id: "royal", name: "סגול מלכותי", desc: "נועז וייחודי", emoji: "🔮", c1: "#a78bfa", c2: "#7c3aed" },
+  ];
+  // החלת סגנון העיצוב של המספרה (נשמר במסד — הלקוחות רואים את אותו סגנון)
+  function applyShopStyle(id) {
+    const ok = WIZ_STYLES.some((s) => s.id === id);
+    document.documentElement.setAttribute("data-style", ok ? id : "sky");
+  }
+
+  const wiz = {
+    step: 0, busy: false,
+    data: {
+      owner: "", name: "", handle: "", phone: "", city: "", street: "", houseNo: "", address: "",
+      services: [{ name: "תספורת גבר", price: 60, durationMin: 30 }],
+      style: "sky", pass: "", pass2: "",
+    },
+  };
   // הרכבת כתובת מלאה מהשדות הנפרדים (רחוב + מספר, עיר)
   function wizComposeAddress(d) {
     const line1 = [d.street, d.houseNo].filter(Boolean).join(" ").trim();
     return [line1, d.city].filter(Boolean).join(", ").trim();
   }
-  const WIZ_QUESTIONS = 5;   // שלבים 1..5 הם שאלות
+  const WIZ_QUESTIONS = 7;   // שלבים 1..7 הם שאלות
 
   // רטט קצר למשוב מגע (נתמך באנדרואיד; באייפון פשוט מתעלם)
   function haptic(ms) { try { if (navigator.vibrate) navigator.vibrate(ms || 12); } catch (e) {} }
@@ -1789,6 +1818,7 @@
           </div>
           <div class="wiz-perks">
             <div class="wiz-perk"><span>📅</span><div><b>יומן חכם</b><div class="hint">הלקוחות מזמינים לבד</div></div></div>
+            <div class="wiz-perk"><span>💰</span><div><b>הכנסות ובקרת לקוחות</b><div class="hint">רואים כמה הכנסתם, מי הלקוחות וכמה ביקרו</div></div></div>
             <div class="wiz-perk"><span>🔔</span><div><b>תזכורות אוטומטיות</b><div class="hint">פחות ביטולים</div></div></div>
             <div class="wiz-perk"><span>🔗</span><div><b>קישור אישי</b><div class="hint">שולחים ללקוחות</div></div></div>
           </div>`;
@@ -1812,6 +1842,25 @@
              <input class="input wiz-input" id="wz-houseno" placeholder="מס׳" value="${esc(d.houseNo)}" style="flex:.6" inputmode="numeric">
            </div>`);
       case 5:
+        return wizQ("✂️", "אילו שירותים אתם מציעים?", "שם, מחיר ומשך — הלקוחות יבחרו מתוך אלה. תמיד אפשר להוסיף ולשנות שירותים אחר כך מלשונית ״שירותים״.",
+          `<div class="wiz-svc-head"><span class="h-name">שם השירות</span><span class="h-price">מחיר ₪</span><span class="h-dur">דק׳</span><span class="h-sp"></span></div>
+           <div id="wz-svc-list">${(d.services || []).map((s, i) => `
+             <div class="wiz-svc-row" data-svc-row="${i}">
+               <input class="input sv-name" placeholder="למשל: תספורת גבר" value="${esc(s.name || "")}">
+               <input class="input sv-price" type="number" inputmode="numeric" min="0" placeholder="60" value="${esc(s.price)}">
+               <input class="input sv-dur" type="number" inputmode="numeric" min="5" step="5" placeholder="30" value="${esc(s.durationMin)}">
+               <button type="button" class="sv-del" data-act="wiz-svc-del" data-i="${i}" aria-label="מחיקה">✕</button>
+             </div>`).join("")}</div>
+           <button type="button" class="btn btn-sm" data-act="wiz-svc-add" style="width:100%;margin-top:6px">＋ הוספת שירות</button>`);
+      case 6:
+        return wizQ("🎨", "בחרו סגנון עיצוב", "ככה ייראה האתר שלכם — גם אצלכם וגם אצל הלקוחות. אפשר לשנות בכל רגע מההגדרות.",
+          `<div class="style-picker">${WIZ_STYLES.map((s) => `
+             <button type="button" class="style-opt ${d.style === s.id ? "selected" : ""}" data-act="wiz-style" data-style="${s.id}">
+               <span class="style-swatch" style="background:linear-gradient(145deg, ${s.c1}, ${s.c2})">${s.emoji}</span>
+               <span class="so-body"><span class="so-name">${esc(s.name)}</span><span class="hint" style="display:block">${esc(s.desc)}</span></span>
+               <span class="so-check">✓</span>
+             </button>`).join("")}</div>`);
+      case 7:
         return wizQ("🔒", "סיסמת ניהול", "רק איתה נכנסים לנהל את המספרה. שמור/י אותה במקום בטוח!",
           `<div class="pw-field">
              <input class="input wiz-input" id="wz-pass" type="password" placeholder="בחר/י סיסמה" value="${esc(d.pass)}">
@@ -1872,20 +1921,32 @@
     </div>`;
   }
 
+  // חיווט אירועים לשלב הנוכחי (בטוח לקריאה חוזרת)
+  function wizBindStep() {
+    // תצוגה מקדימה חיה של הקישור
+    const h = $("#wz-handle");
+    if (h && !h.__bound) {
+      h.__bound = true;
+      h.addEventListener("input", () => {
+        const v = h.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
+        const p = $("#wz-linkPrev");
+        if (p) p.innerHTML = esc(shareBase() + "#") + "<b>" + esc(v || "הכתובת-שלך") + "</b>";
+      });
+    }
+    // Enter = המשך (למעט שלב השירותים, שם יש כמה שדות בשורה)
+    const body = $("#wizBody");
+    if (body && !body.__bound) {
+      body.__bound = true;
+      body.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && wiz.step !== 5) { e.preventDefault(); wizNext(); }
+      });
+    }
+  }
+
   function wizFocus() {
+    wizBindStep();
     const el = $("#wizBody") && $("#wizBody").querySelector("input");
     if (el) setTimeout(() => el.focus(), 120);
-    // תצוגה מקדימה חיה של הקישור + Enter להמשך
-    const h = $("#wz-handle");
-    if (h) h.addEventListener("input", () => {
-      const v = h.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
-      const p = $("#wz-linkPrev");
-      if (p) p.innerHTML = esc(shareBase() + "#") + "<b>" + esc(v || "הכתובת-שלך") + "</b>";
-    });
-    const body = $("#wizBody");
-    if (body) body.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") { e.preventDefault(); wizNext(); }
-    });
   }
 
   // שמירת שדות שלב 4 (טלפון + כתובת מפורקת) מתוך הטופס לתוך wiz.data
@@ -1896,6 +1957,24 @@
     if ($("#wz-street")) d.street = $("#wz-street").value.trim();
     if ($("#wz-houseno")) d.houseNo = $("#wz-houseno").value.trim();
     d.address = wizComposeAddress(d);
+  }
+
+  // קריאת שורות השירותים מהטופס אל wiz.data
+  function wizCaptureServices() {
+    const list = $("#wz-svc-list");
+    if (!list) return;
+    wiz.data.services = [...list.querySelectorAll("[data-svc-row]")].map((row) => ({
+      name: (row.querySelector(".sv-name") || {}).value ? row.querySelector(".sv-name").value.trim() : "",
+      price: Number((row.querySelector(".sv-price") || {}).value || 0),
+      durationMin: Number((row.querySelector(".sv-dur") || {}).value || 0),
+    }));
+  }
+  // רענון גוף השאלון בלבד (בלי לקפוץ עם הפוקוס)
+  function wizRenderBody() {
+    const body = $("#wizBody");
+    if (!body) { render(); return; }
+    body.innerHTML = wizStepHtml();
+    wizBindStep();
   }
 
   function wizGo(step) {
@@ -1938,6 +2017,14 @@
     }
     if (wiz.step === 4) { wizCaptureStep4(); wizGo(5); return; }
     if (wiz.step === 5) {
+      wizCaptureServices();
+      const valid = (d.services || []).filter((s) => s.name && s.price >= 0 && s.durationMin >= 5);
+      if (!valid.length) { toast("הוסיפו לפחות שירות אחד (שם, מחיר ומשך)", "", "✂️"); haptic(40); return; }
+      d.services = valid;
+      wizGo(6); return;
+    }
+    if (wiz.step === 6) { wizGo(7); return; }
+    if (wiz.step === 7) {
       d.pass = ($("#wz-pass") && $("#wz-pass").value.trim()) || "";
       d.pass2 = ($("#wz-pass2") && $("#wz-pass2").value.trim()) || "";
       if (d.pass.length < 4) { toast("סיסמה קצרה מדי (לפחות 4 תווים)", "", "✋"); haptic(40); return; }
@@ -1949,11 +2036,12 @@
   function wizBack() {
     if (wiz.step <= 0) return;
     // שמירת מה שהוקלד לפני חזרה
-    const map = { 1: ["owner", "#wz-owner"], 2: ["name", "#wz-name"], 3: ["handle", "#wz-handle"], 5: ["pass", "#wz-pass"] };
+    const map = { 1: ["owner", "#wz-owner"], 2: ["name", "#wz-name"], 3: ["handle", "#wz-handle"], 7: ["pass", "#wz-pass"] };
     const m = map[wiz.step];
     if (m && $(m[1])) wiz.data[m[0]] = $(m[1]).value.trim();
-    if (wiz.step === 5 && $("#wz-pass2")) wiz.data.pass2 = $("#wz-pass2").value.trim();
+    if (wiz.step === 7 && $("#wz-pass2")) wiz.data.pass2 = $("#wz-pass2").value.trim();
     if (wiz.step === 4) wizCaptureStep4();
+    if (wiz.step === 5) wizCaptureServices();
     wizGo(wiz.step - 1);
   }
 
@@ -1977,6 +2065,7 @@
     const d = wiz.data;
     const res = await Store.createShop(d.handle, {
       name: d.name, ownerPass: d.pass, phone: d.phone, address: d.address, ownerName: d.owner,
+      style: d.style, services: d.services,
     });
     clearInterval(timer);
     if (!res.ok) {
@@ -2113,7 +2202,6 @@
       if (!act) return;
 
       switch (act) {
-        case "logout": go("client"); break;
         case "close-modal": closeModal(); break;
 
         case "open-confirm": openConfirm(); break;
@@ -2195,6 +2283,28 @@
         case "wiz-next": wizNext(); break;
         case "wiz-back": wizBack(); break;
         case "wiz-skip": wizCaptureStep4(); wizGo(5); break;
+        case "wiz-svc-add":
+          wizCaptureServices();
+          wiz.data.services.push({ name: "", price: "", durationMin: 30 });
+          haptic(10); wizRenderBody();
+          setTimeout(() => {
+            const rows = document.querySelectorAll("#wz-svc-list .sv-name");
+            if (rows.length) rows[rows.length - 1].focus();
+          }, 60);
+          break;
+        case "wiz-svc-del": {
+          wizCaptureServices();
+          const i = Number(t.dataset.i);
+          wiz.data.services.splice(i, 1);
+          if (!wiz.data.services.length) wiz.data.services.push({ name: "", price: "", durationMin: 30 });
+          haptic(14); wizRenderBody();
+          break;
+        }
+        case "wiz-style":
+          wiz.data.style = t.dataset.style;
+          applyShopStyle(wiz.data.style);       // תצוגה מקדימה חיה
+          haptic(14); wizRenderBody();
+          break;
         case "wiz-existing": wizExisting(); break;
         case "goto-shop": {
           const h = (($("#ob-existing") && $("#ob-existing").value) || "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
@@ -2302,6 +2412,10 @@
           await Store.removeService(t.dataset.id); closeModal();
           toast("השירות נמחק", "", "🗑️"); render(); break;
 
+        case "set-style":
+          applyShopStyle(t.dataset.style);
+          await Store.saveShop({ style: t.dataset.style });
+          haptic(14); toast("סגנון העיצוב עודכן ✓", "good", "🎨"); render(); break;
         case "save-settings": saveSettings(); break;
       }
     });
