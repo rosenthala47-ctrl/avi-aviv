@@ -1720,7 +1720,23 @@
           ${Store.mode === "cloud" ? "מחובר לענן (Firebase) — סנכרון מלא בין כל המכשירים" : "מצב מקומי — לסנכרון בין מכשירים ראו את קובץ README"}
         </div>
       </div>
+
+      <div class="section-title">יציאה</div>
+      <div class="card">
+        <p class="hint" style="margin-top:0">יציאה מהניהול במכשיר הזה — שימושי במכשיר משותף או להחלפת מספרה. הנתונים נשמרים; כדי להיכנס שוב צריך את הכתובת והסיסמה.</p>
+        <button class="btn btn-danger" data-act="owner-logout" style="margin-top:12px">🚪 יציאה / החלפת מספרה</button>
+      </div>
     `;
+  }
+
+  function confirmOwnerLogout() {
+    openModal(`
+      <div class="m-title">יציאה מהמערכת</div>
+      <div class="m-sub">תצאו מהניהול ותחזרו למסך הפתיחה</div>
+      <p style="font-size:14px;color:var(--muted);margin:6px 0 20px">המספרה וכל הנתונים נשמרים. כדי להיכנס שוב תצטרכו את הכתובת האישית והסיסמה.</p>
+      <button class="btn btn-danger" data-act="do-owner-logout">כן, יציאה</button>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
+    `);
   }
 
   /* =======================================================================
@@ -2124,6 +2140,17 @@
 
         case "enable-notif": handleEnableNotif(); break;
         case "owner-login": promptOwner(); break;   // כניסת מנהל ייעודית (במקום 3 לחיצות על הלוגו)
+        case "owner-logout": confirmOwnerLogout(); break;
+        case "do-owner-logout":
+          try {
+            localStorage.removeItem("ug_owner_auth__" + SHOP);
+            localStorage.removeItem("ug_route__" + SHOP);
+            localStorage.removeItem("ug_otab__" + SHOP);
+            localStorage.removeItem("ug_last_shop");
+          } catch (e2) {}
+          if (UG.Auth && UG.Auth.signOut) { try { await UG.Auth.signOut(); } catch (e3) {} }
+          location.hash = "new"; location.reload();
+          break;
         case "toggle-theme": toggleTheme(); break;
         case "toggle-pw": {
           const field = t.closest(".pw-field"); const inp = field && field.querySelector("input");
