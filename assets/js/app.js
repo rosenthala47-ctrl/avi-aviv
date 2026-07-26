@@ -14,9 +14,11 @@
     if (h === "new" || h === "signup") return "__new__";   // מסך הרשמה/פתיחה
     h = h.replace(/[^a-z0-9-]/g, "");
     if (h) return h;                                        // מספרה לפי כתובת אישית (כולל #main = אורי)
-    // בלי כתובת אישית: בדומיין הישן של אורי מציגים את המספרה שלו (תאימות לקישורים קיימים);
-    // בדומיין של המוצר (barbertor וכו') מציגים את מסך הפתיחה של BarberTor.
+    // בלי כתובת אישית: בדומיין הישן של אורי מציגים את המספרה שלו (תאימות לקישורים קיימים).
     if ((location.hostname || "").toLowerCase().indexOf("ori-grushko") !== -1) return "main";
+    // בדומיין המוצר: פותחים ישר את המספרה האחרונה שנכנסו אליה במכשיר הזה
+    // (כך הספר לא צריך להקליד את הכתובת שלו בכל פעם). אם אין — מסך הפתיחה של BarberTor.
+    try { const last = (localStorage.getItem("ug_last_shop") || "").trim(); if (/^[a-z0-9-]+$/.test(last)) return last; } catch (e) {}
     return "__new__";
   }
   const SHOP = resolveShopId();
@@ -2253,6 +2255,9 @@
 
     await Store.init(SHOP);
     if (Store.notFound) { view.notFound = true; render(); return; }        // מספרה לא קיימת
+
+    // זכירת המספרה הזו כברירת מחדל לפתיחה הבאה (הספר לא יצטרך להקליד שוב)
+    try { localStorage.setItem("ug_last_shop", SHOP); } catch (e) {}
 
     Store.subscribe(onStoreChange);
     Store.subscribeGallery(() => {

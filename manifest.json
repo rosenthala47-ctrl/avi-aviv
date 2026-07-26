@@ -5,7 +5,7 @@
   "description": "מערכת תורים לספרים — פתחו מערכת משלכם, נהלו יומן ותזכורות, וקבלו קישור אישי ללקוחות",
   "lang": "he",
   "dir": "rtl",
-  "start_url": "./#new",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
