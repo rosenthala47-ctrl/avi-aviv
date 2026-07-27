@@ -16,14 +16,24 @@
     if (h) return h;                                        // מספרה לפי כתובת אישית (כולל #main = אורי)
     // בלי כתובת אישית: בדומיין הישן של אורי מציגים את המספרה שלו (תאימות לקישורים קיימים).
     if ((location.hostname || "").toLowerCase().indexOf("ori-grushko") !== -1) return "main";
-    // בדומיין המוצר: פותחים ישר את המספרה האחרונה שנכנסו אליה במכשיר הזה
-    // (כך הספר לא צריך להקליד את הכתובת שלו בכל פעם). אם אין — מסך הפתיחה של BarberTor.
-    try { const last = (localStorage.getItem("ug_last_shop") || "").trim(); if (/^[a-z0-9-]+$/.test(last)) return last; } catch (e) {}
+    // בדומיין המוצר (פתיחת האפליקציה): אם למכשיר יש מספרה בבעלותו — פותחים ישר
+    // את הניהול שלה (כניסת הספר, בלי צורך להקליד כתובת). אחרת — מסך הפתיחה של BarberTor.
+    // חשוב: לעולם לא פותחים דרך האפליקציה עמוד הזמנה של לקוח — זה שמור לקישור ייעודי בלבד.
+    try { const mine = (localStorage.getItem("ug_my_shop") || "").trim(); if (/^[a-z0-9-]+$/.test(mine)) return mine; } catch (e) {}
     return "__new__";
   }
   const SHOP = resolveShopId();
   const AUTHKEY = "ug_owner_auth__" + SHOP;
   const ROUTEKEY = "ug_route__" + SHOP;
+  // אם הגענו למספרה שבבעלות המכשיר דרך פתיחת האפליקציה (כתובת ריקה) — תמיד במצב ניהול,
+  // כדי שהספר לא ינחת בטעות בעמוד הלקוח. מצב לקוח מתקבל רק דרך קישור עם כתובת (#handle).
+  try {
+    if (!(location.hash || "").replace(/^#/, "").trim() &&
+        (localStorage.getItem("ug_my_shop") || "").trim() === SHOP &&
+        SHOP !== "__new__" && SHOP !== "main") {
+      localStorage.setItem(ROUTEKEY, "owner");
+    }
+  } catch (e) {}
 
   /* ---------- תאימות למעטפת אפליקציה (Capacitor / Cordova / WebView) ---------- */
   // האם רצים בתוך מעטפת אפליקציה נייטיב (ולא בדפדפן רגיל)
@@ -303,8 +313,6 @@
         </div>
       </div>
       <div class="spacer"></div>
-      ${(view.route === "client" && localStorage.getItem(AUTHKEY) === "1")
-        ? `<button class="icon-btn" data-act="owner-login" title="כניסת מנהל" aria-label="כניסת מנהל">🔑</button>` : ""}
       <button class="icon-btn" data-act="toggle-theme" title="מצב תצוגה">${themeIco}</button>
     </div>`;
   }
@@ -2082,7 +2090,8 @@
     localStorage.setItem("ug_owner_auth__" + d.handle, "1");
     localStorage.setItem("ug_route__" + d.handle, "owner");
     localStorage.setItem("ug_otab__" + d.handle, "publish");
-    try { localStorage.setItem("ug_last_shop", d.handle); } catch (e) {}
+    // המספרה שבבעלות המכשיר הזה — פתיחת האפליקציה תוביל ישר לניהול שלה (כניסת הספר)
+    try { localStorage.setItem("ug_my_shop", d.handle); } catch (e) {}
     setTimeout(() => { location.hash = d.handle; location.reload(); }, 800);
   }
 
@@ -2116,7 +2125,8 @@
       // כניסה מוצלחת — ישר לניהול
       localStorage.setItem("ug_owner_auth__" + handle, "1");
       localStorage.setItem("ug_route__" + handle, "owner");
-      try { localStorage.setItem("ug_last_shop", handle); } catch (e) {}
+      // המספרה שבבעלות המכשיר הזה — פתיחת האפליקציה תוביל ישר לניהול שלה (כניסת הספר)
+      try { localStorage.setItem("ug_my_shop", handle); } catch (e) {}
       haptic(16);
       location.hash = handle; location.reload();
     };
@@ -2249,6 +2259,7 @@
             localStorage.removeItem("ug_owner_auth__" + SHOP);
             localStorage.removeItem("ug_route__" + SHOP);
             localStorage.removeItem("ug_otab__" + SHOP);
+            localStorage.removeItem("ug_my_shop");
             localStorage.removeItem("ug_last_shop");
           } catch (e2) {}
           if (UG.Auth && UG.Auth.signOut) { try { await UG.Auth.signOut(); } catch (e3) {} }
@@ -2721,9 +2732,6 @@
 
     await Store.init(SHOP);
     if (Store.notFound) { view.notFound = true; render(); return; }        // מספרה לא קיימת
-
-    // זכירת המספרה הזו כברירת מחדל לפתיחה הבאה (הספר לא יצטרך להקליד שוב)
-    try { localStorage.setItem("ug_last_shop", SHOP); } catch (e) {}
 
     Store.subscribe(onStoreChange);
     Store.subscribeGallery(() => {
