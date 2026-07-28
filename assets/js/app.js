@@ -108,34 +108,68 @@
   }
 
   /* =======================================================================
-     ניווט "אחורה" חכם — מחזיר למסך הקודם, ובדף הבית שואל אם לצאת
+     ניווט "אחורה" חכם (כפתור/החלקה של המערכת) — מחזיר בכל פעם למסך הקודם
+     שבו היה המשתמש, צמוד, עד המסך הראשון; שם נפתחת שאלת יציאה.
+     ההקלטה אוטומטית מתוך render(): כל מעבר בין "עמודים" (לשוניות / שלבי
+     האשף / בחירת שירות / מנהל↔לקוח) נשמר, ובחירות בתוך אותו עמוד (יום/שעה)
+     לא מציפות את מחסנית ה"אחורה".
      =======================================================================*/
-  const viewStack = [];
+  const viewStack = [];       // מחסנית העמודים הקודמים (לשחזור בלחיצת "אחורה")
+  let navCur = null;          // תמונת המסך הנוכחי
+  let navRestoring = false;   // נמנע מהקלטה בזמן שחזור
   function snapView() {
-    return { route: view.route, clientTab: view.clientTab, ownerTab: view.ownerTab,
-      selDate: view.selDate, oDate: view.oDate, statMonth: view.statMonth };
+    return {
+      route: view.route, clientTab: view.clientTab, ownerTab: view.ownerTab,
+      onboarding: view.onboarding, wizStep: view.onboarding ? wiz.step : null,
+      selService: view.selService, selDate: view.selDate, selSlot: view.selSlot,
+      rescheduleId: view.rescheduleId, oDate: view.oDate, statMonth: view.statMonth,
+    };
+  }
+  // חתימת "עמוד" — רק שינויים שנחשבים ניווט אמיתי יוצרים צעד "אחורה".
+  // בחירת שירות/יום/שעה היא בתוך אותו עמוד (חלקן אוטומטית) ולכן לא נספרת כניווט.
+  function pageSig(s) {
+    return [s.route, s.clientTab, s.ownerTab,
+      s.onboarding ? "wiz" + s.wizStep : ""].join("|");
+  }
+  // נקרא בסוף כל render(): שומר את העמוד הקודם אם עברנו לעמוד חדש
+  function syncNav() {
+    if (navRestoring) return;
+    const snap = snapView();
+    if (navCur === null) { navCur = snap; return; }
+    if (pageSig(navCur) === pageSig(snap)) { navCur = snap; return; }  // אותו עמוד — רק עדכון תת-מצב
+    viewStack.push(navCur);
+    if (viewStack.length > 80) viewStack.shift();
+    navCur = snap;
   }
   function restoreSnap(s) {
+    navRestoring = true;
     view.route = s.route; view.clientTab = s.clientTab; view.ownerTab = s.ownerTab;
-    if (s.selDate) view.selDate = s.selDate;
-    if (s.oDate) view.oDate = s.oDate;
-    if (s.statMonth) view.statMonth = s.statMonth;
+    view.onboarding = !!s.onboarding;
+    view.selService = s.selService || null;
+    view.selDate = s.selDate || null;
+    view.selSlot = s.selSlot || null;
+    view.rescheduleId = s.rescheduleId || null;
+    view.oDate = s.oDate || null;
+    view.statMonth = s.statMonth || null;
+    if (s.onboarding && s.wizStep != null) wiz.step = s.wizStep;
+    navCur = s;
     render();
+    navRestoring = false;
   }
-  function recordNav() { viewStack.push(snapView()); if (viewStack.length > 60) viewStack.shift(); }
   function modalOpen() { const m = $("#modalBack"); return m && m.classList.contains("open"); }
 
   function onPopState() {
-    try { history.pushState(null, ""); } catch (e) {}   // מלכודת מחדש כדי לא לצאת
-    if (modalOpen()) { closeModal(); return; }
-    if (viewStack.length) { restoreSnap(viewStack.pop()); return; }
-    showExitConfirm();
+    try { history.pushState(null, ""); } catch (e) {}   // מלכודת מחדש כדי לא לצאת מהאפליקציה
+    if (modalOpen()) { closeModal(); return; }           // חלון פתוח → סגירה
+    if (viewStack.length) { restoreSnap(viewStack.pop()); return; }   // חזרה לעמוד הקודם
+    showExitConfirm();                                   // המסך הראשון → שאלת יציאה
   }
   function setupBackGuard() {
     try { history.pushState(null, ""); } catch (e) {}
     window.addEventListener("popstate", onPopState);
   }
   function showExitConfirm() {
+    if (modalOpen()) return;   // כבר פתוח — לא לפתוח שוב
     openModal(`
       <div class="m-title">יציאה מהאפליקציה</div>
       <div class="m-sub">להישאר או לצאת?</div>
@@ -147,7 +181,9 @@
   function performExit() {
     closeModal();
     window.removeEventListener("popstate", onPopState);
-    try { history.go(-2); } catch (e) {}
+    try { if (window.navigator && navigator.app && navigator.app.exitApp) { navigator.app.exitApp(); return; } } catch (e) {}
+    try { history.back(); } catch (e) {}
+    setTimeout(() => { try { window.close(); } catch (e) {} }, 80);
   }
 
   /* =======================================================================
@@ -226,7 +262,6 @@
      ראוטינג
      =======================================================================*/
   function go(route) {
-    if (view.route !== route) recordNav();
     view.route = route;
     if (route === "owner") localStorage.setItem(AUTHKEY, "1");
     localStorage.setItem(ROUTEKEY, route);
@@ -1769,6 +1804,7 @@
      רינדור ראשי
      =======================================================================*/
   function render() {
+    syncNav();   // הקלטת ניווט ל"אחורה" חכם (לפני הצגת המסך)
     if (view.onboarding) { document.title = "BarberTor — תורים לספרים"; $("#root").innerHTML = renderOnboarding(); return; }
     if (view.notFound) { document.title = "BarberTor"; $("#root").innerHTML = renderNotFound(); return; }
     if (!Store.get()) return;
@@ -2202,9 +2238,8 @@
       if (t.dataset.wait) { const [dk, tm] = t.dataset.wait.split("|"); openWaitlist(dk, tm); return; }
       if (t.dataset.day && t.classList.contains("day-chip")) { view.selDate = t.dataset.day; view.selSlot = null; render(); return; }
       if (t.dataset.oday) { view.oDate = t.dataset.oday; render(); return; }
-      if (t.dataset.tab) { if (view.clientTab !== t.dataset.tab) recordNav(); view.clientTab = t.dataset.tab; render(); return; }
+      if (t.dataset.tab) { view.clientTab = t.dataset.tab; render(); return; }
       if (t.dataset.otab) {
-        if (view.ownerTab !== t.dataset.otab) recordNav();
         view.ownerTab = t.dataset.otab;
         try { localStorage.setItem("ug_otab__" + SHOP, view.ownerTab); } catch (e2) {}
         render(); return;
