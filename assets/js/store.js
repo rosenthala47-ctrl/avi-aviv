@@ -44,6 +44,7 @@ UG.Store = (function () {
       ],
       bookings: [],
       contacts: [],          // ספר הלקוחות שהספר ייבא (שם + טלפון)
+      closedDates: [],       // ימי סגירה/חופשה מלאים: "YYYY-MM-DD"
       blocks: [],            // שעות שהבעלים סימן כלא-פנויות: "YYYY-MM-DD|HH:MM"
       waitlist: [],          // רשימת המתנה לשעות תפוסות
       alerts: [],            // "התפנה תור" — התראות ממתינות למשתמשים
@@ -64,6 +65,7 @@ UG.Store = (function () {
     if (!Array.isArray(s.services)) s.services = base.services;
     if (!Array.isArray(s.bookings)) s.bookings = [];
     if (!Array.isArray(s.contacts)) s.contacts = [];
+    if (!Array.isArray(s.closedDates)) s.closedDates = [];
     if (!Array.isArray(s.blocks)) s.blocks = [];
     if (!Array.isArray(s.waitlist)) s.waitlist = [];
     if (!Array.isArray(s.alerts)) s.alerts = [];
@@ -354,6 +356,19 @@ UG.Store = (function () {
     return persist();
   }
 
+  /* ---------- ימי סגירה / חופשה ---------- */
+  function addClosedDates(list) {
+    state.closedDates = state.closedDates || [];
+    const set = new Set(state.closedDates);
+    (list || []).forEach((k) => { if (/^\d{4}-\d{2}-\d{2}$/.test(k)) set.add(k); });
+    state.closedDates = [...set].sort();
+    return persist();
+  }
+  function removeClosedDate(key) {
+    state.closedDates = (state.closedDates || []).filter((k) => k !== key);
+    return persist();
+  }
+
   /* ---------- הזמנת תור (עם הגנה מפני כפילויות) ---------- */
   function buildBooking(cur, data) {
     const svc = cur.services.find((s) => s.id === data.serviceId);
@@ -519,7 +534,7 @@ UG.Store = (function () {
   return {
     init, subscribe, get,
     setDay, saveShop, upsertService, removeService,
-    addContacts, removeContact,
+    addContacts, removeContact, addClosedDates, removeClosedDate,
     createBooking, setBookingStatus, setBlock, deleteBooking,
     joinWaitlist, leaveWaitlist, consumeAlert, addReview, savePushToken,
     subscribeGallery, getGallery, addPhoto, removePhoto,

@@ -180,6 +180,47 @@
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
   padding: 9px 12px; font-size: 12.5px; color: var(--muted); line-height: 1.7; margin-bottom: 10px; direction: ltr; text-align: start;
 }
+/* הסבר "לקוח מיובא" */
+.info-note {
+  margin-top: 16px; background: var(--sky-glow); border: 1px solid var(--border);
+  border-radius: 13px; padding: 13px 15px;
+}
+.info-note b { font-size: 13.5px; }
+.info-note p { margin: 5px 0 0; font-size: 13px; color: var(--muted); line-height: 1.6; }
+/* תג "לא הגיע" */
+.status-noshow { background: var(--bad-bg); color: var(--bad); }
+.noshow-cnt { color: var(--bad); font-weight: 700; }
+/* חופשות — צ'יפים */
+.vac-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.vac-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px;
+  padding: 6px 8px 6px 13px; font-size: 13px; font-weight: 600;
+}
+.vac-chip button {
+  width: 22px; height: 22px; border-radius: 50%; border: none; cursor: pointer;
+  background: var(--bad-bg); color: var(--bad); font-weight: 800; font-size: 12px; line-height: 1;
+}
+/* קאבר בעמוד הלקוח */
+.client-cover {
+  margin: -4px 0 4px; border-radius: 16px; overflow: hidden; aspect-ratio: 16 / 7; background: var(--surface-2);
+}
+.client-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* תצוגה מקדימה של קאבר בהגדרות */
+.cover-preview {
+  border-radius: 12px; overflow: hidden; aspect-ratio: 16 / 7; background: var(--surface-2);
+  display: grid; place-items: center; color: var(--muted); font-size: 14px;
+}
+.cover-preview.has-img { color: transparent; }
+.cover-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* שעות פעילות */
+.hours-card { padding: 4px 16px; }
+.hours-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.hours-row:last-child { border-bottom: none; }
+.hours-row.today { font-weight: 800; }
+.hours-row.today .hr-time { color: var(--sky-2); }
+.hr-day { font-size: 14px; }
+.hr-time { font-size: 14px; color: var(--muted); font-weight: 600; }
 
 * , *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 

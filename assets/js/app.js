@@ -287,6 +287,7 @@
   // מחזיר לכל משבצת: האם תפוסה (תור קיים), האם חסומה ע״י הבעלים, האם עברה.
   function gridSlots(dateKey) {
     const st = Store.get();
+    if ((st.closedDates || []).includes(dateKey)) return [];   // יום חופשה/סגירה
     const dow = u.parseKey(dateKey).getDay();
     const sched = st.schedule[dow];
     if (!sched || !sched.active) return [];
@@ -591,17 +592,20 @@
     const service = services.find((s) => s.id === view.selService);
 
     // בורר ימים (14 יום)
+    const closed = new Set(st.closedDates || []);
+    const isOpen = (k) => st.schedule[u.parseKey(k).getDay()].active && !closed.has(k);
     const days = nextDays(14);
     if (!view.selDate || !days.includes(view.selDate)) {
-      view.selDate = days.find((k) => st.schedule[u.parseKey(k).getDay()].active) || days[0];
+      view.selDate = days.find(isOpen) || days[0];
     }
     const dayChips = days.map((k) => {
       const d = u.parseKey(k);
-      const off = !st.schedule[d.getDay()].active;
+      const vac = closed.has(k);
+      const off = !st.schedule[d.getDay()].active || vac;
       return `
       <button class="day-chip ${view.selDate === k ? "selected" : ""} ${off ? "off" : ""}"
               data-day="${k}" ${off ? "disabled" : ""}>
-        <div class="dc-dow">${off ? "סגור" : u.DOW_SHORT[d.getDay()]}</div>
+        <div class="dc-dow">${vac ? "חופשה" : off ? "סגור" : u.DOW_SHORT[d.getDay()]}</div>
         <div class="dc-num">${d.getDate()}</div>
         <div class="dc-mon">${u.MON[d.getMonth()]}</div>
       </button>`;
@@ -611,7 +615,9 @@
     let slotsHtml;
     const allSlots = gridSlots(view.selDate).filter((s) => !s.past && !s.blocked);
     const hasFree = allSlots.some((s) => !s.booking);
-    if (!st.schedule[u.parseKey(view.selDate).getDay()].active) {
+    if (closed.has(view.selDate)) {
+      slotsHtml = emptyState("🌴", "המספרה בחופשה ביום זה", "בחרו יום אחר מהיומן");
+    } else if (!st.schedule[u.parseKey(view.selDate).getDay()].active) {
       slotsHtml = emptyState("🚫", "סגור ביום זה", "בחרו יום אחר מהיומן");
     } else if (!allSlots.length || !hasFree) {
       slotsHtml = emptyState("⌛", "אין תורים פנויים", "כל התורים ליום זה תפוסים או שהיום הסתיים");
@@ -631,6 +637,7 @@
       : "בחרו שעה לתור";
 
     return `
+      ${st.shop.cover ? `<div class="client-cover"><img src="${esc(st.shop.cover)}" alt=""></div>` : ""}
       ${rescheduleBanner(st)}
       ${alertBanner(st)}
       ${notifBanner()}
@@ -648,6 +655,8 @@
       <div style="height:14px"></div>
       <button class="btn btn-primary" data-act="open-confirm" ${view.selSlot ? "" : "disabled"}>${ctaLabel}</button>
 
+      ${aboutCard(st)}
+      ${hoursCard(st)}
       ${installCard()}
       ${mapsCard(st)}
       ${shareCard()}
@@ -736,7 +745,7 @@
     const reviewed = new Set((st.reviews || []).filter((r) => r.userId === identity.userId).map((r) => r.bookingId));
     const now = Date.now();
     const o = st.bookings
-      .filter((x) => x.userId === identity.userId && x.status !== "cancelled")
+      .filter((x) => x.userId === identity.userId && x.status !== "cancelled" && x.status !== "noshow")
       .map((x) => ({ x, end: u.dateTime(x.date, x.end).getTime() }))
       .filter((o) => o.end < now && now - o.end < 14 * 86400000 && !reviewed.has(o.x.id) && !skip.has(o.x.id))
       .sort((a, z) => z.end - a.end)[0];
@@ -757,6 +766,32 @@
         <button class="btn btn-primary btn-sm" data-act="open-review" data-id="${b.id}">דרג</button>
       </div>
     </div>`;
+  }
+
+  /* ---------- כרטיס "קצת עלינו" ---------- */
+  function aboutCard(st) {
+    const about = (st.shop.about || "").trim();
+    if (!about) return "";
+    return `
+      <div class="section-title">✨ קצת עלינו</div>
+      <div class="card"><p style="margin:0;line-height:1.65;font-size:14.5px;white-space:pre-line">${esc(about)}</p></div>`;
+  }
+
+  /* ---------- כרטיס שעות פעילות ---------- */
+  function hoursCard(st) {
+    const todayDow = new Date().getDay();
+    const rows = [];
+    for (let i = 0; i < 7; i++) {
+      const d = st.schedule[i];
+      rows.push(`
+        <div class="hours-row ${i === todayDow ? "today" : ""}">
+          <span class="hr-day">${u.DOW[i]}${i === todayDow ? " · היום" : ""}</span>
+          <span class="hr-time" dir="ltr">${d.active ? `${esc(d.open)}–${esc(d.close)}` : "סגור"}</span>
+        </div>`);
+    }
+    return `
+      <div class="section-title">🕒 שעות פעילות</div>
+      <div class="card hours-card">${rows.join("")}</div>`;
   }
 
   /* ---------- כרטיס "איך מגיעים" ---------- */
@@ -1099,6 +1134,19 @@
     }
   }
 
+  async function handleCoverUpload(file) {
+    if (!file || !file.type || file.type.indexOf("image/") !== 0) { toast("נא לבחור קובץ תמונה", "", "🖼️"); return; }
+    toast("מעלה תמונת נושא…", "sky", "⏳");
+    try {
+      const dataUrl = await compressImage(file, 1200, 0.7);   // תמונה רחבה
+      await Store.saveShop({ cover: dataUrl });
+      toast("תמונת הנושא עודכנה ✓", "good", "🌄");
+      render();
+    } catch (e) {
+      toast("לא הצלחנו להעלות את התמונה", "", "⚠️");
+    }
+  }
+
   /* ---------- קוד QR לקישור הלקוחות (מקומי, ללא רשת) ---------- */
   function qrDataUrl(text, cell, margin) {
     try {
@@ -1380,10 +1428,27 @@
         </label>
       </div>`);
     }
+    const todayKey = u.dateKey(new Date());
+    const upcomingClosed = (st.closedDates || []).filter((k) => k >= todayKey).sort();
+    const closedList = upcomingClosed.length ? `
+      <div class="hint" style="margin:14px 0 8px;font-weight:700">תאריכים חסומים:</div>
+      <div class="vac-list">${upcomingClosed.map((k) => `
+        <span class="vac-chip">${esc(u.longDate(k))}<button data-act="del-vacation" data-key="${k}" aria-label="הסר">✕</button></span>`).join("")}</div>` : "";
     return `
       <div class="section-title">ימי הפעילות ושעות העבודה</div>
       <div class="card">${rows.join("")}</div>
       <p class="hint">כל שינוי נשמר מיד ומתעדכן אצל הלקוחות בזמן אמת. שעות העבודה קובעות אילו שעות מוצגות בלשונית ״יומן״.</p>
+
+      <div class="section-title">🌴 חופשות וסגירת תאריכים</div>
+      <div class="card">
+        <p class="hint" style="margin-top:0;margin-bottom:11px">חסמו יום בודד או טווח (חופשה) — הלקוחות לא יוכלו להזמין בתאריכים אלה.</p>
+        <div class="field-row">
+          <div class="field"><label>מתאריך</label><input class="input" id="vac-from" type="date" value="${todayKey}"></div>
+          <div class="field"><label>עד תאריך</label><input class="input" id="vac-to" type="date" value="${todayKey}"></div>
+        </div>
+        <button class="btn btn-primary btn-sm" data-act="add-vacation" style="width:100%">חסימת התאריכים</button>
+        ${closedList}
+      </div>
     `;
   }
 
@@ -1455,11 +1520,18 @@
 
     const row = (x, isPast) => {
       const b = x.b;
-      const stg = b.status === "confirmed"
+      const stg = b.status === "noshow"
+        ? `<span class="status-tag status-noshow">❌ לא הגיע</span>`
+        : b.status === "confirmed"
         ? `<span class="status-tag status-confirmed">✓ אישר הגעה</span>`
         : `<span class="status-tag status-booked">ממתין</span>`;
+      const action = !isPast
+        ? `<button class="btn btn-sm btn-danger" data-act="owner-cancel" data-id="${b.id}">בטל</button>`
+        : (b.status === "noshow"
+            ? `<button class="btn btn-sm" data-act="owner-unnoshow" data-id="${b.id}">בטל סימון</button>`
+            : `<button class="btn btn-sm" data-act="owner-noshow" data-id="${b.id}">לא הגיע</button>`);
       return `
-      <div class="booking" style="${isPast ? "opacity:.55" : ""}">
+      <div class="booking" style="${isPast ? "opacity:.6" : ""}">
         <div class="bk-time">
           <div class="bt-h">${esc(b.start)}</div>
           <div class="bt-d">${esc(u.relativeDay(b.date))}</div>
@@ -1471,7 +1543,7 @@
         </div>
         <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
           ${stg}
-          ${!isPast ? `<button class="btn btn-sm btn-danger" data-act="owner-cancel" data-id="${b.id}">בטל</button>` : ""}
+          ${action}
         </div>
       </div>`;
     };
@@ -1585,6 +1657,7 @@
       if (b.userName) c.name = b.userName;
       if (b.phone) c.phone = b.phone;
       if (b.status === "confirmed") { c.visits++; c.spent += Number(b.price || 0); }
+      if (b.status === "noshow") c.noShows = (c.noShows || 0) + 1;
       const ts = u.dateTime(b.date, b.start).getTime();
       if (ts > c.lastTs) { c.lastTs = ts; c.lastDate = b.date; c.imported = false; }
     });
@@ -1608,13 +1681,18 @@
             <div style="flex:1;min-width:0">
               <div class="bk-title">${esc(c.name)}${c.imported ? ` <span class="cli-badge">מיובא</span>` : ""}</div>
               <div class="bk-sub">${c.phone ? `<a href="tel:${esc(c.phone)}">${esc(c.phone)}</a>` : "ללא טלפון"}</div>
-              <div class="bk-sub">${c.imported ? "עדיין לא הזמין תור" : `${c.visits} ביקורים · <b>${u.fmtPrice(c.spent)}</b> · אחרון ${esc(u.relativeDay(c.lastDate))}`}</div>
+              <div class="bk-sub">${c.imported ? "עדיין לא הזמין תור" : `${c.visits} ביקורים · <b>${u.fmtPrice(c.spent)}</b> · אחרון ${esc(u.relativeDay(c.lastDate))}`}${c.noShows ? ` · <span class="noshow-cnt">❌ ${c.noShows} לא הגיע</span>` : ""}</div>
             </div>
             ${c.imported
               ? `<button class="btn btn-sm" data-act="del-contact" data-id="${esc(c.contactId)}">הסר</button>`
               : `<button class="btn btn-sm" data-act="client-detail" data-key="${esc(c.key)}">פרטים</button>`}
           </div>
         </div>`).join("")}
+      ${clients.some((c) => c.imported) ? `
+      <div class="info-note">
+        <b>ℹ️ מה זה "לקוח מיובא"?</b>
+        <p>לקוח שהוספת מרשימת הלקוחות שלך אך עדיין לא הזמין תור. ברגע שיזמין תור (או שתקבע לו תור ידני) — הוא יהפוך ללקוח מלא עם היסטוריית ביקורים והכנסות, והתג ייעלם.</p>
+      </div>` : ""}
     `;
   }
 
@@ -1937,6 +2015,7 @@
 
   function ownerSettings(st) {
     const logo = st.shop.logo || "";
+    const cover = st.shop.cover || "";
     return `
       <div class="section-title">🖼️ לוגו המספרה</div>
       <div class="card">
@@ -1953,6 +2032,16 @@
             <input type="file" accept="image/*" data-logofile style="display:none">
           </div>
         </div>
+      </div>
+      <div class="section-title">🌄 תמונת נושא (קאבר)</div>
+      <div class="card">
+        <div class="cover-preview${cover ? " has-img" : ""}">${cover ? `<img src="${esc(cover)}" alt="קאבר">` : "🌄 אין תמונת נושא"}</div>
+        <div class="hint" style="margin:11px 0">תמונה רחבה שתופיע בראש עמוד ההזמנה של הלקוחות — נותנת מראה מקצועי.</div>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-sm" data-act="cover-pick">${cover ? "החלפת תמונה" : "העלאת תמונה"}</button>
+          ${cover ? `<button class="btn btn-danger btn-sm" data-act="cover-remove">הסרה</button>` : ""}
+        </div>
+        <input type="file" accept="image/*" data-coverfile style="display:none">
       </div>
       <div class="section-title">🔗 הקישור שלך ללקוחות</div>
       <div class="card">
@@ -1991,6 +2080,8 @@
           <input class="input" id="set-name" value="${esc(st.shop.name)}"></div>
         <div class="field"><label>תיאור קצר</label>
           <input class="input" id="set-tag" value="${esc(st.shop.tagline || "")}"></div>
+        <div class="field"><label>קצת עלינו (יוצג ללקוחות בעמוד ההזמנה)</label>
+          <textarea class="input" id="set-about" rows="3" placeholder="ספרו על המספרה — ותק, התמחות, אווירה…" style="resize:vertical;line-height:1.6">${esc(st.shop.about || "")}</textarea></div>
         <div class="field"><label>כתובת המספרה (לכפתור ״איך מגיעים״)</label>
           <input class="input" id="set-addr" value="${esc(st.shop.address || "")}" placeholder="רבי טרפון 12, ירושלים"></div>
         <div class="field-row">
@@ -2623,6 +2714,10 @@
         case "logo-remove":
           await Store.saveShop({ logo: "" });
           toast("הלוגו הוסר", "", "🗑️"); render(); break;
+        case "cover-pick": { const inp = $("[data-coverfile]"); if (inp) inp.click(); break; }
+        case "cover-remove":
+          await Store.saveShop({ cover: "" });
+          toast("תמונת הנושא הוסרה", "", "🗑️"); render(); break;
         case "share-app": shareApp(); break;
         case "share-wa": {
           const stw = Store.get();
@@ -2786,6 +2881,31 @@
           await Store.removeContact(t.dataset.id);
           toast("הלקוח הוסר מהרשימה", "", "🗑️"); render(); break;
 
+        // סימון "לא הגיע"
+        case "owner-noshow":
+          await Store.setBookingStatus(t.dataset.id, "noshow", "owner");
+          toast("סומן: הלקוח לא הגיע", "", "❌"); render(); break;
+        case "owner-unnoshow":
+          await Store.setBookingStatus(t.dataset.id, "booked", "owner");
+          toast("הסימון בוטל", "", "↩️"); render(); break;
+
+        // חופשות / חסימת תאריכים
+        case "add-vacation": {
+          const from = ($("#vac-from") && $("#vac-from").value) || "";
+          const to = ($("#vac-to") && $("#vac-to").value) || from;
+          if (!from) { toast("בחרו תאריך", "", "✋"); break; }
+          const a = from, b2 = (to && to >= from) ? to : from;
+          const list = []; let cur = u.parseKey(a); const end = u.parseKey(b2);
+          let guard = 0;
+          while (cur <= end && guard++ < 400) { list.push(u.dateKey(cur)); cur.setDate(cur.getDate() + 1); }
+          await Store.addClosedDates(list);
+          toast(list.length > 1 ? `נחסמו ${list.length} תאריכים 🌴` : "התאריך נחסם 🌴", "good", "🌴");
+          render(); break;
+        }
+        case "del-vacation":
+          await Store.removeClosedDate(t.dataset.key);
+          toast("התאריך נפתח מחדש", "good", "✓"); render(); break;
+
         // שירותים
         case "add-svc": svcModal(null); break;
         case "edit-svc": {
@@ -2826,6 +2946,11 @@
       }
       if (a.dataset.logofile !== undefined && a.type === "file") {
         if (a.files && a.files[0]) handleLogoUpload(a.files[0]);
+        a.value = "";
+        return;
+      }
+      if (a.dataset.coverfile !== undefined && a.type === "file") {
+        if (a.files && a.files[0]) handleCoverUpload(a.files[0]);
         a.value = "";
         return;
       }
@@ -2956,6 +3081,7 @@
     await Store.saveShop({
       name: $("#set-name").value.trim() || "המספרה",
       tagline: $("#set-tag").value.trim(),
+      about: ($("#set-about") && $("#set-about").value.trim()) || "",
       address: $("#set-addr").value.trim(),
       phone: $("#set-phone").value.trim(),
       slotStep: Number($("#set-step").value),
