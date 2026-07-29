@@ -35,6 +35,7 @@ UG.Store = (function () {
       shop: {
         name: d.shopName, tagline: d.tagline, phone: d.phone, address: d.address,
         slotStep: d.slotStep, reminderMinutes: d.reminderMinutes,
+        staff: [],           // שמות הספרים (אם יש כמה) — לבחירת ספר מועדף ע״י הלקוח
       },
       schedule,
       services: [
@@ -42,6 +43,7 @@ UG.Store = (function () {
         { id: u.uid(), name: "זקן ועיצוב", price: 40, durationMin: 20, icon: "🧔", active: true },
       ],
       bookings: [],
+      contacts: [],          // ספר הלקוחות שהספר ייבא (שם + טלפון)
       blocks: [],            // שעות שהבעלים סימן כלא-פנויות: "YYYY-MM-DD|HH:MM"
       waitlist: [],          // רשימת המתנה לשעות תפוסות
       alerts: [],            // "התפנה תור" — התראות ממתינות למשתמשים
@@ -61,10 +63,12 @@ UG.Store = (function () {
     for (let i = 0; i < 7; i++) s.schedule[i] = Object.assign({}, base.schedule[i], s.schedule[i]);
     if (!Array.isArray(s.services)) s.services = base.services;
     if (!Array.isArray(s.bookings)) s.bookings = [];
+    if (!Array.isArray(s.contacts)) s.contacts = [];
     if (!Array.isArray(s.blocks)) s.blocks = [];
     if (!Array.isArray(s.waitlist)) s.waitlist = [];
     if (!Array.isArray(s.alerts)) s.alerts = [];
     if (!Array.isArray(s.reviews)) s.reviews = [];
+    if (!Array.isArray(s.shop.staff)) s.shop.staff = [];
     if (!s.shop.address) s.shop.address = base.shop.address;
     // ניקוי רשומות שפג תוקפן (שעת התור כבר עברה)
     const nowTs = Date.now();
@@ -260,6 +264,10 @@ UG.Store = (function () {
     s.shop.address = (data && data.address) || "";
     s.shop.ownerName = (data && data.ownerName) || "";
     s.shop.style = (data && data.style) || "sky";
+    // שמות הספרים (אם המספרה בחרה כמה ספרים בשאלון)
+    if (data && Array.isArray(data.staff)) {
+      s.shop.staff = data.staff.map((n) => String(n || "").trim()).filter(Boolean);
+    }
     // שירותים שנבחרו בשאלון (אם יש) — אחרת ברירת המחדל
     if (data && Array.isArray(data.services) && data.services.length) {
       s.services = data.services
@@ -322,6 +330,30 @@ UG.Store = (function () {
     return persist();
   }
 
+  /* ---------- ספר לקוחות (ייבוא) ---------- */
+  // מוסיף רשימת אנשי קשר {name, phone}; מדלג על כפילויות. מחזיר כמה נוספו בפועל.
+  function addContacts(list) {
+    state.contacts = state.contacts || [];
+    const key = (n, p) => (String(p || "").replace(/\D/g, "")) + "|" + String(n || "").trim();
+    const seen = new Set(state.contacts.map((c) => key(c.name, c.phone)));
+    let added = 0;
+    (list || []).forEach((c) => {
+      const name = String((c && c.name) || "").trim();
+      const phone = String((c && c.phone) || "").trim();
+      if (!name && !phone) return;
+      const k = key(name, phone);
+      if (seen.has(k)) return;
+      seen.add(k);
+      state.contacts.push({ id: u.uid(), name, phone });
+      added++;
+    });
+    return persist().then(() => added);
+  }
+  function removeContact(id) {
+    state.contacts = (state.contacts || []).filter((c) => c.id !== id);
+    return persist();
+  }
+
   /* ---------- הזמנת תור (עם הגנה מפני כפילויות) ---------- */
   function buildBooking(cur, data) {
     const svc = cur.services.find((s) => s.id === data.serviceId);
@@ -346,6 +378,7 @@ UG.Store = (function () {
       serviceId: svc.id, serviceName: svc.name, price: svc.price, durationMin: svc.durationMin,
       date: data.date, start: data.start, end: u.toHHMM(endMin),
       userId: data.userId, userName: data.userName, phone: data.phone || "", email: data.email || "",
+      staff: data.staff || "",   // ספר מועדף שהלקוח ביקש (בקשה בלבד — לא מובטח)
       status: "booked", createdAt: Date.now(),
     };
     cur.bookings.push(booking);
@@ -486,6 +519,7 @@ UG.Store = (function () {
   return {
     init, subscribe, get,
     setDay, saveShop, upsertService, removeService,
+    addContacts, removeContact,
     createBooking, setBookingStatus, setBlock, deleteBooking,
     joinWaitlist, leaveWaitlist, consumeAlert, addReview, savePushToken,
     subscribeGallery, getGallery, addPhoto, removePhoto,

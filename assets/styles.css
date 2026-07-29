@@ -136,6 +136,51 @@
 .wiz-svc-head .h-dur { flex: .8; text-align: center; }
 .wiz-svc-head .h-sp { flex: none; width: 38px; }
 
+/* בחירת מספר ספרים (אשף) */
+.staff-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+.staff-opt {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 16px 10px; border-radius: 15px; background: var(--surface-2);
+  border: 1.5px solid var(--border); position: relative; cursor: pointer;
+}
+.staff-opt.selected { border-color: var(--sky); box-shadow: 0 0 0 3px var(--sky-glow); }
+.staff-opt:active { transform: scale(.99); }
+.staff-opt .stm-emoji { font-size: 30px; }
+.staff-opt .stm-name { font-weight: 700; font-size: 14.5px; }
+.staff-opt .so-check { position: absolute; top: 8px; inset-inline-end: 10px; font-size: 16px; color: var(--sky); opacity: 0; }
+.staff-opt.selected .so-check { opacity: 1; }
+.wiz-staff-row { display: flex; gap: 8px; align-items: center; margin-bottom: 9px; }
+.wiz-staff-row .input { height: 48px; font-size: 15px; text-align: start; flex: 1; }
+.wiz-staff-row .sv-del {
+  flex: none; width: 38px; height: 38px; border-radius: 11px;
+  background: var(--bad-bg); color: var(--bad); border: 1px solid rgba(248,113,113,.35);
+  font-size: 15px; font-weight: 800; display: grid; place-items: center;
+}
+/* כוכבית "לא מחייב" + בקשת ספר */
+.opt-star { color: var(--sky); font-weight: 800; }
+.staff-req { color: var(--sky-2); font-weight: 700; }
+/* צ'יפים של ספרים בהגדרות */
+.staff-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.staff-chip {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px;
+  padding: 6px 13px; font-size: 13.5px; font-weight: 600;
+}
+/* כרטיס "קבע שוב כמו פעם קודמת" */
+.again-card { display: flex; align-items: center; gap: 13px; padding: 14px 16px; }
+.again-ico { font-size: 26px; flex: none; }
+.again-body { flex: 1; min-width: 0; }
+.again-body b { font-size: 15px; }
+/* תג לקוח מיובא */
+.cli-badge {
+  font-size: 10.5px; font-weight: 700; color: var(--sky-2);
+  background: var(--sky-glow); border-radius: 6px; padding: 1px 6px; vertical-align: middle;
+}
+/* דוגמת ייבוא */
+.import-eg {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+  padding: 9px 12px; font-size: 12.5px; color: var(--muted); line-height: 1.7; margin-bottom: 10px; direction: ltr; text-align: start;
+}
+
 * , *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html { -webkit-text-size-adjust: 100%; }

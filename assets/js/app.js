@@ -67,6 +67,7 @@
     clientTab: "book",   // book | gallery | mine
     ownerTab: (function () { try { return localStorage.getItem("ug_otab__" + SHOP) || "cal"; } catch (e) { return "cal"; } })(),  // cal | hours | services | bookings | clients | report | publish | settings
     selService: null,
+    selStaff: "",        // ספר מועדף שהלקוח בחר (בקשה בלבד)
     selDate: null,       // יום נבחר בצד הלקוח
     selSlot: null,
     rescheduleId: null,  // מזהה תור בעת שינוי מועד (החלפת מועד לתור קיים)
@@ -804,8 +805,11 @@
       const st2 = b.status === "confirmed"
         ? `<span class="status-tag status-confirmed">✓ אושר</span>`
         : `<span class="status-tag status-booked">ממתין</span>`;
-      const actions = isPast ? "" : `
-        <div class="btn-row btn-row-wrap" style="margin-top:12px">
+      const actions = isPast
+        ? `<div class="btn-row" style="margin-top:12px">
+             <button class="btn btn-sm" data-act="book-again" data-service="${esc(b.serviceId)}" data-staff="${esc(b.staff || "")}">🔁 קבע שוב</button>
+           </div>`
+        : `<div class="btn-row btn-row-wrap" style="margin-top:12px">
           ${b.status !== "confirmed" ? `<button class="btn btn-sm" data-act="confirm-arrival" data-id="${b.id}">אשר הגעה</button>` : ""}
           <button class="btn btn-sm" data-act="reschedule" data-id="${b.id}">🔄 שינוי מועד</button>
           <button class="btn btn-sm" data-act="add-cal" data-id="${b.id}">📅 ליומן</button>
@@ -828,6 +832,19 @@
       </div>`;
     };
     let html = alertBanner(st) + reviewBanner(st);
+    // "קבע שוב כמו פעם קודמת" — קיצור מהיר על בסיס התור האחרון (לקוחות חוזרים)
+    const lastBk = past.length ? past[0].b : null;
+    if (lastBk) {
+      html += `
+      <div class="card again-card">
+        <div class="again-ico">🔁</div>
+        <div class="again-body">
+          <b>קבע שוב כמו פעם קודמת</b>
+          <div class="hint">${esc(lastBk.serviceName)}${lastBk.staff ? " · עם " + esc(lastBk.staff) : ""}</div>
+        </div>
+        <button class="btn btn-primary btn-sm" data-act="book-again" data-service="${esc(lastBk.serviceId)}" data-staff="${esc(lastBk.staff || "")}">קבע שוב</button>
+      </div>`;
+    }
     if (upcoming.length) {
       html += `<div class="section-title">תורים קרובים</div>` + upcoming.map((x) => card(x, false)).join("");
     }
@@ -893,6 +910,14 @@
       <div class="summary-row"><span class="sr-k">משך</span><span class="sr-v">${u.fmtDuration(service.durationMin)}</span></div>
       <div class="summary-row"><span class="sr-k">מחיר</span><span class="sr-v big">${u.fmtPrice(service.price)}</span></div>
       <div style="height:18px"></div>
+      ${(st.shop.staff && st.shop.staff.length) ? `
+      <div class="field"><label>ספר מועדף <span class="opt-star">*</span></label>
+        <select class="input" id="cf-staff">
+          <option value="">אין העדפה</option>
+          ${st.shop.staff.map((n) => `<option value="${esc(n)}" ${view.selStaff === n ? "selected" : ""}>${esc(n)}</option>`).join("")}
+        </select>
+        <div class="hint" style="margin-top:5px">* בקשה בלבד — ייתכן שהתור יתקיים עם ספר אחר.</div>
+      </div>` : ""}
       <div class="field-row">
         <div class="field"><label>שם פרטי</label>
           <input class="input" id="cf-first" placeholder="שם פרטי" value="${esc(identity.firstName || "")}"></div>
@@ -954,10 +979,14 @@
     if (!contact) return;
     const bookedDate = view.selDate, bookedStart = view.selSlot;
     const reschedId = view.rescheduleId;
+    const staffEl = $("#cf-staff");
+    const staff = staffEl ? staffEl.value : (view.selStaff || "");
+    view.selStaff = staff;
     const btn = $("[data-act='do-book']"); if (btn) { btn.disabled = true; btn.textContent = reschedId ? "מעדכן…" : "קובע תור…"; }
     const res = await Store.createBooking({
       serviceId: view.selService, date: bookedDate, start: bookedStart,
       userId: identity.userId, userName: contact.name, phone: contact.phone, email: contact.email,
+      staff: staff,
       excludeBookingId: reschedId || undefined,   // אל תתנגש עם התור המקורי בעת שינוי מועד
     });
     if (!res.ok) {
@@ -1438,7 +1467,7 @@
         <div class="bk-body">
           <div class="bk-title">${esc(b.userName || "לקוח")}</div>
           <div class="bk-sub">${esc(b.serviceName)} · ${b.phone ? `<a href="tel:${esc(b.phone)}">${esc(b.phone)}</a>` : "ללא טלפון"}</div>
-          <div class="bk-sub">${esc(u.longDate(b.date))}</div>
+          <div class="bk-sub">${esc(u.longDate(b.date))}${b.staff ? ` · <span class="staff-req">🧑‍🔧 ביקש: ${esc(b.staff)}</span>` : ""}</div>
         </div>
         <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
           ${stg}
@@ -1460,11 +1489,25 @@
     const svcOptions = st.services.map((s) => `<option value="${s.id}">${esc(s.name)} · ${u.fmtDuration(s.durationMin)}</option>`).join("");
     const hourOptions = Array.from({ length: 24 }, (_, h) => { const v = String(h).padStart(2, "0"); return `<option value="${v}">${v}</option>`; }).join("");
     const minOptions = ["00", "15", "30", "45"].map((m) => `<option value="${m}">${m}</option>`).join("");
+    const contacts = (st.contacts || []).slice().sort((a, b) => (a.name || "").localeCompare(b.name || "", "he"));
+    const staff = st.shop.staff || [];
     openModal(`
       <div class="m-title">הוספת תור ידני</div>
       <div class="m-sub">אפשר לקבוע בכל שעה — גם מחוץ לשעות הפעילות</div>
+      ${contacts.length ? `
+      <div class="field"><label>בחירת לקוח קיים (לא חובה)</label>
+        <select class="input" id="ab-contact">
+          <option value="">— לקוח חדש —</option>
+          ${contacts.map((c) => `<option value="${esc(c.id)}" data-name="${esc(c.name)}" data-phone="${esc(c.phone)}">${esc(c.name)}${c.phone ? " · " + esc(c.phone) : ""}</option>`).join("")}
+        </select></div>` : ""}
       <div class="field"><label>שירות</label>
         <select class="input" id="ab-svc">${svcOptions}</select></div>
+      ${staff.length ? `
+      <div class="field"><label>ספר</label>
+        <select class="input" id="ab-staff">
+          <option value="">— ללא —</option>
+          ${staff.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("")}
+        </select></div>` : ""}
       <div class="field"><label>תאריך</label>
         <input class="input" id="ab-date" type="date" value="${today}"></div>
       <div class="field"><label>שעה</label>
@@ -1484,6 +1527,15 @@
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
     `);
     const hs = $("#ab-hour"); if (hs) hs.value = String(new Date().getHours()).padStart(2, "0");
+    // בחירת לקוח קיים — מילוי אוטומטי של שם וטלפון
+    const cs = $("#ab-contact");
+    if (cs) cs.addEventListener("change", () => {
+      const opt = cs.options[cs.selectedIndex];
+      if (opt && opt.value) {
+        if ($("#ab-name")) $("#ab-name").value = opt.dataset.name || "";
+        if ($("#ab-phone")) $("#ab-phone").value = opt.dataset.phone || "";
+      }
+    });
     setTimeout(() => $("#ab-name") && $("#ab-name").focus(), 100);
   }
 
@@ -1501,10 +1553,11 @@
     const phone = phoneRaw ? u.fmtPhone(phoneRaw) : "";
     const email = ($("#ab-email") && $("#ab-email").value.trim()) || "";
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("כתובת אימייל לא תקינה", "", "📧"); return; }
+    const staff = ($("#ab-staff") && $("#ab-staff").value) || "";
     const res = await Store.createBooking({
       serviceId: svcId, date, start,
       userId: "owner:" + (phone ? u.normalizePhone(phone) : u.uid()),
-      userName: name, phone, email,
+      userName: name, phone, email, staff,
     });
     if (!res.ok) { toast(res.reason || "לא ניתן לקבוע את התור", "", "⚠️"); return; }
     closeModal(); toast("התור נוסף ✓", "good", "➕");
@@ -1517,6 +1570,14 @@
 
   function ownerClients(st) {
     const map = new Map();
+    // אנשי הקשר שיובאו — מופיעים גם אם עדיין לא הזמינו תור
+    (st.contacts || []).forEach((c) => {
+      const key = (c.phone && u.normalizePhone(c.phone)) || c.name || c.id;
+      if (!map.has(key)) map.set(key, {
+        key, name: c.name || "לקוח", phone: c.phone || "", visits: 0, spent: 0,
+        lastTs: 0, lastDate: null, contactId: c.id, imported: true,
+      });
+    });
     st.bookings.filter((b) => b.status !== "cancelled").forEach((b) => {
       const key = clientKey(b);
       let c = map.get(key);
@@ -1525,13 +1586,15 @@
       if (b.phone) c.phone = b.phone;
       if (b.status === "confirmed") { c.visits++; c.spent += Number(b.price || 0); }
       const ts = u.dateTime(b.date, b.start).getTime();
-      if (ts > c.lastTs) { c.lastTs = ts; c.lastDate = b.date; }
+      if (ts > c.lastTs) { c.lastTs = ts; c.lastDate = b.date; c.imported = false; }
     });
     const clients = [...map.values()].sort((a, z) => z.lastTs - a.lastTs);
-    if (!clients.length) return emptyState("👥", "אין עדיין לקוחות", "לקוחות יופיעו כאן אחרי שיזמינו תור");
+    const importBtn = `<button class="btn btn-primary" data-act="import-clients" style="margin-bottom:14px">📥 ייבוא רשימת לקוחות</button>`;
+    if (!clients.length) return importBtn + emptyState("👥", "אין עדיין לקוחות", "ייבאו את רשימת הלקוחות שלכם, או שהם יופיעו כאן אחרי שיזמינו תור");
     const totalSpent = clients.reduce((s, c) => s + c.spent, 0);
     const totalVisits = clients.reduce((s, c) => s + c.visits, 0);
     return `
+      ${importBtn}
       <div class="stat-chips">
         <div class="stat-chip"><div class="sc-num">${clients.length}</div><div class="sc-lbl">לקוחות</div></div>
         <div class="stat-chip"><div class="sc-num">${totalVisits}</div><div class="sc-lbl">ביקורים</div></div>
@@ -1543,14 +1606,59 @@
           <div style="display:flex;align-items:center;gap:12px">
             <div class="cli-ava">${esc((String(c.name).trim()[0]) || "?")}</div>
             <div style="flex:1;min-width:0">
-              <div class="bk-title">${esc(c.name)}</div>
+              <div class="bk-title">${esc(c.name)}${c.imported ? ` <span class="cli-badge">מיובא</span>` : ""}</div>
               <div class="bk-sub">${c.phone ? `<a href="tel:${esc(c.phone)}">${esc(c.phone)}</a>` : "ללא טלפון"}</div>
-              <div class="bk-sub">${c.visits} ביקורים · <b>${u.fmtPrice(c.spent)}</b> · אחרון ${esc(u.relativeDay(c.lastDate))}</div>
+              <div class="bk-sub">${c.imported ? "עדיין לא הזמין תור" : `${c.visits} ביקורים · <b>${u.fmtPrice(c.spent)}</b> · אחרון ${esc(u.relativeDay(c.lastDate))}`}</div>
             </div>
-            <button class="btn btn-sm" data-act="client-detail" data-key="${esc(c.key)}">פרטים</button>
+            ${c.imported
+              ? `<button class="btn btn-sm" data-act="del-contact" data-id="${esc(c.contactId)}">הסר</button>`
+              : `<button class="btn btn-sm" data-act="client-detail" data-key="${esc(c.key)}">פרטים</button>`}
           </div>
         </div>`).join("")}
     `;
+  }
+
+  /* מודאל ייבוא לקוחות — הדבקת רשימה (שם + טלפון בכל שורה) */
+  function openImportClients() {
+    openModal(`
+      <div class="m-title">📥 ייבוא רשימת לקוחות</div>
+      <div class="m-sub">הדביקו שורה לכל לקוח — שם וטלפון</div>
+      <p class="hint" style="margin:8px 0 6px">כל שורה: <b>שם, טלפון</b> · לדוגמה:</p>
+      <div class="import-eg">דני כהן, 050-1234567<br>מאיה לוי 0529876543<br>יוסי</div>
+      <textarea class="input" id="imp-text" rows="7" placeholder="דני כהן, 050-1234567
+מאיה לוי, 052-9876543" style="resize:vertical;line-height:1.6"></textarea>
+      <button class="btn btn-primary" data-act="do-import-clients" style="margin-top:12px">ייבוא</button>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
+    `);
+    setTimeout(() => $("#imp-text") && $("#imp-text").focus(), 100);
+  }
+
+  // ניתוח טקסט חופשי לרשימת {name, phone}. הטלפון = רצף הספרות בשורה; השם = השאר.
+  function parseContactsText(text) {
+    return (text || "").split(/\r?\n/).map((line) => {
+      const raw = line.trim();
+      if (!raw) return null;
+      const phoneMatch = raw.match(/[0-9][0-9\-\s()+]{6,}/);
+      let phone = "", name = raw;
+      if (phoneMatch) {
+        phone = phoneMatch[0].replace(/[^\d+]/g, "");
+        name = raw.replace(phoneMatch[0], "").replace(/[,;|\t]+/g, " ").trim();
+      } else {
+        name = raw.replace(/[,;|\t]+/g, " ").trim();
+      }
+      if (!name && !phone) return null;
+      return { name: name || "לקוח", phone };
+    }).filter(Boolean);
+  }
+
+  async function doImportClients() {
+    const text = ($("#imp-text") && $("#imp-text").value) || "";
+    const list = parseContactsText(text);
+    if (!list.length) { toast("לא נמצאו לקוחות בטקסט", "", "✋"); return; }
+    const added = await Store.addContacts(list);
+    closeModal();
+    toast(added ? `יובאו ${added} לקוחות ✓` : "כל הלקוחות כבר קיימים", added ? "good" : "sky", "📥");
+    render();
   }
 
   function clientDetail(key) {
@@ -1725,6 +1833,43 @@
     `;
   }
 
+  /* ---------- עורך רשימת הספרים (בהגדרות) ---------- */
+  let staffEdit = [];
+  function staffEditorBody() {
+    return (staffEdit.length ? staffEdit : [""]).map((n, i) => `
+      <div class="wiz-staff-row" data-staff-row="${i}">
+        <input class="input st-name" placeholder="שם הספר" value="${esc(n || "")}">
+        <button type="button" class="sv-del" data-act="stf-del" data-i="${i}" aria-label="מחיקה">✕</button>
+      </div>`).join("");
+  }
+  function captureStaffEdit() {
+    const list = $("#stf-list"); if (!list) return;
+    staffEdit = [...list.querySelectorAll(".st-name")].map((el) => el.value.trim());
+  }
+  function refreshStaffEditor() { const l = $("#stf-list"); if (l) l.innerHTML = staffEditorBody(); }
+  function openStaffEditor() {
+    const st = Store.get();
+    staffEdit = (st.shop.staff || []).slice();
+    if (!staffEdit.length) staffEdit = [""];
+    openModal(`
+      <div class="m-title">🧑‍🔧 ספרים במספרה</div>
+      <div class="m-sub">הלקוח יוכל לבקש ספר מסוים בעת ההזמנה</div>
+      <div id="stf-list" style="margin-top:12px">${staffEditorBody()}</div>
+      <button type="button" class="btn btn-sm" data-act="stf-add" style="width:100%;margin-top:6px">＋ הוספת ספר</button>
+      <button class="btn btn-primary" data-act="save-staff" style="margin-top:12px">שמירה</button>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
+    `);
+    setTimeout(() => { const el = $("#stf-list .st-name"); if (el) el.focus(); }, 100);
+  }
+  async function saveStaff() {
+    captureStaffEdit();
+    const names = staffEdit.map((n) => (n || "").trim()).filter(Boolean);
+    await Store.saveShop({ staff: names });
+    closeModal();
+    toast("רשימת הספרים נשמרה ✓", "good", "🧑‍🔧");
+    render();
+  }
+
   function confirmDeleteBooking(id) {
     const b = Store.get().bookings.find((x) => x.id === id);
     if (!b) return;
@@ -1829,6 +1974,14 @@
             <span class="so-body"><span class="so-name">${esc(s.name)}</span><span class="hint" style="display:block">${esc(s.desc)}</span></span>
             <span class="so-check">✓</span>
           </button>`).join("")}</div>
+      </div>
+      <div class="section-title">🧑‍🔧 ספרים במספרה</div>
+      <div class="card">
+        <p class="hint" style="margin-top:0;margin-bottom:${(st.shop.staff || []).length ? "10px" : "12px"}">${(st.shop.staff || []).length
+          ? "הלקוחות יכולים לבקש ספר מסוים בעת ההזמנה (בקשה בלבד — לא התחייבות)."
+          : "אין ספרים מוגדרים. הוסיפו שמות כדי לאפשר ללקוח לבחור ספר מועדף."}</p>
+        ${(st.shop.staff || []).length ? `<div class="staff-chips">${st.shop.staff.map((n) => `<span class="staff-chip">🧑 ${esc(n)}</span>`).join("")}</div>` : ""}
+        <button class="btn btn-sm" data-act="edit-staff" style="margin-top:12px">${(st.shop.staff || []).length ? "עריכת רשימת הספרים" : "＋ הוספת ספרים"}</button>
       </div>
       ${ownerSecuritySection(st)}
       ${ownerGallerySection()}
@@ -1937,6 +2090,7 @@
     data: {
       owner: "", name: "", handle: "", phone: "", city: "", street: "", houseNo: "", address: "",
       services: [{ name: "תספורת גבר", price: 60, durationMin: 30 }],
+      multiStaff: false, staff: [""],
       style: "sky", pass: "", pass2: "",
     },
   };
@@ -1945,7 +2099,7 @@
     const line1 = [d.street, d.houseNo].filter(Boolean).join(" ").trim();
     return [line1, d.city].filter(Boolean).join(", ").trim();
   }
-  const WIZ_QUESTIONS = 7;   // שלבים 1..7 הם שאלות
+  const WIZ_QUESTIONS = 8;   // שלבים 1..8 הם שאלות
 
   // רטט קצר למשוב מגע (נתמך באנדרואיד; באייפון פשוט מתעלם)
   function haptic(ms) { try { if (navigator.vibrate) navigator.vibrate(ms || 12); } catch (e) {} }
@@ -1998,6 +2152,21 @@
              </div>`).join("")}</div>
            <button type="button" class="btn btn-sm" data-act="wiz-svc-add" style="width:100%;margin-top:6px">＋ הוספת שירות</button>`);
       case 6:
+        return wizQ("🧑‍🔧", "כמה ספרים עובדים אצלכם?", "אם יש כמה ספרים, הלקוח יוכל לבקש ספר מסוים בעת הזמנת התור (בקשה בלבד — לא התחייבות).",
+          `<div class="staff-mode">
+             <button type="button" class="staff-opt ${!d.multiStaff ? "selected" : ""}" data-act="wiz-staff-mode" data-multi="0">
+               <span class="stm-emoji">🧑</span><span class="stm-name">ספר יחיד</span><span class="so-check">✓</span></button>
+             <button type="button" class="staff-opt ${d.multiStaff ? "selected" : ""}" data-act="wiz-staff-mode" data-multi="1">
+               <span class="stm-emoji">🧑‍🤝‍🧑</span><span class="stm-name">כמה ספרים</span><span class="so-check">✓</span></button>
+           </div>
+           ${d.multiStaff ? `<div id="wz-staff-list" style="margin-top:14px">${(d.staff || [""]).map((n, i) => `
+             <div class="wiz-staff-row" data-staff-row="${i}">
+               <input class="input st-name" placeholder="שם הספר" value="${esc(n || "")}">
+               <button type="button" class="sv-del" data-act="wiz-staff-del" data-i="${i}" aria-label="מחיקה">✕</button>
+             </div>`).join("")}
+             <button type="button" class="btn btn-sm" data-act="wiz-staff-add" style="width:100%;margin-top:6px">＋ הוספת ספר</button>
+           </div>` : ""}`);
+      case 7:
         return wizQ("🎨", "בחרו סגנון עיצוב", "ככה ייראה האתר שלכם — גם אצלכם וגם אצל הלקוחות. אפשר לשנות בכל רגע מההגדרות.",
           `<div class="style-picker">${WIZ_STYLES.map((s) => `
              <button type="button" class="style-opt ${d.style === s.id ? "selected" : ""}" data-act="wiz-style" data-style="${s.id}">
@@ -2005,7 +2174,7 @@
                <span class="so-body"><span class="so-name">${esc(s.name)}</span><span class="hint" style="display:block">${esc(s.desc)}</span></span>
                <span class="so-check">✓</span>
              </button>`).join("")}</div>`);
-      case 7:
+      case 8:
         return wizQ("🔒", "סיסמת ניהול", "רק איתה נכנסים לנהל את המספרה. שמור/י אותה במקום בטוח!",
           `<div class="pw-field">
              <input class="input wiz-input" id="wz-pass" type="password" placeholder="בחר/י סיסמה" value="${esc(d.pass)}">
@@ -2168,8 +2337,17 @@
       d.services = valid;
       wizGo(6); return;
     }
-    if (wiz.step === 6) { wizGo(7); return; }
-    if (wiz.step === 7) {
+    if (wiz.step === 6) {
+      wizCaptureStaff();
+      if (d.multiStaff) {
+        const names = (d.staff || []).map((n) => (n || "").trim()).filter(Boolean);
+        if (!names.length) { toast("הוסיפו לפחות שם ספר אחד", "", "🧑‍🔧"); haptic(40); return; }
+        d.staff = names;
+      } else { d.staff = []; }
+      wizGo(7); return;
+    }
+    if (wiz.step === 7) { wizGo(8); return; }
+    if (wiz.step === 8) {
       d.pass = ($("#wz-pass") && $("#wz-pass").value.trim()) || "";
       d.pass2 = ($("#wz-pass2") && $("#wz-pass2").value.trim()) || "";
       if (d.pass.length < 4) { toast("סיסמה קצרה מדי (לפחות 4 תווים)", "", "✋"); haptic(40); return; }
@@ -2178,15 +2356,24 @@
     }
   }
 
+  // קריאת שמות הספרים מהטופס אל wiz.data
+  function wizCaptureStaff() {
+    const list = $("#wz-staff-list");
+    if (!list) return;
+    wiz.data.staff = [...list.querySelectorAll("[data-staff-row] .st-name")].map((el) => el.value.trim());
+    if (!wiz.data.staff.length) wiz.data.staff = [""];
+  }
+
   function wizBack() {
     if (wiz.step <= 0) return;
     // שמירת מה שהוקלד לפני חזרה
-    const map = { 1: ["owner", "#wz-owner"], 2: ["name", "#wz-name"], 3: ["handle", "#wz-handle"], 7: ["pass", "#wz-pass"] };
+    const map = { 1: ["owner", "#wz-owner"], 2: ["name", "#wz-name"], 3: ["handle", "#wz-handle"], 8: ["pass", "#wz-pass"] };
     const m = map[wiz.step];
     if (m && $(m[1])) wiz.data[m[0]] = $(m[1]).value.trim();
-    if (wiz.step === 7 && $("#wz-pass2")) wiz.data.pass2 = $("#wz-pass2").value.trim();
+    if (wiz.step === 8 && $("#wz-pass2")) wiz.data.pass2 = $("#wz-pass2").value.trim();
     if (wiz.step === 4) wizCaptureStep4();
     if (wiz.step === 5) wizCaptureServices();
+    if (wiz.step === 6) wizCaptureStaff();
     wizGo(wiz.step - 1);
   }
 
@@ -2210,7 +2397,7 @@
     const d = wiz.data;
     const res = await Store.createShop(d.handle, {
       name: d.name, ownerPass: d.pass, phone: d.phone, address: d.address, ownerName: d.owner,
-      style: d.style, services: d.services,
+      style: d.style, services: d.services, staff: d.multiStaff ? d.staff : [],
     });
     clearInterval(timer);
     if (!res.ok) {
@@ -2385,6 +2572,21 @@
           view.rescheduleId = null; view.selSlot = null; view.clientTab = "mine";
           toast("שינוי המועד בוטל", "", "↩️"); render(); break;
 
+        // "קבע שוב כמו פעם קודמת" — טוען את השירות (והספר) מהתור האחרון וקופץ לבחירת מועד
+        case "book-again": {
+          const st = Store.get();
+          const svcId = t.dataset.service;
+          const svcOk = (st.services || []).some((s) => s.id === svcId && s.active !== false);
+          view.rescheduleId = null;
+          view.selService = svcOk ? svcId : null;
+          view.selStaff = t.dataset.staff || "";
+          view.selSlot = null; view.selDate = null;
+          view.clientTab = "book";
+          toast(svcOk ? "בחרו מועד לתור החדש" : "בחרו שירות ומועד", "sky", "🔁");
+          render();
+          break;
+        }
+
         case "enable-notif": handleEnableNotif(); break;
         case "owner-login": promptOwner(); break;   // כניסת מנהל ייעודית (במקום 3 לחיצות על הלוגו)
         case "owner-logout": confirmOwnerLogout(); break;
@@ -2450,6 +2652,29 @@
           const i = Number(t.dataset.i);
           wiz.data.services.splice(i, 1);
           if (!wiz.data.services.length) wiz.data.services.push({ name: "", price: "", durationMin: 30 });
+          haptic(14); wizRenderBody();
+          break;
+        }
+        case "wiz-staff-mode":
+          wizCaptureStaff();
+          wiz.data.multiStaff = t.dataset.multi === "1";
+          if (wiz.data.multiStaff && !(wiz.data.staff || []).some((n) => (n || "").trim())) wiz.data.staff = [""];
+          haptic(12); wizRenderBody();
+          break;
+        case "wiz-staff-add":
+          wizCaptureStaff();
+          wiz.data.staff.push("");
+          haptic(10); wizRenderBody();
+          setTimeout(() => {
+            const rows = document.querySelectorAll("#wz-staff-list .st-name");
+            if (rows.length) rows[rows.length - 1].focus();
+          }, 60);
+          break;
+        case "wiz-staff-del": {
+          wizCaptureStaff();
+          const i = Number(t.dataset.i);
+          wiz.data.staff.splice(i, 1);
+          if (!wiz.data.staff.length) wiz.data.staff.push("");
           haptic(14); wizRenderBody();
           break;
         }
@@ -2554,6 +2779,13 @@
         case "add-booking": ownerAddBooking(); break;
         case "save-add-booking": saveAddBooking(); break;
 
+        // ייבוא לקוחות
+        case "import-clients": openImportClients(); break;
+        case "do-import-clients": doImportClients(); break;
+        case "del-contact":
+          await Store.removeContact(t.dataset.id);
+          toast("הלקוח הוסר מהרשימה", "", "🗑️"); render(); break;
+
         // שירותים
         case "add-svc": svcModal(null); break;
         case "edit-svc": {
@@ -2569,6 +2801,17 @@
           applyShopStyle(t.dataset.style);
           await Store.saveShop({ style: t.dataset.style });
           haptic(14); toast("סגנון העיצוב עודכן ✓", "good", "🎨"); render(); break;
+
+        // עורך רשימת הספרים
+        case "edit-staff": openStaffEditor(); break;
+        case "stf-add": captureStaffEdit(); staffEdit.push(""); refreshStaffEditor();
+          setTimeout(() => { const rows = document.querySelectorAll("#stf-list .st-name"); if (rows.length) rows[rows.length - 1].focus(); }, 60); break;
+        case "stf-del": {
+          captureStaffEdit(); staffEdit.splice(Number(t.dataset.i), 1);
+          if (!staffEdit.length) staffEdit.push(""); refreshStaffEditor(); break;
+        }
+        case "save-staff": saveStaff(); break;
+
         case "save-settings": saveSettings(); break;
       }
     });
