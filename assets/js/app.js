@@ -341,7 +341,9 @@
     return `
     <div class="topbar">
       <div class="brand">
-        <div class="logo-dot" title="">${esc((st.shop.name || "מ")[0])}</div>
+        <div class="logo-dot${st.shop.logo ? " has-img" : ""}" title="">${st.shop.logo
+          ? `<img class="logo-img" src="${esc(st.shop.logo)}" alt="">`
+          : esc((st.shop.name || "מ")[0])}</div>
         <div class="titles">
           <h1>${esc(st.shop.name)}</h1>
           <p>${esc(sub)}</p>
@@ -1027,6 +1029,82 @@
     }
   }
 
+  /* ---------- לוגו המספרה (דחיסה + שמירת שקיפות) ---------- */
+  function compressLogo(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        let w = img.naturalWidth, h = img.naturalHeight;
+        const scale = Math.min(1, 320 / Math.max(w, h));
+        w = Math.max(1, Math.round(w * scale)); h = Math.max(1, Math.round(h * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        let out = canvas.toDataURL("image/png");   // PNG — שומר שקיפות של לוגו
+        if (out.length > 200000) {                 // גדול מדי — רקע לבן + JPEG
+          ctx.globalCompositeOperation = "destination-over";
+          ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, w, h);
+          let q = 0.85; out = canvas.toDataURL("image/jpeg", q);
+          while (out.length > 200000 && q > 0.4) { q -= 0.1; out = canvas.toDataURL("image/jpeg", q); }
+        }
+        resolve(out);
+      };
+      img.onerror = reject;
+      img.src = url;
+    });
+  }
+
+  async function handleLogoUpload(file) {
+    if (!file || !file.type || file.type.indexOf("image/") !== 0) { toast("נא לבחור קובץ תמונה", "", "🖼️"); return; }
+    toast("מעלה לוגו…", "sky", "⏳");
+    try {
+      const dataUrl = await compressLogo(file);
+      await Store.saveShop({ logo: dataUrl });
+      toast("הלוגו עודכן ✓ — כך יראו אותו הלקוחות", "good", "🎨");
+      render();
+    } catch (e) {
+      toast("לא הצלחנו להעלות את הלוגו", "", "⚠️");
+    }
+  }
+
+  /* ---------- קוד QR לקישור הלקוחות (מקומי, ללא רשת) ---------- */
+  function qrDataUrl(text, cell, margin) {
+    try {
+      if (typeof qrcode === "undefined") return "";
+      const qr = qrcode(0, "M");   // 0 = בחירת גרסה אוטומטית · M = תיקון שגיאות בינוני
+      qr.addData(text || "");
+      qr.make();
+      return qr.createDataURL(cell || 6, margin == null ? 4 : margin);
+    } catch (e) { return ""; }
+  }
+  function downloadQr() {
+    const url = qrDataUrl(clientLink(), 16, 4);
+    if (!url) { toast("לא ניתן ליצור קוד QR", "", "⚠️"); return; }
+    try {
+      const a = document.createElement("a");
+      a.href = url; a.download = "barbertor-" + SHOP + "-qr.gif";
+      document.body.appendChild(a); a.click(); a.remove();
+      toast("קוד ה-QR הורד — אפשר להדפיס ולתלות 📷", "good", "⬇️");
+    } catch (e) { toast("ההורדה נכשלה", "", "⚠️"); }
+  }
+  // כרטיס QR משותף (מוצג בדף הפרסום ובהגדרות)
+  function qrShareCard() {
+    const url = qrDataUrl(clientLink(), 6, 4);
+    if (!url) return "";
+    return `
+      <div class="section-title">📷 קוד QR למספרה</div>
+      <div class="card qr-card">
+        <img class="qr-img" src="${url}" alt="קוד QR של המספרה" width="180" height="180">
+        <div class="qr-body">
+          <div class="hint" style="margin:0 0 10px">הדפיסו ותלו בחנות, או הוסיפו לביו באינסטגרם — הלקוחות סורקים וקובעים תור.</div>
+          <button class="btn btn-primary btn-sm" data-act="qr-download">⬇️ הורדת הקוד</button>
+        </div>
+      </div>`;
+  }
+
   /* ---------- מודאל רשימת המתנה ---------- */
   function openWaitlist(dateKey, start) {
     const st = Store.get();
@@ -1666,7 +1744,8 @@
     const svcCount = (st.services || []).filter((s) => s.active !== false).length;
     return `
       <div class="pub-hero">
-        <div class="pub-ico">📣</div>
+        <div class="pub-ico${st.shop.logo ? " has-img" : ""}">${st.shop.logo
+          ? `<img class="pub-logo" src="${esc(st.shop.logo)}" alt="">` : "📣"}</div>
         <h2>${owner ? esc(owner) + ", המספרה שלך מוכנה!" : "המספרה שלך מוכנה!"}</h2>
         <p>שלח/י את הקישור הזה ללקוחות — הם יזמינו תור לבד, ישירות מהטלפון.</p>
       </div>
@@ -1680,6 +1759,8 @@
           <button class="btn btn-wa btn-sm" data-act="share-wa"><svg class="wa-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M.057 24l1.687-6.163a11.867 11.867 0 01-1.587-5.945C.16 5.335 5.495 0 12.05 0a11.82 11.82 0 018.413 3.488 11.824 11.824 0 013.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 01-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.767.967-.94 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>וואטסאפ</button>
         </div>
       </div>
+
+      ${qrShareCard()}
 
       <div class="section-title">איך זה עובד?</div>
       <div class="card">
@@ -1710,7 +1791,24 @@
   }
 
   function ownerSettings(st) {
+    const logo = st.shop.logo || "";
     return `
+      <div class="section-title">🖼️ לוגו המספרה</div>
+      <div class="card">
+        <div class="logo-set">
+          <div class="logo-preview${logo ? " has-img" : ""}">${logo
+            ? `<img src="${esc(logo)}" alt="לוגו">`
+            : esc((st.shop.name || "מ")[0])}</div>
+          <div class="logo-set-body">
+            <div class="hint" style="margin:0 0 10px">העלו תמונת לוגו — היא תופיע בראש העמוד, אצלכם ואצל הלקוחות.</div>
+            <div class="btn-row">
+              <button class="btn btn-primary btn-sm" data-act="logo-pick">${logo ? "החלפת לוגו" : "העלאת לוגו"}</button>
+              ${logo ? `<button class="btn btn-danger btn-sm" data-act="logo-remove">הסרה</button>` : ""}
+            </div>
+            <input type="file" accept="image/*" data-logofile style="display:none">
+          </div>
+        </div>
+      </div>
       <div class="section-title">🔗 הקישור שלך ללקוחות</div>
       <div class="card">
         <div class="hint" style="margin-bottom:10px">שלחו את הקישור הזה ללקוחות — הוא פותח את המספרה שלכם:</div>
@@ -1721,6 +1819,7 @@
           <button class="btn btn-wa btn-sm" data-act="share-wa"><svg class="wa-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M.057 24l1.687-6.163a11.867 11.867 0 01-1.587-5.945C.16 5.335 5.495 0 12.05 0a11.82 11.82 0 018.413 3.488 11.824 11.824 0 013.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 01-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.767.967-.94 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>וואטסאפ</button>
         </div>
       </div>
+      ${qrShareCard()}
       <div class="section-title">🎨 סגנון העיצוב</div>
       <div class="card">
         <p class="hint" style="margin-top:0;margin-bottom:12px">כך ייראה האתר — אצלכם ואצל הלקוחות.</p>
@@ -2317,6 +2416,11 @@
           localStorage.setItem("ug_cookie_ok", "1"); hideCookieBar();
           setTimeout(maybeShowInstall, 400); break;
         case "add-cal": addToCalendar(t.dataset.id); break;
+        case "qr-download": downloadQr(); break;
+        case "logo-pick": { const inp = $("[data-logofile]"); if (inp) inp.click(); break; }
+        case "logo-remove":
+          await Store.saveShop({ logo: "" });
+          toast("הלוגו הוסר", "", "🗑️"); render(); break;
         case "share-app": shareApp(); break;
         case "share-wa": {
           const stw = Store.get();
@@ -2474,6 +2578,11 @@
       const a = e.target;
       if (a.dataset.gfile !== undefined && a.type === "file") {
         if (a.files && a.files[0]) handleUpload(a.files[0]);
+        a.value = "";
+        return;
+      }
+      if (a.dataset.logofile !== undefined && a.type === "file") {
+        if (a.files && a.files[0]) handleLogoUpload(a.files[0]);
         a.value = "";
         return;
       }
