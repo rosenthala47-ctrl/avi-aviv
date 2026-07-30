@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>העברת נתונים · BarberTor</title>
+  <style>
+    :root { --bg:#0a0c10; --surface:#12161d; --border:#232a35; --text:#e8edf4; --muted:#9aa6b5; --sky:#38bdf8; --good:#34d399; --bad:#f87171; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { font-family:"Heebo",system-ui,-apple-system,Arial,sans-serif; background:var(--bg); color:var(--text); line-height:1.6; padding:22px; max-width:720px; margin:0 auto; }
+    h1 { font-size:23px; font-weight:800; margin-bottom:6px; }
+    .sub { color:var(--muted); font-size:14px; margin-bottom:20px; }
+    .card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:16px 18px; margin-bottom:16px; }
+    .step { display:flex; gap:10px; font-size:14.5px; margin-bottom:7px; }
+    .step b { color:var(--sky); }
+    button { font-family:inherit; font-size:16px; font-weight:800; padding:15px 20px; border-radius:13px; border:none; cursor:pointer; width:100%; }
+    .btn-go { background:linear-gradient(145deg,#38bdf8,#0ea5e9); color:#04202e; box-shadow:0 8px 22px rgba(56,189,248,.3); }
+    .btn-go:disabled { opacity:.5; cursor:not-allowed; box-shadow:none; }
+    #log { background:#0d1014; border:1px solid var(--border); border-radius:12px; padding:14px; margin-top:16px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:13px; direction:ltr; text-align:left; max-height:52vh; overflow-y:auto; white-space:pre-wrap; }
+    .l-ok { color:var(--good); } .l-err { color:var(--bad); } .l-info { color:var(--muted); }
+    .warn { background:rgba(248,113,113,.12); border:1px solid rgba(248,113,113,.3); border-radius:10px; padding:11px 13px; font-size:13.5px; color:#fca5a5; margin-bottom:16px; }
+    .done-badge { display:none; background:rgba(52,211,153,.14); border:1px solid rgba(52,211,153,.4); color:var(--good); border-radius:12px; padding:14px; font-weight:800; text-align:center; margin-top:16px; }
+  </style>
+</head>
+<body>
+  <h1>🚚 העברת נתונים ל-BarberTor</h1>
+  <div class="sub">מעתיק את כל המספרות, התורים, הלקוחות והגלריה מהמסד הישן למסד החדש שלך. פעולה בטוחה — לא נוגעת במסד הישן, וניתן להריץ שוב.</div>
+
+  <div class="card">
+    <div class="step"><span>📤</span><div><b>מקור:</b> הפרויקט הישן (gb201-e1c85) — נקרא בלבד</div></div>
+    <div class="step"><span>📥</span><div><b>יעד:</b> הפרויקט שלך (barbertor) — Realtime Database</div></div>
+  </div>
+
+  <div class="warn">⚠️ להריץ את העמוד הזה <b>רק מהכתובת barbertor.web.app/migrate.html</b> (דרושה התחברות מורשית). ההעתקה דורסת נתונים זהים במסד החדש — לכן בטוח להריץ שוב.</div>
+
+  <button id="go" class="btn-go">התחל העברה ›</button>
+  <div id="done" class="done-badge">✅ ההעברה הושלמה!</div>
+  <div id="log"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script>
+    const SRC = {
+      apiKey: "AIzaSyDPl_DjdAV873aHBBCoqnNk1YTZx6eG7kQ",
+      authDomain: "gb201-e1c85.firebaseapp.com",
+      projectId: "gb201-e1c85",
+      storageBucket: "gb201-e1c85.firebasestorage.app",
+      messagingSenderId: "92589759772",
+      appId: "1:92589759772:web:8fb918b085df403bbe2ed9",
+    };
+    const DST = {
+      apiKey: "AIzaSyC_kyz97Ee0t42cDqfy4NcApxw14eceCQM",
+      authDomain: "barbertor.firebaseapp.com",
+      databaseURL: "https://barbertor-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "barbertor",
+      storageBucket: "barbertor.firebasestorage.app",
+      messagingSenderId: "239278537111",
+      appId: "1:239278537111:web:91867686ede5e9f2006cd2",
+    };
+
+    const logEl = document.getElementById("log");
+    function log(msg, cls) {
+      const line = document.createElement("div");
+      if (cls) line.className = cls;
+      line.textContent = msg;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    const clean = (o) => JSON.parse(JSON.stringify(o || {}));
+
+    const srcApp = firebase.initializeApp(SRC, "src");
+    const dstApp = firebase.initializeApp(DST, "dst");
+    const srcDb = srcApp.firestore();
+    const dstDb = dstApp.database();
+    const dstAuth = dstApp.auth();
+
+    async function migrate() {
+      const btn = document.getElementById("go");
+      btn.disabled = true; btn.textContent = "מעביר…";
+      try {
+        log("מתחבר למסד החדש…", "l-info");
+        await dstAuth.signInAnonymously();
+        log("✓ מחובר", "l-ok");
+
+        log("קורא מספרות מהמסד הישן…", "l-info");
+        const shopsSnap = await srcDb.collection("shops").get();
+        let shops = 0, legacy = 0;
+        for (const doc of shopsSnap.docs) {
+          const data = doc.data() || {};
+          if (data.type === "photo") {
+            await dstDb.ref("gallery/main/" + doc.id).set(clean({ dataUrl: data.dataUrl || "", caption: data.caption || "", createdAt: data.createdAt || Date.now() }));
+            legacy++;
+          } else {
+            await dstDb.ref("shops/" + doc.id).set(clean(data));
+            shops++;
+            log("  ✓ מספרה: " + doc.id + (data.shop && data.shop.name ? " (" + data.shop.name + ")" : ""), "l-ok");
+          }
+        }
+
+        log("קורא גלריה…", "l-info");
+        let photos = 0;
+        try {
+          const gSnap = await srcDb.collection("gallery").get();
+          for (const doc of gSnap.docs) {
+            const data = doc.data() || {};
+            const sid = data.shopId || "main";
+            await dstDb.ref("gallery/" + sid + "/" + doc.id).set(clean({ dataUrl: data.dataUrl || "", caption: data.caption || "", createdAt: data.createdAt || Date.now() }));
+            photos++;
+          }
+        } catch (e) { log("  (אין גלריה נפרדת — דילוג)", "l-info"); }
+
+        log("", "l-info");
+        log("──────────────────────", "l-info");
+        log("הושלם ✅  " + shops + " מספרות · " + (photos + legacy) + " תמונות", "l-ok");
+        log("──────────────────────", "l-info");
+        document.getElementById("done").style.display = "block";
+        btn.textContent = "הרץ שוב";
+        btn.disabled = false;
+      } catch (e) {
+        log("שגיאה: " + (e && e.message ? e.message : e), "l-err");
+        btn.textContent = "נסה שוב"; btn.disabled = false;
+      }
+    }
+
+    document.getElementById("go").addEventListener("click", () => {
+      if (confirm("להתחיל העברת נתונים למסד החדש (barbertor)?")) migrate();
+    });
+  </script>
+</body>
+</html>
