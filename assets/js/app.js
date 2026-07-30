@@ -550,6 +550,21 @@
     </div>`;
   }
 
+  /* באנר למנהל — כל ספר יתבקש להפעיל התראות כדי לקבל הודעה על כל תור חדש */
+  function ownerNotifBanner() {
+    if (!Notify.supported()) return "";
+    if (Notify.permission() === "granted") return "";
+    return `
+    <div class="banner sky">
+      <span class="bn-ico">🔔</span>
+      <div class="bn-body">
+        <div class="bn-title">הפעילו התראות על תורים חדשים</div>
+        <div class="bn-sub">קבלו הודעה לטלפון בכל פעם שלקוח קובע תור — גם כשהאפליקציה סגורה</div>
+      </div>
+      <button class="btn btn-primary btn-sm" data-act="enable-notif" style="width:auto">הפעל</button>
+    </div>`;
+  }
+
   function arrivalBanner(st) {
     const now = Date.now();
     const upcoming = st.bookings
@@ -1345,7 +1360,7 @@
     return `
     <div class="screen active">
       ${topbar("ניהול העסק", {})}
-      <div class="content" id="oscroll">${body}</div>
+      <div class="content" id="oscroll">${view.ownerTab !== "settings" ? ownerNotifBanner() : ""}${body}</div>
       <div class="tabbar scroll">
         <button data-otab="cal" class="${view.ownerTab === "cal" ? "active" : ""}"><span class="tb-ico">🗓️</span>יומן</button>
         <button data-otab="hours" class="${view.ownerTab === "hours" ? "active" : ""}"><span class="tb-ico">🕐</span>שעות</button>
