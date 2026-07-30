@@ -388,12 +388,20 @@ UG.Store = (function () {
     });
     if (clash) return { ok: false, reason: "התור נתפס הרגע — נסו שעה אחרת" };
 
+    // כמה פעמים הלקוח הזה כבר לא הגיע בעבר (לפי מזהה או טלפון) — כדי להתריע למנהל
+    const dphone = data.phone ? u.normalizePhone(data.phone) : "";
+    const priorNoShow = cur.bookings.filter((b) =>
+      b.status === "noshow" &&
+      (b.userId === data.userId || (dphone && b.phone && u.normalizePhone(b.phone) === dphone))
+    ).length;
+
     const booking = {
       id: u.uid(),
       serviceId: svc.id, serviceName: svc.name, price: svc.price, durationMin: svc.durationMin,
       date: data.date, start: data.start, end: u.toHHMM(endMin),
       userId: data.userId, userName: data.userName, phone: data.phone || "", email: data.email || "",
       staff: data.staff || "",   // ספר מועדף שהלקוח ביקש (בקשה בלבד — לא מובטח)
+      priorNoShow: priorNoShow,  // מספר פעמים שהלקוח לא הגיע בעבר
       status: "booked", createdAt: Date.now(),
     };
     cur.bookings.push(booking);

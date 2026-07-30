@@ -64,7 +64,7 @@
   /* ---------- מצב תצוגה מקומי (לא נשמר בשרת) ---------- */
   const view = {
     route: (function () { const r = localStorage.getItem(ROUTEKEY); return r === "owner" || r === "client" ? r : "client"; })(), // client | owner
-    clientTab: "book",   // book | gallery | mine
+    clientTab: (function () { try { const t = localStorage.getItem("ug_ctab__" + SHOP); return ["book", "gallery", "reviews", "mine"].includes(t) ? t : "book"; } catch (e) { return "book"; } })(),   // נשמר כדי לא לאבד מיקום ברענון
     ownerTab: (function () { try { return localStorage.getItem("ug_otab__" + SHOP) || "cal"; } catch (e) { return "cal"; } })(),  // cal | hours | services | bookings | clients | report | publish | settings
     selService: null,
     selStaff: "",        // ספר מועדף שהלקוח בחר (בקשה בלבד)
@@ -1540,6 +1540,7 @@
           <div class="bk-title">${esc(b.userName || "לקוח")}</div>
           <div class="bk-sub">${esc(b.serviceName)} · ${b.phone ? `<a href="tel:${esc(b.phone)}">${esc(b.phone)}</a>` : "ללא טלפון"}</div>
           <div class="bk-sub">${esc(u.longDate(b.date))}${b.staff ? ` · <span class="staff-req">🧑‍🔧 ביקש: ${esc(b.staff)}</span>` : ""}</div>
+          ${b.priorNoShow ? `<div class="noshow-warn">⚠️ הלקוח לא הגיע בעבר${b.priorNoShow > 1 ? ` (${b.priorNoShow} פעמים)` : ""}</div>` : ""}
         </div>
         <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
           ${stg}
@@ -2156,6 +2157,8 @@
     // כותרת לשונית דינמית — שם המספרה של הספר, עם מיתוג BarberTor
     const shopName = (Store.get().shop && Store.get().shop.name) || "BarberTor";
     document.title = shopName + " · BarberTor";
+    // שמירת הלשונית הנוכחית — כדי שרענון הדף לא יחזיר להתחלה
+    if (view.route === "client") { try { localStorage.setItem("ug_ctab__" + SHOP, view.clientTab); } catch (e) {} }
     $("#root").innerHTML = view.route === "owner" ? renderOwner() : renderClient();
   }
 
@@ -3195,8 +3198,9 @@
         const fresh = st.bookings.filter((b) => b.status !== "cancelled" && !ownerSeen.has(b.id));
         fresh.forEach((b) => {
           ownerSeen.add(b.id);
-          toast(`תור חדש: ${b.userName} · ${b.serviceName} ${u.relativeDay(b.date)} ${b.start}`, "sky", "🎉");
-          Notify.show("📅 תור חדש נקבע", `${b.userName} — ${b.serviceName}\n${u.longDate(b.date)} בשעה ${b.start}`, { tag: "newbook-" + b.id });
+          const warn = b.priorNoShow ? " · ⚠️ לא הגיע בעבר" : "";
+          toast(`תור חדש: ${b.userName} · ${b.serviceName} ${u.relativeDay(b.date)} ${b.start}${warn}`, "sky", "🎉");
+          Notify.show("📅 תור חדש נקבע", `${b.userName} — ${b.serviceName}\n${u.longDate(b.date)} בשעה ${b.start}${b.priorNoShow ? "\n⚠️ הלקוח לא הגיע בפעם הקודמת" : ""}`, { tag: "newbook-" + b.id });
         });
       }
     } else if (ownerSeen) {
@@ -3255,10 +3259,9 @@
     });
     const bootShop = (Store.get() && Store.get().shop) || {};
     const secured = !!bootShop.ownerUid;   // מספרה מאובטחת בחשבון אישי (Firebase Auth)
-    if (secured) {
-      // כניסה לניהול רק לאחר אימות מול החשבון — לא סומכים על סימון מקומי
-      view.route = "client";
-    } else if (view.route === "owner" && localStorage.getItem(AUTHKEY) !== "1") {
+    // כלל יחיד וברור: נכנסים לניהול רק אם יש אישור מקומי כבעלים (התחברות עם הסיסמה/קוד).
+    // כך התחברות עם כתובת+סיסמה תמיד פותחת את עמוד הספר — גם למספרה מאובטחת.
+    if (view.route === "owner" && localStorage.getItem(AUTHKEY) !== "1") {
       view.route = "client";
     }
     render();

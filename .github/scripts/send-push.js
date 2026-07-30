@@ -100,8 +100,9 @@ function apptTs(date, start) {
           `${relDay(a.date)} בשעה ${a.start} — מהרו להזמין לפני שייתפס · ${shopName}`, "freed-" + a.id);
       }
       for (const b of newBookings) {
+        const warn = b.priorNoShow ? "\n⚠️ הלקוח לא הגיע בפעם הקודמת" : "";
         sent += await sendToUid("owner_" + sid, "📅 תור חדש נקבע",
-          `${b.userName} — ${b.serviceName}, ${relDay(b.date)} בשעה ${b.start}`, "newbook-" + b.id);
+          `${b.userName} — ${b.serviceName}, ${relDay(b.date)} בשעה ${b.start}${warn}`, "newbook-" + b.id);
       }
       for (const b of newCancels) {
         sent += await sendToUid(b.userId, "❌ התור שלך בוטל",

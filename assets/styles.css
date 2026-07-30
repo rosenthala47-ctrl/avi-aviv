@@ -190,6 +190,11 @@
 /* תג "לא הגיע" */
 .status-noshow { background: var(--bad-bg); color: var(--bad); }
 .noshow-cnt { color: var(--bad); font-weight: 700; }
+.noshow-warn {
+  margin-top: 6px; display: inline-block; background: var(--bad-bg); color: var(--bad);
+  border: 1px solid rgba(248,113,113,.35); border-radius: 8px; padding: 3px 9px;
+  font-size: 12px; font-weight: 700;
+}
 /* חופשות — צ'יפים */
 .vac-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .vac-chip {
