@@ -49,6 +49,10 @@ window.UG_CONFIG = {
     messagingSenderId: "92589759772",
     appId: "1:92589759772:web:8fb918b085df403bbe2ed9",
     measurementId: "G-7JXW84Z5PW",
+    // אם ממלאים databaseURL → האפליקציה עוברת אוטומטית ל-Realtime Database
+    // (חינמי, ללא כרטיס אשראי). ריק = נשארים על Firestore. לדוגמה:
+    // "https://<project>-default-rtdb.europe-west1.firebasedatabase.app"
+    databaseURL: "",
   },
 
   /* ---------------------------------------------------------------------

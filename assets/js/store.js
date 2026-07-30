@@ -129,9 +129,10 @@ UG.Store = (function () {
   }
 
   /* =======================================================================
-     Backend של Firebase (compat SDK)
+     Backend של Firebase — Firestore (ברירת מחדל) או Realtime Database.
+     בוחרים אוטומטית: אם ב-config יש databaseURL → Realtime Database, אחרת Firestore.
      =======================================================================*/
-  function FirebaseBackend(db, id) {
+  function FirestoreBackend(db, id) {
     const ref = db.collection("shops").doc(id);
     return {
       mode: "cloud",
@@ -194,32 +195,94 @@ UG.Store = (function () {
     };
   }
 
-  let _db = null, _connected = false;
+  /* Realtime Database — חינמי, ללא כרטיס אשראי (תוכנית Spark) */
+  function RtdbBackend(db, id) {
+    const ref = db.ref("shops/" + id);
+    const galRef = db.ref("gallery/" + id);
+    return {
+      mode: "cloud",
+      _db: db, _ref: ref,
+      read() {
+        return ref.once("value").then((snap) => (snap.exists() ? normalize(snap.val()) : null));
+      },
+      write(s) {
+        s.updatedAt = Date.now();
+        return ref.set(clone(s));   // clone → JSON נקי (RTDB לא מקבל undefined)
+      },
+      onRemote(cb) {
+        ref.on("value", (snap) => { if (snap.exists()) cb(snap.val()); });
+      },
+      onGallery(cb) {
+        galRef.on("value", (snap) => {
+          const val = snap.val() || {};
+          cb(Object.keys(val).map((k) => Object.assign({ id: k }, val[k])));
+        });
+      },
+      addPhoto(p) { return galRef.push(clone(p)); },
+      removePhoto(pid) { return galRef.child(pid).remove(); },
+      // טוקני פוש — נשמרים כמערך; טרנזקציה כדי לא לדרוס טוקנים של מכשירים אחרים
+      saveToken(uid, token) {
+        const tRef = db.ref("pushTokens/" + uid);
+        return tRef.child("tokens").transaction((arr) => {
+          arr = Array.isArray(arr) ? arr : [];
+          if (arr.indexOf(token) === -1) arr.push(token);
+          return arr;
+        }).then(() => tRef.update({
+          platform: (navigator.userAgent || "").slice(0, 120), updatedAt: Date.now(),
+        }));
+      },
+      // הזמנה בטוחה מפני התנגשות — קריאה טרייה מהשרת, בדיקת חפיפה, ואז כתיבה
+      transactBooking(build) {
+        return ref.once("value").then((snap) => {
+          if (!snap.exists()) return { ok: false, reason: "המספרה לא נמצאה" };
+          const cur = normalize(snap.val());
+          const res = build(cur);
+          if (!res.ok) return res;
+          cur.updatedAt = Date.now();
+          return ref.set(clone(cur)).then(() => res);
+        });
+      },
+      exists() { return ref.once("value").then((snap) => snap.exists()); },
+    };
+  }
+
+  let _conn = null, _connected = false;   // _conn = { db, kind }
   function loadFirebaseDb() {
     return new Promise((resolve, reject) => {
       const cfg = UG_CONFIG.firebase;
       if (!cfg || !cfg.apiKey || !cfg.projectId) return reject("no-config");
+      const useRtdb = !!cfg.databaseURL;
       const load = (src) => new Promise((res, rej) => {
         const sc = document.createElement("script");
         sc.src = src; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc);
       });
       const V = "10.12.2";
-      load(`https://www.gstatic.com/firebasejs/${V}/firebase-app-compat.js`)
-        .then(() => load(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore-compat.js`))
-        .then(() => { firebase.initializeApp(cfg); resolve(firebase.firestore()); })
-        .catch(reject);
+      let chain = load(`https://www.gstatic.com/firebasejs/${V}/firebase-app-compat.js`)
+        .then(() => load(`https://www.gstatic.com/firebasejs/${V}/firebase-${useRtdb ? "database" : "firestore"}-compat.js`));
+      if (useRtdb) {
+        // התחברות אנונימית — כדי שחוקי האבטחה יוכלו לדרוש משתמש מחובר
+        chain = chain.then(() => load(`https://www.gstatic.com/firebasejs/${V}/firebase-auth-compat.js`));
+      }
+      chain.then(() => {
+        firebase.initializeApp(cfg);
+        if (useRtdb) { try { firebase.auth().signInAnonymously().catch(() => {}); } catch (e) {} }
+        resolve({ db: useRtdb ? firebase.database() : firebase.firestore(), kind: useRtdb ? "rtdb" : "firestore" });
+      }).catch(reject);
     });
   }
   async function connect() {
     if (_connected) return;
     _connected = true;
-    try { _db = await loadFirebaseDb(); }
+    try { _conn = await loadFirebaseDb(); }
     catch (e) {
-      _db = null;
+      _conn = null;
       if (UG_CONFIG.firebase && UG_CONFIG.firebase.apiKey) console.warn("[UG] Firebase לא זמין — מצב מקומי.", e && e.message ? e.message : e);
     }
   }
-  function makeBackend(id) { return _db ? FirebaseBackend(_db, id) : LocalBackend(id); }
+  function makeBackend(id) {
+    if (!_conn) return LocalBackend(id);
+    return _conn.kind === "rtdb" ? RtdbBackend(_conn.db, id) : FirestoreBackend(_conn.db, id);
+  }
 
   /* =======================================================================
      API
