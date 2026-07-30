@@ -663,6 +663,9 @@
       <p class="hint" style="text-align:center;margin-top:22px">
         מנהלים מספרה? <a href="#new" data-act="open-signup" style="color:var(--sky)">פתחו מערכת תורים משלכם ›</a>
       </p>
+      <p class="hint" style="text-align:center;margin-top:8px">
+        <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--muted)">מדיניות פרטיות</a>
+      </p>
     `;
   }
 
@@ -2124,6 +2127,11 @@
         <p class="hint" style="margin-top:0">יציאה מהניהול במכשיר הזה — שימושי במכשיר משותף או להחלפת מספרה. הנתונים נשמרים; כדי להיכנס שוב צריך את הכתובת והסיסמה.</p>
         <button class="btn btn-danger" data-act="owner-logout" style="margin-top:12px">🚪 יציאה / החלפת מספרה</button>
       </div>
+
+      <p class="hint" style="text-align:center;margin-top:20px">
+        <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--muted)">מדיניות פרטיות</a>
+        · BarberTor
+      </p>
     `;
   }
 
