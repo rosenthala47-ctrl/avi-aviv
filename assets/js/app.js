@@ -1009,10 +1009,10 @@
       shop_name: shop.name || "",
       shop_address: shop.address || "",
       shop_phone: shop.phone || "",
-    }).then((sent) => {
-      if (sent) toast("אישור נשלח למייל 📧", "sky", "📧");
-      else console.warn("[UG] Email send returned false for", bk.email);
-    }).catch((e) => console.warn("[UG] Email error:", e));
+    }).then((res) => {
+      if (res && res.sent) toast("אישור נשלח למייל 📧", "sky", "📧");
+      else toast("מייל נכשל: " + (res && res.error || "unknown"), "", "⚠️");
+    }).catch((e) => toast("שגיאת מייל: " + (e && e.message || e), "", "⚠️"));
   }
 
   async function doBook() {

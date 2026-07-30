@@ -5,7 +5,7 @@
    =========================================================================*/
 window.UG = window.UG || {};
 UG.Email = (function () {
-  let ready = false, loading = null;
+  let ready = false, loading = null, lastError = "";
 
   function cfg() { return (window.UG_CONFIG && UG_CONFIG.emailjs) || {}; }
   function configured() {
@@ -21,7 +21,7 @@ UG.Email = (function () {
 
   async function ensure() {
     if (ready) return true;
-    if (!configured()) return false;
+    if (!configured()) { lastError = "EmailJS not configured"; return false; }
     if (!loading) loading = (async () => {
       try {
         if (typeof emailjs === "undefined") {
@@ -29,11 +29,11 @@ UG.Email = (function () {
         }
         emailjs.init(cfg().publicKey);
         ready = true;
-        console.log("[UG] EmailJS ready");
+        lastError = "";
         return true;
       } catch (e) {
         loading = null;
-        console.warn("[UG] Email SDK load failed:", e && e.message ? e.message : e);
+        lastError = "SDK: " + (e && e.message ? e.message : String(e));
         return false;
       }
     })();
@@ -41,16 +41,15 @@ UG.Email = (function () {
   }
 
   async function sendBooking(params) {
-    if (!configured()) return false;
+    if (!configured()) return { sent: false, error: "not configured" };
     const ok = await ensure();
-    if (!ok) return false;
+    if (!ok) return { sent: false, error: lastError || "SDK load failed" };
     try {
       await emailjs.send(cfg().serviceId, cfg().templateId, params);
-      console.log("[UG] Email sent to", params.to_email);
-      return true;
+      return { sent: true };
     } catch (e) {
-      console.warn("[UG] Email send failed:", e && (e.text || e.message) ? (e.text || e.message) : e);
-      return false;
+      const msg = e && (e.text || e.message) ? (e.text || e.message) : String(e);
+      return { sent: false, error: msg };
     }
   }
 
