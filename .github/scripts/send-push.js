@@ -126,6 +126,7 @@ function apptTs(date, start) {
   }
 
   await stateRef.set({ shops: perShop, updatedAt: now });
-  if (firstRun) { console.log("ריצה ראשונה — סימון מצב קיים בלבד, ללא שליחה."); return; }
-  console.log(`הושלם. מספרות=${shopIds.length}, alerts חדשים=${totalNewA}, bookings חדשים=${totalNewB}, פושים שנשלחו=${sent}`);
-})().catch((e) => { console.error(e); process.exit(1); });
+  if (firstRun) console.log("ריצה ראשונה — סימון מצב קיים בלבד, ללא שליחה.");
+  else console.log(`הושלם. מספרות=${shopIds.length}, alerts חדשים=${totalNewA}, bookings חדשים=${totalNewB}, פושים שנשלחו=${sent}`);
+})().catch((e) => { console.error(e); process.exitCode = 1; })
+  .finally(() => admin.app().delete());   // סוגר את חיבור ה-RTDB כדי שהתהליך יסתיים
