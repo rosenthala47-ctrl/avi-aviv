@@ -65,9 +65,9 @@ window.UG_CONFIG = {
        4) Account → API Keys → מעתיקים את ה-Public Key
        5) מדביקים כאן את שלושת הערכים. אם ריק — התכונה פשוט כבויה. */
   emailjs: {
-    publicKey: "",
-    serviceId: "",
-    templateId: "",
+    publicKey: "EWeh0d1Y_5DcQd-5A",
+    serviceId: "service_0ci0nxr",
+    templateId: "template_e77wd4g",
   },
 
   /* מפתח Web Push (VAPID) — לשליחת התראות פוש גם כשהאפליקציה סגורה לגמרי (FCM).
