@@ -67,7 +67,7 @@ window.UG_CONFIG = {
   emailjs: {
     publicKey: "EWeh0d1Y_5DcQd-5A",
     serviceId: "service_0ci0nxr",
-    templateId: "template_e77wd4g",
+    templateId: "template_vpwtm9r",
   },
 
   /* מפתח Web Push (VAPID) — לשליחת התראות פוש גם כשהאפליקציה סגורה לגמרי (FCM).
