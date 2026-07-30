@@ -1,10 +1,13 @@
 /* =========================================================================
    שולח התראות פוש (FCM) — רץ ב-GitHub Actions כל כמה דקות.
-   קורא את מסמך shops/main, מזהה alerts/bookings חדשים שעוד לא טופלו,
-   ושולח הודעת פוש לטלפונים הרשומים. בלי Firebase Functions ובלי Blaze.
-   דורש secret בשם FIREBASE_SERVICE_ACCOUNT (מפתח service account, JSON).
+   קורא את המספרות מ-Realtime Database, מזהה alerts/bookings/ביטולים חדשים
+   שעוד לא טופלו, ושולח הודעת פוש לטלפונים הרשומים. בלי Functions ובלי Blaze.
+   דורש secret בשם FIREBASE_SERVICE_ACCOUNT (מפתח service account של barbertor, JSON).
    =========================================================================*/
 const admin = require("firebase-admin");
+
+const DB_URL = process.env.DATABASE_URL ||
+  "https://barbertor-default-rtdb.europe-west1.firebasedatabase.app";
 
 const DOW = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
 function relDay(dateKey) {
@@ -29,13 +32,13 @@ function apptTs(date, start) {
   try { creds = JSON.parse(raw); }
   catch (e) { console.error("FIREBASE_SERVICE_ACCOUNT אינו JSON תקין"); process.exit(1); }
 
-  admin.initializeApp({ credential: admin.credential.cert(creds) });
-  const db = admin.firestore();
+  admin.initializeApp({ credential: admin.credential.cert(creds), databaseURL: DB_URL });
+  const db = admin.database();
   const messaging = admin.messaging();
 
   async function tokensFor(uid) {
-    const s = await db.doc("pushTokens/" + uid).get();
-    const d = s.exists ? s.data() : null;
+    const snap = await db.ref("pushTokens/" + uid).once("value");
+    const d = snap.val();
     return d && Array.isArray(d.tokens) ? d.tokens : [];
   }
   async function sendToUid(uid, title, body, tag) {
@@ -57,26 +60,26 @@ function apptTs(date, start) {
       }
     });
     if (bad.length) {
-      await db.doc("pushTokens/" + uid).set(
-        { tokens: admin.firestore.FieldValue.arrayRemove(...bad) }, { merge: true });
+      const remaining = tokens.filter((t) => bad.indexOf(t) === -1);
+      await db.ref("pushTokens/" + uid + "/tokens").set(remaining);
     }
     return res.successCount;
   }
 
-  // מצב "כבר טופל" לכל המספרות במסמך אחד
-  const stateRef = db.doc("system/pushState");
-  const stateSnap = await stateRef.get();
-  const firstRun = !stateSnap.exists;
-  const perShop = (stateSnap.exists && stateSnap.data().shops) || {};
+  // מצב "כבר טופל" לכל המספרות בצומת אחד
+  const stateRef = db.ref("system/pushState");
+  const stateVal = (await stateRef.once("value")).val();
+  const firstRun = !stateVal;
+  const perShop = (stateVal && stateVal.shops) || {};
 
   const now = Date.now();
-  const shopsSnap = await db.collection("shops").get();
+  const shopsVal = (await db.ref("shops").once("value")).val() || {};
+  const shopIds = Object.keys(shopsVal);
   let sent = 0, totalNewA = 0, totalNewB = 0;
 
-  for (const doc of shopsSnap.docs) {
-    const shop = doc.data() || {};
-    if (shop.type === "photo") continue;   // דלג על תמונות גלריה ישנות ששמורות ב-shops
-    const sid = doc.id;
+  for (const sid of shopIds) {
+    const shop = shopsVal[sid] || {};
+    if (shop.type === "photo") continue;   // דלג על רשומות ישנות
     const shopName = (shop.shop && shop.shop.name) || "המספרה";
     const alerts = Array.isArray(shop.alerts) ? shop.alerts : [];
     const bookings = Array.isArray(shop.bookings) ? shop.bookings : [];
@@ -124,5 +127,5 @@ function apptTs(date, start) {
 
   await stateRef.set({ shops: perShop, updatedAt: now });
   if (firstRun) { console.log("ריצה ראשונה — סימון מצב קיים בלבד, ללא שליחה."); return; }
-  console.log(`הושלם. מספרות=${shopsSnap.size}, alerts חדשים=${totalNewA}, bookings חדשים=${totalNewB}, פושים שנשלחו=${sent}`);
+  console.log(`הושלם. מספרות=${shopIds.length}, alerts חדשים=${totalNewA}, bookings חדשים=${totalNewB}, פושים שנשלחו=${sent}`);
 })().catch((e) => { console.error(e); process.exit(1); });
