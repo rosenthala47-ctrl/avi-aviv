@@ -59,7 +59,8 @@ window.UG_CONFIG = {
        2) Email Services → מחברים חשבון (למשל Gmail) → מעתיקים Service ID
        3) Email Templates → יוצרים תבנית עם המשתנים:
           {{to_name}} {{service}} {{date}} {{time}} {{duration}} {{price}}
-          {{shop_name}} {{shop_address}} {{shop_phone}}
+          {{shop_name}} {{shop_address}} {{shop_phone}} {{calendar_url}}
+          ({{calendar_url}} = קישור "הוסף ליומן Google")
           ובשדה "To email" של התבנית שמים: {{to_email}}
           → מעתיקים Template ID
        4) Account → API Keys → מעתיקים את ה-Public Key

@@ -994,6 +994,26 @@
     return { first, last, phone, name, email };
   }
 
+  /* קישור "הוסף ליומן Google" — נבנה מהתאריך והשעה של התור (אזור זמן ישראל) */
+  function gcalUrl(bk, shop) {
+    const d = (bk.date || "").replace(/-/g, "");         // 20260730
+    const s = (bk.start || "").replace(":", "") + "00";  // 140000
+    const e = (bk.end || "").replace(":", "") + "00";    // 143000
+    if (d.length !== 8 || s.length !== 6 || e.length !== 6) return "";
+    const detParts = [];
+    if (bk.serviceName) detParts.push("שירות: " + bk.serviceName);
+    if (shop.phone) detParts.push("טלפון: " + shop.phone);
+    const p = new URLSearchParams({
+      action: "TEMPLATE",
+      text: (bk.serviceName || "תור") + " · " + (shop.name || "מספרה"),
+      dates: d + "T" + s + "/" + d + "T" + e,
+      details: detParts.join("\n"),
+      location: shop.address || "",
+      ctz: "Asia/Jerusalem",
+    });
+    return "https://calendar.google.com/calendar/render?" + p.toString();
+  }
+
   /* שליחת מייל אישור ללקוח (אם EmailJS מוגדר והוזן אימייל) — לא חוסם את הזרימה */
   function sendBookingEmail(bk) {
     if (!bk || !bk.email || !(UG.Email && UG.Email.configured())) return;
@@ -1009,6 +1029,7 @@
       shop_name: shop.name || "",
       shop_address: shop.address || "",
       shop_phone: shop.phone || "",
+      calendar_url: gcalUrl(bk, shop),
     }).then((res) => {
       if (res && res.sent) toast("אישור נשלח למייל 📧", "sky", "📧");
       else toast("מייל נכשל [tpl=" + ((UG_CONFIG.emailjs || {}).templateId || "?") + "]: " + (res && res.error || "unknown"), "", "⚠️");
