@@ -78,3 +78,24 @@ window.UG_CONFIG = {
      אם ריק — האפליקציה תשלח תזכורות רק כשהיא פתוחה/ברקע (כמו קודם). */
   vapidKey: "BGkGsIAeOaXpzKZI16P919WEnnQN7gU4vtYxBGsgUdsB4ym5hOoy1qbenQSyn5hZH2yesWaymlGJOAsHblyYG-U",
 };
+
+/* ---------------------------------------------------------------------
+   מצב בדיקה למסד החדש (Realtime Database של barbertor) — לסשן הזה בלבד.
+   פותחים: barbertor.web.app/?newdb=1#main  → האפליקציה קוראת מהמסד החדש,
+   בלי להשפיע על אף אחד אחר (כולם נשארים על המסד הישן). לאחר אימות שהכל
+   עובד, נהפוך את זה לברירת המחדל.
+   --------------------------------------------------------------------- */
+try {
+  if (typeof location !== "undefined" && /[?&]newdb=1/.test(location.search || "")) {
+    window.UG_CONFIG.firebase = {
+      apiKey: "AIzaSyC_kyz97Ee0t42cDqfy4NcApxw14eceCQM",
+      authDomain: "barbertor.firebaseapp.com",
+      databaseURL: "https://barbertor-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "barbertor",
+      storageBucket: "barbertor.firebasestorage.app",
+      messagingSenderId: "239278537111",
+      appId: "1:239278537111:web:91867686ede5e9f2006cd2",
+    };
+    window.UG_CONFIG.vapidKey = "BLenPWZ30w1QMg3ojqW032DY4cPKex6Dv8XMnKznwlrHZOhdWkpF7712cfVfjsUH3C0fvSCSGdSYMKj4VK4CKtU";
+  }
+} catch (e) {}
