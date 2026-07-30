@@ -67,7 +67,7 @@ window.UG_CONFIG = {
        5) מדביקים כאן את שלושת הערכים. אם ריק — התכונה פשוט כבויה. */
   emailjs: {
     publicKey: "EWeh0d1Y_5DcQd-5A",
-    serviceId: "service_0ci0nxr",
+    serviceId: "service_t2k5p7c",
     templateId: "template_vpwtm9r",
   },
 
