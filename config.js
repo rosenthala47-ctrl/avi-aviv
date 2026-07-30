@@ -42,17 +42,14 @@ window.UG_CONFIG = {
      אם משאירים ריק — האפליקציה פשוט תרוץ במצב מקומי.
      --------------------------------------------------------------------- */
   firebase: {
-    apiKey: "AIzaSyDPl_DjdAV873aHBBCoqnNk1YTZx6eG7kQ",
-    authDomain: "gb201-e1c85.firebaseapp.com",
-    projectId: "gb201-e1c85",
-    storageBucket: "gb201-e1c85.firebasestorage.app",
-    messagingSenderId: "92589759772",
-    appId: "1:92589759772:web:8fb918b085df403bbe2ed9",
-    measurementId: "G-7JXW84Z5PW",
-    // אם ממלאים databaseURL → האפליקציה עוברת אוטומטית ל-Realtime Database
-    // (חינמי, ללא כרטיס אשראי). ריק = נשארים על Firestore. לדוגמה:
-    // "https://<project>-default-rtdb.europe-west1.firebasedatabase.app"
-    databaseURL: "",
+    apiKey: "AIzaSyC_kyz97Ee0t42cDqfy4NcApxw14eceCQM",
+    authDomain: "barbertor.firebaseapp.com",
+    projectId: "barbertor",
+    storageBucket: "barbertor.firebasestorage.app",
+    messagingSenderId: "239278537111",
+    appId: "1:239278537111:web:91867686ede5e9f2006cd2",
+    // databaseURL מוגדר → האפליקציה משתמשת ב-Realtime Database (חינמי, ללא כרטיס).
+    databaseURL: "https://barbertor-default-rtdb.europe-west1.firebasedatabase.app",
   },
 
   /* ---------------------------------------------------------------------
@@ -77,5 +74,5 @@ window.UG_CONFIG = {
      איפה משיגים: Firebase Console → Project Settings → Cloud Messaging →
      "Web Push certificates" → Generate key pair → להעתיק לכאן.
      אם ריק — האפליקציה תשלח תזכורות רק כשהיא פתוחה/ברקע (כמו קודם). */
-  vapidKey: "BGkGsIAeOaXpzKZI16P919WEnnQN7gU4vtYxBGsgUdsB4ym5hOoy1qbenQSyn5hZH2yesWaymlGJOAsHblyYG-U",
+  vapidKey: "BLenPWZ30w1QMg3ojqW032DY4cPKex6Dv8XMnKznwlrHZOhdWkpF7712cfVfjsUH3C0fvSCSGdSYMKj4VK4CKtU",
 };

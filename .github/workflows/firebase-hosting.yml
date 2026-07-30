@@ -25,10 +25,10 @@ jobs:
       - name: Install Firebase CLI
         run: npm install -g firebase-tools
 
-      - name: Deploy to Firebase Hosting (BarberTor)
+      - name: Deploy to Firebase Hosting + Database rules (BarberTor)
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-        run: firebase deploy --only hosting --project barbertor --token "$FIREBASE_TOKEN" --non-interactive
+        run: firebase deploy --only hosting,database --project barbertor --token "$FIREBASE_TOKEN" --non-interactive
 
       # ממשיכים לפרסם גם לכתובת הישנה כדי שהקישור הקיים של אורי יישאר מעודכן
       - name: Deploy to Firebase Hosting (legacy ori-grushko link)
