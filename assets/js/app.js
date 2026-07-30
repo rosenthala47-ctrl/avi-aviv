@@ -1011,7 +1011,7 @@
       shop_phone: shop.phone || "",
     }).then((res) => {
       if (res && res.sent) toast("אישור נשלח למייל 📧", "sky", "📧");
-      else toast("מייל נכשל: " + (res && res.error || "unknown"), "", "⚠️");
+      else toast("מייל נכשל [tpl=" + ((UG_CONFIG.emailjs || {}).templateId || "?") + "]: " + (res && res.error || "unknown"), "", "⚠️");
     }).catch((e) => toast("שגיאת מייל: " + (e && e.message || e), "", "⚠️"));
   }
 
