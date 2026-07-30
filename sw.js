@@ -1,10 +1,9 @@
 /* Service Worker — BarberTor
    מטרות: התקנת PWA + הצגת התראות פוש (תזכורות / תור חדש).            */
-const CACHE = "ug-barber-v58";
+const CACHE = "ug-barber-v59";
 const ASSETS = [
   "./",
   "./index.html",
-  "./config.js",
   "./assets/styles.css",
   "./assets/js/qrcode.js",
   "./assets/js/util.js",
@@ -33,17 +32,21 @@ self.addEventListener("activate", (e) => {
   );
 });
 
-/* network-first עבור הקבצים כדי לקבל עדכונים, עם נפילה למטמון */
+/* network-first עבור הקבצים כדי לקבל עדכונים, עם נפילה למטמון.
+   config.js לעולם לא נשמר במטמון — שינויי מפתחות (EmailJS וכו') נכנסים מיד. */
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // אל תיגע בבקשות ל-Firebase/גופנים
+  const noStore = /\/config\.js(\?|$)/.test(url.pathname);
   e.respondWith(
     fetch(req)
       .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+        if (!noStore) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+        }
         return res;
       })
       .catch(() => caches.match(req).then((r) => r || caches.match("./index.html")))
