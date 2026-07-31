@@ -610,6 +610,17 @@
       </div>`).join("") + `</div>`;
   }
 
+  // כפתור פנייה בוואטסאפ להפעלת מנוי — כולל שם/כתובת המספרה כדי שנדע מי פונה
+  function subWaButton(label) {
+    const cfg = UG_CONFIG.subscription || {};
+    if (!cfg.waPhone) return "";
+    const st = Store.get();
+    const name = (st && st.shop && st.shop.name) || "";
+    const msg = `שלום! אני רוצה להפעיל מנוי ל-BarberTor.\nהמספרה: ${name} (${SHOP})`;
+    const href = "https://wa.me/" + cfg.waPhone + "?text=" + encodeURIComponent(msg);
+    return `<a class="btn btn-wa" href="${esc(href)}" target="_blank" rel="noopener" style="margin-top:10px;text-decoration:none">💬 ${esc(label || "פנייה בוואטסאפ")}</a>`;
+  }
+
   // באנר עדין במסך הניהול — ספירת ימי ניסיון / התראה על מנוי שמסתיים
   function subBanner() {
     const s = subStatus();
@@ -653,6 +664,7 @@
         <div class="pw-card">
           <div class="pw-card-t">להפעלת המנוי</div>
           <div class="pw-card-b">${esc(cfg.payInfo || "")}</div>
+          ${subWaButton("פנייה בוואטסאפ")}
         </div>
         <p class="hint">הלקוחות שלך עדיין יכולים לקבוע תור בינתיים. ההפעלה מיידית לאחר התשלום.</p>
       </div>`;
@@ -666,6 +678,7 @@
       ${planCards()}
       <div class="pw-card" style="margin-top:4px">
         <div class="pw-card-b">${esc(cfg.payInfo || "")}</div>
+        ${subWaButton("פנייה בוואטסאפ")}
       </div>
       <p class="hint" style="margin-top:12px">לאחר התשלום המספרה שלך תופעל והגישה לניהול תחזור — בדרך כלל תוך זמן קצר.</p>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:12px">סגירה</button>
