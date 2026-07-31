@@ -539,15 +539,66 @@
   function notifBanner() {
     if (!Notify.supported()) return "";
     if (Notify.permission() === "granted") return "";
+    const blocked = Notify.permission() === "denied";
     return `
     <div class="banner sky">
       <span class="bn-ico">🔔</span>
       <div class="bn-body">
-        <div class="bn-title">קבלת תזכורת לפני התור</div>
-        <div class="bn-sub">אפשרו התראות ותקבלו תזכורת שעה לפני התספורת</div>
+        <div class="bn-title">${blocked ? "ההתראות חסומות" : "אל תפספסו את התור"}</div>
+        <div class="bn-sub">${blocked
+          ? "כדי לקבל תזכורות — אפשרו התראות בהגדרות הדפדפן"
+          : "תזכורת לפני התור, עדכון על ביטול, והודעה כשמתפנה תור מוקדם"}</div>
       </div>
-      <button class="btn btn-primary btn-sm" data-act="enable-notif" style="width:auto">אפשר</button>
+      <button class="btn btn-primary btn-sm" data-act="${blocked ? "notif-help" : "enable-notif"}" style="width:auto">${blocked ? "איך?" : "אפשר"}</button>
     </div>`;
+  }
+
+  /* ---------- הזמנה לאישור התראות — בכל כניסה, עד שהלקוח מאשר ---------- */
+  let notifPromptShown = false;   // פעם אחת לכל פתיחה של האפליקציה
+
+  function notifBenefits() {
+    return `
+      <ul class="nb-list">
+        <li><span>⏰</span><div><b>תזכורת לפני התור</b>לא תשכחו ולא תפספסו את התספורת</div></li>
+        <li><span>🎉</span><div><b>התפנה תור מוקדם?</b>נעדכן אתכם ראשונים כשמתפנה מקום</div></li>
+        <li><span>🔄</span><div><b>שינוי או ביטול</b>תדעו מיד אם משהו בתור שלכם משתנה</div></li>
+        <li><span>💈</span><div><b>מבצעים והטבות</b>עדכונים מהמספרה — רק כשבאמת יש משהו</div></li>
+      </ul>`;
+  }
+
+  // מוצג בכניסה ללקוח כשההתראות עדיין לא אושרו
+  function promptNotif(force) {
+    if (!Notify.supported()) return;
+    if (Notify.permission() === "granted") return;
+    if (!force && notifPromptShown) return;
+    if (!force && view.route !== "client") return;
+    if ($("#modalBack") && $("#modalBack").classList.contains("open")) return;   // אל תדרוס מודאל פתוח
+    notifPromptShown = true;
+    if (Notify.permission() === "denied") { notifHelp(); return; }
+    openModal(`
+      <div class="m-title">🔔 שלא תפספסו את התור</div>
+      <div class="m-sub">אישור התראות לוקח שנייה — וזה מה שתקבלו:</div>
+      ${notifBenefits()}
+      <button class="btn btn-primary" data-act="enable-notif" style="margin-top:6px">אישור התראות</button>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">אולי אחר כך</button>
+    `);
+  }
+
+  // ההתראות נחסמו בדפדפן — אי אפשר לבקש שוב, אז מסבירים איך לפתוח ידנית
+  function notifHelp() {
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    openModal(`
+      <div class="m-title">🔕 ההתראות חסומות</div>
+      <div class="m-sub">חסמתם התראות בעבר, ולכן הדפדפן לא ישאל שוב. כך פותחים:</div>
+      ${notifBenefits()}
+      <div class="pw-card" style="margin-top:4px">
+        <div class="pw-card-t">${ios ? "באייפון" : "בדפדפן"}</div>
+        <div class="pw-card-b">${ios
+          ? "הגדרות → Safari → אתרים → התראות → אפשרו לאתר הזה. אם הוספתם לבית — הגדרות → התראות → BarberTor."
+          : "לחצו על סמל המנעול 🔒 בשורת הכתובת → התראות (Notifications) → אפשר (Allow), ואז רעננו את העמוד."}</div>
+      </div>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:12px">סגירה</button>
+    `);
   }
 
   /* באנר למנהל — כל ספר יתבקש להפעיל התראות כדי לקבל הודעה על כל תור חדש */
@@ -3019,6 +3070,7 @@
         }
 
         case "enable-notif": handleEnableNotif(); break;
+        case "notif-help": notifHelp(); break;
         case "owner-login": promptOwner(); break;   // כניסת מנהל ייעודית (במקום 3 לחיצות על הלוגו)
         case "owner-logout": confirmOwnerLogout(); break;
         case "do-owner-logout":
@@ -3444,6 +3496,7 @@
   }
 
   async function handleEnableNotif() {
+    closeModal();   // אם הבקשה הגיעה מחלון ההזמנה — לסגור אותו לפני בקשת ההרשאה
     if (!Notify.supported()) { toast("הדפדפן אינו תומך בהתראות", "", "⚠️"); return; }
     if (Notify.permission() === "granted") {
       Notify.show("בדיקת התראה 🔔", "מצוין! ההתראות עובדות.", { tag: "test" });
@@ -3601,6 +3654,7 @@
     if (Store.notFound) { view.notFound = true; render(); return; }        // מספרה לא קיימת
 
     checkPaymentReturn();   // חזרה מעמוד התשלום של ספק הסליקה
+    setTimeout(() => promptNotif(), 1200);   // הזמנה לאישור התראות — בכל כניסה עד שיאשר
     Store.subscribe(onStoreChange);
     Store.subscribeGallery(() => {
       // רענון כשמסתכלים על גלריה ולא באמצע הקלדה

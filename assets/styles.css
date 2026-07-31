@@ -603,6 +603,13 @@ select.input {
 .banner.good { border-color: rgba(52,211,153,.35); background: linear-gradient(120deg, rgba(52,211,153,.10), var(--surface)); }
 .banner.warn { border-color: rgba(251,191,36,.45); background: linear-gradient(120deg, rgba(251,191,36,.13), var(--surface)); }
 
+/* ==== יתרונות אישור התראות (חלון הזמנה ללקוח) ==== */
+.nb-list { list-style: none; margin: 15px 0 17px; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.nb-list li { display: flex; align-items: flex-start; gap: 11px; text-align: start; }
+.nb-list li > span { font-size: 21px; flex: none; line-height: 1.25; }
+.nb-list li > div { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.nb-list li b { display: block; font-size: 13.5px; color: var(--text); margin-bottom: 1px; }
+
 /* ==== תבניות הודעה קבוצתית ==== */
 .bc-tpls { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 11px; }
 .bc-tpl {
