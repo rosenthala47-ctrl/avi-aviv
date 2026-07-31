@@ -20,6 +20,9 @@
     // את הניהול שלה (כניסת הספר, בלי צורך להקליד כתובת). אחרת — מסך הפתיחה של BarberTor.
     // חשוב: לעולם לא פותחים דרך האפליקציה עמוד הזמנה של לקוח — זה שמור לקישור ייעודי בלבד.
     try { const mine = (localStorage.getItem("ug_my_shop") || "").trim(); if (/^[a-z0-9-]+$/.test(mine)) return mine; } catch (e) {}
+    // לקוח שהתקין את האפליקציה מקישור של מספרה: ההפעלה מהאייקון מגיעה בלי כתובת
+    // (start_url במניפסט), לכן חוזרים למספרה האחרונה שנצפתה במכשיר במקום למסך פתיחה.
+    try { const last = (localStorage.getItem("ug_last_shop") || "").trim(); if (/^[a-z0-9-]+$/.test(last)) return last; } catch (e) {}
     return "__new__";
   }
   const SHOP = resolveShopId();
@@ -2621,6 +2624,11 @@
     // כותרת לשונית דינמית — שם המספרה של הספר, עם מיתוג BarberTor
     const shopName = (Store.get().shop && Store.get().shop.name) || "BarberTor";
     document.title = shopName + " · BarberTor";
+    // שם האייקון במסך הבית באייפון — שם המספרה, כך שהלקוח רואה את המספרה שלו
+    try {
+      const mt = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+      if (mt && shopName) mt.setAttribute("content", shopName);
+    } catch (e) {}
     // שמירת הלשונית הנוכחית — כדי שרענון הדף לא יחזיר להתחלה
     if (view.route === "client") { try { localStorage.setItem("ug_ctab__" + SHOP, view.clientTab); } catch (e) {} }
     $("#root").innerHTML = view.route === "owner" ? renderOwner() : renderClient();
@@ -3731,6 +3739,9 @@
 
     await Store.init(SHOP);
     if (Store.notFound) { view.notFound = true; render(); return; }        // מספרה לא קיימת
+
+    // זכירת המספרה — כדי שפתיחת האפליקציה המותקנת (ללא כתובת) תחזיר לכאן
+    try { if (SHOP !== "__new__") localStorage.setItem("ug_last_shop", SHOP); } catch (e) {}
 
     checkPaymentReturn();   // חזרה מעמוד התשלום של ספק הסליקה
     setTimeout(() => promptNotif(), 1200);   // הזמנה לאישור התראות — בכל כניסה עד שיאשר
