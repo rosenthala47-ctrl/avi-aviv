@@ -766,6 +766,22 @@
   }
 
   /* ---------- פאנל-על: ניהול מנויים (אתה בלבד) ---------- */
+  // השוואת קוד-על: מול hash מוצפן (עדיף) או מול טקסט גלוי (תאימות לאחור)
+  async function sha256Hex(s) {
+    try {
+      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+      return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    } catch (e) { return ""; }
+  }
+  async function adminCodeMatches(v, sc) {
+    if (!v) return false;
+    if (sc.adminPasscodeHash) {
+      const h = await sha256Hex(v);
+      return !!h && h === String(sc.adminPasscodeHash).toLowerCase();
+    }
+    return !!sc.adminPasscode && v === String(sc.adminPasscode);
+  }
+
   let adminShops = [];
   async function openAdminPanel() {
     openModal(`
@@ -3541,12 +3557,13 @@
       <button class="btn btn-primary" data-act2="check-code">כניסה לניהול</button>
       <button class="btn btn-ghost btn-sm" data-act="close-modal" style="margin-top:8px;width:100%">ביטול</button>
     `);
-    const check = () => {
+    const check = async () => {
       const v = (($("#own-code") && $("#own-code").value) || "").trim();
       const shop = (Store.get() && Store.get().shop) || {};
-      // קוד-על לניהול מנויים (אתה בלבד) — פותח את פאנל האדמין במקום מצב מנהל
-      const adminPass = String((UG_CONFIG.subscription || {}).adminPasscode || "");
-      if (adminPass && v === adminPass) { closeModal(); openAdminPanel(); return; }
+      // קוד-על לניהול מנויים (אתה בלבד) — פותח את פאנל האדמין במקום מצב מנהל.
+      // הקוד נשמר כ-hash מוצפן; משווים לפי טביעת אצבע (או טקסט גלוי לתאימות לאחור).
+      const sc = UG_CONFIG.subscription || {};
+      if (await adminCodeMatches(v, sc)) { closeModal(); openAdminPanel(); return; }
       const configCodes = [UG_CONFIG.ownerPasscode].concat(UG_CONFIG.ownerPasscodesExtra || []).map(String);
       const ok = (shop.ownerPass && v === String(shop.ownerPass)) ||
         (SHOP === "main" && configCodes.includes(v));   // סיסמאות ה-config עובדות רק למספרה הראשית
