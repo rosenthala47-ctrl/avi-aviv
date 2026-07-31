@@ -641,6 +641,8 @@ select.input {
 .adm-badge.ok { color: #059669; background: rgba(52,211,153,.15); }
 .adm-badge.trial { color: #0284c7; background: rgba(56,189,248,.15); }
 .adm-badge.exp { color: #dc2626; background: rgba(248,113,113,.15); }
+.adm-badge.pend { color: #b45309; background: rgba(251,191,36,.2); }
+.adm-shop.pend { border-color: rgba(251,191,36,.6); box-shadow: 0 6px 16px rgba(251,191,36,.14); }
 .adm-btns { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
 .adm-btns .btn { width: auto; flex: 1; min-width: 74px; }
 .banner .bn-ico { font-size: 24px; flex: none; }

@@ -650,11 +650,37 @@
     return "";
   }
 
+  /* חזרה מעמוד התשלום של ספק הסליקה (‎?paid=1‎) — מסמנים "ממתין לאישור" */
+  function checkPaymentReturn() {
+    let sp = null;
+    try { sp = new URLSearchParams(location.search); } catch (e) { return; }
+    if (!sp || sp.get("paid") !== "1") return;
+    const plan = sp.get("plan") || "";
+    try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {}
+    if (Store.markPaymentPending) Store.markPaymentPending(plan);
+    toast("התשלום התקבל — המנוי יופעל בקרוב ✓", "good", "💳");
+  }
+
   // מסך "המנוי הסתיים" — מחליף את הניהול כשהניסיון נגמר ולא שולם
   function paywallBody() {
     const cfg = UG_CONFIG.subscription || {};
     const st = Store.get();
     const name = (st && st.shop && st.shop.name) || "";
+    const sub = (Store.getSub && Store.getSub()) || null;
+    // שילם וממתין לאישור — לא מציגים שוב מסלולים
+    if (sub && sub.pending) {
+      return `
+      <div class="paywall">
+        <div class="pw-ico">⏳</div>
+        <h2>התשלום התקבל</h2>
+        <p>תודה! המנוי של ${esc(name)} יופעל תוך זמן קצר, ואז הניהול ייפתח אוטומטית.</p>
+        <div class="pw-card" style="margin-top:18px">
+          <div class="pw-card-t">לא נפתח תוך כמה דקות?</div>
+          <div class="pw-card-b">${esc(cfg.payInfo || "")}</div>
+          ${subWaButton("בדיקת סטטוס בוואטסאפ")}
+        </div>
+      </div>`;
+    }
     return `
       <div class="paywall">
         <div class="pw-ico">🔒</div>
@@ -705,6 +731,7 @@
   function admShopStatus(s) {
     const cfg = UG_CONFIG.subscription || {};
     const now = Date.now();
+    if (s.pending) return { label: "💰 שילם — ממתין להפעלה", cls: "pend" };
     if (s.paidUntil && s.paidUntil > now) {
       return { label: "מנוי פעיל · עד " + u.longDate(u.dateKey(new Date(s.paidUntil))), cls: "ok" };
     }
@@ -720,7 +747,7 @@
     el.innerHTML = adminShops.map((s) => {
       const st = admShopStatus(s);
       return `
-      <div class="adm-shop">
+      <div class="adm-shop${s.pending ? " pend" : ""}">
         <div class="adm-name">${esc(s.name)} <span style="color:var(--muted);font-weight:400">· ${esc(s.id)}</span></div>
         <div class="adm-meta">${s.phone ? esc(s.phone) + " · " : ""}${s.paidUntil ? "שולם עד " + esc(u.longDate(u.dateKey(new Date(s.paidUntil)))) : "טרם שולם"}</div>
         <span class="adm-badge ${st.cls}">${esc(st.label)}</span>
@@ -747,6 +774,7 @@
     const ok = await Store.adminSetPaid(sid, until);
     if (!ok) { toast("הפעולה זמינה רק במצב ענן", "", "⚠️"); return; }
     s.paidUntil = until;   // עדכון מקומי לתצוגה מיידית
+    s.pending = null;
     renderAdminList();
     toast(months === 0 ? "המנוי אופס" : (months === 12 ? "הופעל לשנה ✓" : (months === 1 ? "הופעל לחודש ✓" : `הופעל ל-${months} חודשים ✓`)), "good", "💳");
   }
@@ -3533,6 +3561,7 @@
     await Store.init(SHOP);
     if (Store.notFound) { view.notFound = true; render(); return; }        // מספרה לא קיימת
 
+    checkPaymentReturn();   // חזרה מעמוד התשלום של ספק הסליקה
     Store.subscribe(onStoreChange);
     Store.subscribeGallery(() => {
       // רענון כשמסתכלים על גלריה ולא באמצע הקלדה

@@ -353,13 +353,27 @@ UG.Store = (function () {
       phone: (idx[k] && idx[k].phone) || "",
       createdAt: (idx[k] && idx[k].createdAt) || 0,
       paidUntil: (subsV[k] && subsV[k].paidUntil) || 0,
-    })).sort((a, z) => (z.createdAt || 0) - (a.createdAt || 0));
+      pending: (subsV[k] && subsV[k].pending) || null,
+    })).sort((a, z) =>
+      // ממתינים לאישור תשלום קודם, ואז לפי תאריך יצירה
+      (z.pending ? 1 : 0) - (a.pending ? 1 : 0) || (z.createdAt || 0) - (a.createdAt || 0));
   }
   async function adminSetPaid(sid, paidUntil, note) {
     await connect();
     if (!_conn || _conn.kind !== "rtdb") return false;
     await _conn.db.ref("subs/" + sid).set({
       paidUntil: paidUntil || 0, note: note || "", updatedAt: Date.now(),
+      pending: null,   // ההפעלה מבטלת את סימון "ממתין לאישור תשלום"
+    });
+    return true;
+  }
+
+  /* הספר חזר מעמוד התשלום — מסמנים "ממתין לאישור" בלי לגעת ב-paidUntil */
+  async function markPaymentPending(planId) {
+    await connect();
+    if (!_conn || _conn.kind !== "rtdb") return false;
+    await _conn.db.ref("subs/" + shopId + "/pending").set({
+      at: Date.now(), plan: String(planId || ""),
     });
     return true;
   }
@@ -671,7 +685,7 @@ UG.Store = (function () {
     joinWaitlist, leaveWaitlist, consumeAlert, addReview, savePushToken,
     subscribeGallery, getGallery, addPhoto, removePhoto,
     createShop, shopExists, peekShop,
-    getSub, adminListShops, adminSetPaid,
+    getSub, markPaymentPending, adminListShops, adminSetPaid,
     get mode() { return backend ? backend.mode : "local"; },
     get shopId() { return shopId; },
     get notFound() { return notFound; },

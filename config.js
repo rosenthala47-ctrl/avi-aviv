@@ -89,7 +89,13 @@ window.UG_CONFIG = {
 
     /* המסלולים שמוצגים לספר בסיום הניסיון.
        payUrl — קישור התשלום מספק הסליקה (CardCom / משולם-Grow / PayPlus / Tranzila).
-       כל עוד payUrl ריק, מוצגות הוראות התשלום הידניות מ-payInfo. */
+       כל עוד payUrl ריק, מוצגות הוראות התשלום הידניות מ-payInfo.
+
+       חשוב — בהגדרות עמוד התשלום אצל הספק, קבעו "כתובת חזרה אחרי תשלום מוצלח":
+         https://barbertor.web.app/?paid=1&plan=monthly
+         https://barbertor.web.app/?paid=1&plan=yearly
+       כך הספר חוזר לאפליקציה, המספרה מסומנת "שילם — ממתין להפעלה",
+       והיא קופצת לראש הרשימה בפאנל ניהול המנויים. */
     plans: [
       { id: "monthly", name: "חודשי", price: 35, per: "לחודש", months: 1, payUrl: "" },
       { id: "yearly", name: "שנתי", price: 299, per: "לשנה", months: 12, payUrl: "",
