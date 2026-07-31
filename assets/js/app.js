@@ -1904,7 +1904,7 @@
         </div></div>
       <div class="field"><label>שם הלקוח</label>
         <input class="input" id="ab-name" placeholder="שם הלקוח"></div>
-      <div class="field"><label>טלפון (לא חובה)</label>
+      <div class="field"><label>טלפון</label>
         <input class="input" id="ab-phone" type="tel" inputmode="tel" placeholder="050-0000000"></div>
       ${(UG.Email && UG.Email.configured()) ? `
       <div class="field"><label>אימייל לאישור (לא חובה)</label>
@@ -1935,8 +1935,10 @@
     if (!svcId) { toast("בחרו שירות", "", "✋"); return; }
     if (!date) { toast("בחרו תאריך", "", "✋"); return; }
     if (!name) { toast("הזינו שם לקוח", "", "✋"); return; }
+    // טלפון חובה — בלעדיו אי אפשר לשלוח ללקוח הודעות בוואטסאפ
+    if (!u.isValidPhone(phoneRaw)) { toast("נא להזין מספר טלפון תקין", "", "📵"); return; }
     const start = hh + ":" + mm;
-    const phone = phoneRaw ? u.fmtPhone(phoneRaw) : "";
+    const phone = u.fmtPhone(phoneRaw);
     const email = ($("#ab-email") && $("#ab-email").value.trim()) || "";
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("כתובת אימייל לא תקינה", "", "📧"); return; }
     const staff = ($("#ab-staff") && $("#ab-staff").value) || "";
@@ -2052,9 +2054,12 @@
     const text = ($("#imp-text") && $("#imp-text").value) || "";
     const list = parseContactsText(text);
     if (!list.length) { toast("לא נמצאו לקוחות בטקסט", "", "✋"); return; }
+    const noPhone = list.filter((c) => !u.isValidPhone(c.phone || "")).length;
     const added = await Store.addContacts(list);
     closeModal();
     toast(added ? `יובאו ${added} לקוחות ✓` : "כל הלקוחות כבר קיימים", added ? "good" : "sky", "📥");
+    // בלי טלפון אי אפשר לשלוח וואטסאפ — כדאי שהספר יידע
+    if (noPhone) setTimeout(() => toast(`${noPhone} לקוחות ללא טלפון תקין — לא יקבלו הודעות וואטסאפ`, "", "📵"), 2600);
     render();
   }
 
@@ -2106,6 +2111,74 @@
     if (!el) return;
     el.value = text || "";
     el.focus();
+  }
+
+  /* ---------- שליחה בוואטסאפ — מגיע לכל לקוח עם טלפון, גם בלי אפליקציה ---------- */
+  // 0501234567 → 972501234567 (פורמט wa.me)
+  function waIntl(phone) {
+    const n = u.normalizePhone(phone || "");
+    if (!/^0\d{8,9}$/.test(n)) return "";
+    return "972" + n.slice(1);
+  }
+
+  // כל הלקוחות עם טלפון — מהתורים ומהרשימה שיובאה, ללא כפילויות
+  function clientsWithPhone() {
+    const st = Store.get();
+    const map = new Map();
+    (st.contacts || []).forEach((c) => {
+      const p = u.normalizePhone(c.phone || "");
+      if (p && !map.has(p)) map.set(p, { name: c.name || "לקוח", phone: p });
+    });
+    (st.bookings || []).filter((b) => b.status !== "cancelled").forEach((b) => {
+      const p = u.normalizePhone(b.phone || "");
+      if (!p) return;
+      const cur = map.get(p);
+      if (cur) { if (b.userName) cur.name = b.userName; }
+      else map.set(p, { name: b.userName || "לקוח", phone: p });
+    });
+    return [...map.values()]
+      .filter((c) => waIntl(c.phone))
+      .sort((a, z) => String(a.name).localeCompare(String(z.name), "he"));
+  }
+
+  let waSent = new Set();
+  let waText = "";
+
+  function openWaBlast() {
+    const el = $("#pb-text");
+    const text = ((el && el.value) || "").trim();
+    if (!text) { toast("קודם כתבו את ההודעה", "", "✋"); return; }
+    const list = clientsWithPhone();
+    if (!list.length) { toast("אין לקוחות עם מספר טלפון", "", "📵"); return; }
+    waSent = new Set();
+    waText = text;
+    openModal(`
+      <div class="m-title">📲 שליחה בוואטסאפ</div>
+      <div class="m-sub">מגיע לכל לקוח עם טלפון — גם למי שאין לו את האפליקציה</div>
+      <div class="wa-msg">${esc(text)}</div>
+      <div id="wa-list"></div>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:12px">סגירה</button>
+    `);
+    renderWaList();
+  }
+
+  function renderWaList() {
+    const el = $("#wa-list"); if (!el) return;
+    const list = clientsWithPhone();
+    const done = list.filter((c) => waSent.has(c.phone)).length;
+    el.innerHTML =
+      `<div class="wa-prog">נשלחו ${done} מתוך ${list.length}</div>
+       <div class="wa-list">` +
+      list.map((c) => {
+        const sent = waSent.has(c.phone);
+        const href = "https://wa.me/" + waIntl(c.phone) + "?text=" + encodeURIComponent(waText);
+        return `
+        <div class="wa-row${sent ? " sent" : ""}">
+          <div class="wa-who"><b>${esc(c.name)}</b><span>${esc(u.fmtPhone(c.phone))}</span></div>
+          <a class="btn btn-wa btn-sm" href="${esc(href)}" target="_blank" rel="noopener"
+             data-act="wa-sent" data-p="${esc(c.phone)}">${sent ? "✓ נשלח" : "שליחה"}</a>
+        </div>`;
+      }).join("") + `</div>`;
   }
 
   function clientDetail(key) {
@@ -2365,8 +2438,11 @@
         <textarea class="input" id="pb-text" rows="3" maxlength="180"
           placeholder="לדוגמה: מבצע החודש — תספורת + עיצוב זקן ב-60₪ בלבד! מוזמנים לקבוע תור 💈"
           style="resize:vertical;line-height:1.6"></textarea>
-        <div class="hint" style="margin:8px 0 12px">עד 180 תווים · עד ${broadcastRecipients()} לקוחות שהזמינו דרך האפליקציה — יקבלו רק מי שאישר התראות בטלפון</div>
-        <button class="btn btn-primary" data-act="do-broadcast-pub">📢 שליחה לכל הלקוחות</button>
+        <div class="hint" style="margin:8px 0 12px">עד 180 תווים</div>
+        <button class="btn btn-primary" data-act="do-broadcast-pub">📢 התראה באפליקציה</button>
+        <div class="hint" style="margin:6px 0 14px">מיידי וחינם · עד ${broadcastRecipients()} לקוחות — רק מי שאישר התראות</div>
+        <button class="btn btn-wa" data-act="wa-blast">📲 שליחה בוואטסאפ</button>
+        <div class="hint" style="margin:6px 0 0">מגיע ל-${clientsWithPhone().length} לקוחות עם טלפון — גם בלי אפליקציה · נשלח מהוואטסאפ שלך, לקוח-לקוח</div>
       </div>
 
       <div class="section-title">איך זה עובד?</div>
@@ -3275,6 +3351,9 @@
         case "do-broadcast": doBroadcast("#bc-text", "do-broadcast"); break;
         case "bc-tpl": fillBroadcast(t.dataset.t); break;
         case "do-broadcast-pub": doBroadcast("#pb-text", "do-broadcast-pub"); break;
+        case "wa-blast": openWaBlast(); break;
+        // סימון "נשלח" — הקישור עצמו נפתח כרגיל בוואטסאפ
+        case "wa-sent": waSent.add(t.dataset.p); setTimeout(renderWaList, 400); break;
 
         // מנוי
         case "show-upgrade": handleUpgrade(); break;
