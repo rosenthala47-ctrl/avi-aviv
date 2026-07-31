@@ -583,9 +583,35 @@
     return { state: "expired" };
   }
 
+  function subPlans() {
+    const cfg = UG_CONFIG.subscription || {};
+    return Array.isArray(cfg.plans) ? cfg.plans : [];
+  }
+  // תיאור קצר של המסלול הזול ביותר לחודש — לשימוש בבאנרים
+  function subPriceText() {
+    const plans = subPlans();
+    if (!plans.length) return "";
+    const p = plans[0];
+    return p.price + " ₪ " + (p.per || "");
+  }
+  // כרטיסי בחירת מסלול — אם הוגדר payUrl הכפתור מוביל לתשלום, אחרת להוראות
+  function planCards() {
+    const plans = subPlans();
+    if (!plans.length) return "";
+    return `<div class="pw-plans">` + plans.map((p) => `
+      <div class="pw-plan${p.badge ? " best" : ""}">
+        ${p.badge ? `<span class="pw-plan-badge">${esc(p.badge)}</span>` : ""}
+        <div class="pw-plan-name">${esc(p.name || "")}</div>
+        <div class="pw-plan-price">${esc(String(p.price))} <span>₪</span></div>
+        <div class="pw-plan-per">${esc(p.per || "")}${p.note ? ` · ${esc(p.note)}` : ""}</div>
+        ${p.payUrl
+          ? `<a class="btn btn-primary btn-sm" href="${esc(p.payUrl)}" target="_blank" rel="noopener">בחירה ותשלום</a>`
+          : `<button class="btn btn-primary btn-sm" data-act="show-upgrade">בחירה</button>`}
+      </div>`).join("") + `</div>`;
+  }
+
   // באנר עדין במסך הניהול — ספירת ימי ניסיון / התראה על מנוי שמסתיים
   function subBanner() {
-    const cfg = UG_CONFIG.subscription || {};
     const s = subStatus();
     if (s.state === "trial") {
       const soon = s.daysLeft <= 7;
@@ -594,7 +620,7 @@
         <span class="bn-ico">${soon ? "⏳" : "🎁"}</span>
         <div class="bn-body">
           <div class="bn-title">תקופת ניסיון — נותרו ${s.daysLeft} ימים</div>
-          <div class="bn-sub">בסיום הניסיון יידרש מנוי (${esc(cfg.priceText || "")}) כדי להמשיך לנהל</div>
+          <div class="bn-sub">בסיום הניסיון יידרש מנוי (${esc(subPriceText())}) כדי להמשיך לנהל</div>
         </div>
         <button class="btn btn-primary btn-sm" data-act="show-upgrade" style="width:auto">פרטים</button>
       </div>`;
@@ -622,8 +648,8 @@
       <div class="paywall">
         <div class="pw-ico">🔒</div>
         <h2>תקופת הניסיון הסתיימה</h2>
-        <p>${esc(name)} — כדי להמשיך לנהל תורים, לקוחות והגדרות יש להפעיל מנוי.</p>
-        <div class="pw-price">${esc(cfg.priceText || "")}</div>
+        <p>${esc(name)} — כדי להמשיך לנהל תורים, לקוחות והגדרות יש לבחור מסלול.</p>
+        ${planCards()}
         <div class="pw-card">
           <div class="pw-card-t">להפעלת המנוי</div>
           <div class="pw-card-b">${esc(cfg.payInfo || "")}</div>
@@ -635,9 +661,10 @@
   function handleUpgrade() {
     const cfg = UG_CONFIG.subscription || {};
     openModal(`
-      <div class="m-title">💳 הפעלת מנוי</div>
-      <div class="m-sub">${esc(cfg.priceText || "")}</div>
-      <div class="pw-card" style="margin-top:12px">
+      <div class="m-title">💳 בחירת מסלול</div>
+      <div class="m-sub">ביטול בכל עת · ללא התחייבות</div>
+      ${planCards()}
+      <div class="pw-card" style="margin-top:4px">
         <div class="pw-card-b">${esc(cfg.payInfo || "")}</div>
       </div>
       <p class="hint" style="margin-top:12px">לאחר התשלום המספרה שלך תופעל והגישה לניהול תחזור — בדרך כלל תוך זמן קצר.</p>
@@ -686,7 +713,6 @@
         <span class="adm-badge ${st.cls}">${esc(st.label)}</span>
         <div class="adm-btns">
           <button class="btn btn-sm" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="1">+ חודש</button>
-          <button class="btn btn-sm" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="3">+ 3 חודשים</button>
           <button class="btn btn-sm" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="12">+ שנה</button>
           <button class="btn btn-sm btn-danger" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="0">איפוס</button>
         </div>
@@ -709,7 +735,7 @@
     if (!ok) { toast("הפעולה זמינה רק במצב ענן", "", "⚠️"); return; }
     s.paidUntil = until;   // עדכון מקומי לתצוגה מיידית
     renderAdminList();
-    toast(months === 0 ? "המנוי אופס" : (months === 12 ? "הופעל לשנה ✓" : `הופעל ל-${months} חודשים ✓`), "good", "💳");
+    toast(months === 0 ? "המנוי אופס" : (months === 12 ? "הופעל לשנה ✓" : (months === 1 ? "הופעל לחודש ✓" : `הופעל ל-${months} חודשים ✓`)), "good", "💳");
   }
 
   function arrivalBanner(st) {

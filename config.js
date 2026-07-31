@@ -86,7 +86,16 @@ window.UG_CONFIG = {
   subscription: {
     enabled: true,
     trialDays: 30,                       // ימי ניסיון חינם למספרה חדשה
-    priceText: "49 ₪ לחודש",             // המחיר שמוצג לספר
+
+    /* המסלולים שמוצגים לספר בסיום הניסיון.
+       payUrl — קישור התשלום מספק הסליקה (CardCom / משולם-Grow / PayPlus / Tranzila).
+       כל עוד payUrl ריק, מוצגות הוראות התשלום הידניות מ-payInfo. */
+    plans: [
+      { id: "monthly", name: "חודשי", price: 35, per: "לחודש", months: 1, payUrl: "" },
+      { id: "yearly", name: "שנתי", price: 299, per: "לשנה", months: 12, payUrl: "",
+        badge: "חיסכון 29%", note: "במקום 420 ₪" },
+    ],
+
     payInfo: "לתשלום והפעלת המנוי שלחו הודעה בוואטסאפ ל-050-0000000",
     // קוד-על שלך לניהול מנויים — שנה לקוד פרטי משלך (מופיע בקוד הציבורי, לכן זו הגנה רכה).
     adminPasscode: "bt-admin-2026",
