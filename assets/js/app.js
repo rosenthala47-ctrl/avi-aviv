@@ -1707,10 +1707,15 @@
     const clients = [...map.values()].sort((a, z) => z.lastTs - a.lastTs);
     const importBtn = `<button class="btn btn-primary" data-act="import-clients" style="margin-bottom:14px">📥 ייבוא רשימת לקוחות</button>`;
     if (!clients.length) return importBtn + emptyState("👥", "אין עדיין לקוחות", "ייבאו את רשימת הלקוחות שלכם, או שהם יופיעו כאן אחרי שיזמינו תור");
+    const actionsRow = `
+      <div class="btn-row" style="margin-bottom:14px">
+        <button class="btn btn-primary" data-act="broadcast">📢 הודעה לכולם</button>
+        <button class="btn" data-act="import-clients">📥 ייבוא רשימה</button>
+      </div>`;
     const totalSpent = clients.reduce((s, c) => s + c.spent, 0);
     const totalVisits = clients.reduce((s, c) => s + c.visits, 0);
     return `
-      ${importBtn}
+      ${actionsRow}
       <div class="stat-chips">
         <div class="stat-chip"><div class="sc-num">${clients.length}</div><div class="sc-lbl">לקוחות</div></div>
         <div class="stat-chip"><div class="sc-num">${totalVisits}</div><div class="sc-lbl">ביקורים</div></div>
@@ -1780,6 +1785,34 @@
     closeModal();
     toast(added ? `יובאו ${added} לקוחות ✓` : "כל הלקוחות כבר קיימים", added ? "good" : "sky", "📥");
     render();
+  }
+
+  /* מודאל הודעה קבוצתית — נשלחת כהתראת פוש לכל הלקוחות שהפעילו התראות */
+  function openBroadcast() {
+    const st = Store.get();
+    const recipients = new Set(
+      (st.bookings || [])
+        .filter((b) => b.userId && b.userId.indexOf("owner") !== 0)
+        .map((b) => b.userId)
+    ).size;
+    openModal(`
+      <div class="m-title">📢 הודעה לכל הלקוחות</div>
+      <div class="m-sub">ההודעה תגיע כהתראה לטלפון של הלקוחות שהזמינו דרך האפליקציה והפעילו התראות</div>
+      <textarea class="input" id="bc-text" rows="4" maxlength="180" placeholder="לדוגמה: מבצע החודש — תספורת + עיצוב זקן ב-60₪ בלבד! מוזמנים לקבוע תור 💈" style="resize:vertical;line-height:1.6;margin-top:6px"></textarea>
+      <p class="hint" style="margin:8px 0 4px">עד 180 תווים · יגיע ל-${recipients} לקוחות שהפעילו התראות · נשלח תוך כמה דקות</p>
+      <button class="btn btn-primary" data-act="do-broadcast" style="margin-top:8px">שליחה לכל הלקוחות</button>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
+    `);
+    setTimeout(() => $("#bc-text") && $("#bc-text").focus(), 100);
+  }
+
+  async function doBroadcast() {
+    const text = (($("#bc-text") && $("#bc-text").value) || "").trim();
+    if (!text) { toast("נא לכתוב הודעה", "", "✋"); return; }
+    const btn = $("[data-act='do-broadcast']"); if (btn) { btn.disabled = true; btn.textContent = "שולח…"; }
+    const entry = await Store.addBroadcast(text);
+    closeModal();
+    toast(entry ? "ההודעה תישלח ללקוחות בקרוב 📢" : "לא ניתן לשלוח כרגע", entry ? "good" : "", "📢");
   }
 
   function clientDetail(key) {
@@ -2927,6 +2960,10 @@
         // ייבוא לקוחות
         case "import-clients": openImportClients(); break;
         case "do-import-clients": doImportClients(); break;
+
+        // הודעה קבוצתית ללקוחות
+        case "broadcast": openBroadcast(); break;
+        case "do-broadcast": doBroadcast(); break;
         case "del-contact":
           await Store.removeContact(t.dataset.id);
           toast("הלקוח הוסר מהרשימה", "", "🗑️"); render(); break;

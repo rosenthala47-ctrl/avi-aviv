@@ -419,6 +419,17 @@ UG.Store = (function () {
     return persist();
   }
 
+  /* ---------- הודעה קבוצתית ללקוחות (נשלחת כפוש ע״י ה-worker כל כמה דקות) ---------- */
+  function addBroadcast(text) {
+    const msg = String(text || "").trim();
+    if (!msg) return Promise.resolve(null);
+    state.broadcasts = state.broadcasts || [];
+    const entry = { id: u.uid(), text: msg, createdAt: Date.now() };
+    state.broadcasts.push(entry);
+    if (state.broadcasts.length > 50) state.broadcasts = state.broadcasts.slice(-50);
+    return persist().then(() => entry);
+  }
+
   /* ---------- ימי סגירה / חופשה ---------- */
   function addClosedDates(list) {
     state.closedDates = state.closedDates || [];
@@ -605,7 +616,7 @@ UG.Store = (function () {
   return {
     init, subscribe, get,
     setDay, saveShop, upsertService, removeService,
-    addContacts, removeContact, addClosedDates, removeClosedDate,
+    addContacts, removeContact, addBroadcast, addClosedDates, removeClosedDate,
     createBooking, setBookingStatus, setBlock, deleteBooking,
     joinWaitlist, leaveWaitlist, consumeAlert, addReview, savePushToken,
     subscribeGallery, getGallery, addPhoto, removePhoto,

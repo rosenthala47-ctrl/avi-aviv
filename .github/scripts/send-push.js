@@ -83,11 +83,13 @@ function apptTs(date, start) {
     const shopName = (shop.shop && shop.shop.name) || "המספרה";
     const alerts = Array.isArray(shop.alerts) ? shop.alerts : [];
     const bookings = Array.isArray(shop.bookings) ? shop.bookings : [];
+    const broadcasts = Array.isArray(shop.broadcasts) ? shop.broadcasts : [];
 
-    const st = perShop[sid] || { alertIds: [], bookingIds: [], cancelIds: [] };
+    const st = perShop[sid] || { alertIds: [], bookingIds: [], cancelIds: [], bcIds: [] };
     const doneAlerts = new Set(st.alertIds || []);
     const doneBookings = new Set(st.bookingIds || []);
     const doneCancels = new Set(st.cancelIds || []);
+    const doneBc = new Set(st.bcIds || []);
 
     const newAlerts = alerts.filter((a) => a && a.id && !doneAlerts.has(a.id) && apptTs(a.date, a.start) > now);
     const newBookings = bookings.filter((b) =>
@@ -96,6 +98,8 @@ function apptTs(date, start) {
     const newCancels = bookings.filter((b) =>
       b && b.id && b.userId && b.status === "cancelled" && b.cancelledBy === "owner" &&
       !doneCancels.has(b.id) && apptTs(b.date, b.start) > now);
+    // הודעות קבוצתיות חדשות שהמנהל שלח ללקוחות
+    const newBc = broadcasts.filter((b) => b && b.id && b.text && !doneBc.has(b.id));
 
     if (!firstRun) {
       for (const a of newAlerts) {
@@ -111,16 +115,29 @@ function apptTs(date, start) {
         sent += await sendToUid(b.userId, "❌ התור שלך בוטל",
           `${shopName}\n${b.serviceName} · ${relDay(b.date)} בשעה ${b.start}`, "cancel-" + b.id);
       }
+      // הודעה קבוצתית — נשלחת לכל הלקוחות שהזמינו דרך האפליקציה
+      if (newBc.length) {
+        const clientIds = [...new Set(
+          bookings.filter((b) => b && b.userId && b.userId.indexOf("owner") !== 0).map((b) => b.userId)
+        )];
+        for (const bc of newBc) {
+          for (const uid of clientIds) {
+            sent += await sendToUid(uid, shopName, bc.text, "bc-" + bc.id);
+          }
+        }
+      }
     }
 
     // סמן הכל כטופל
     alerts.forEach((a) => a && a.id && doneAlerts.add(a.id));
     bookings.forEach((b) => b && b.id && doneBookings.add(b.id));
     bookings.forEach((b) => b && b.id && b.status === "cancelled" && doneCancels.add(b.id));
+    broadcasts.forEach((b) => b && b.id && doneBc.add(b.id));
     perShop[sid] = {
       alertIds: [...doneAlerts].slice(-500),
       bookingIds: [...doneBookings].slice(-500),
       cancelIds: [...doneCancels].slice(-500),
+      bcIds: [...doneBc].slice(-200),
     };
     totalNewA += newAlerts.length; totalNewB += newBookings.length;
   }
