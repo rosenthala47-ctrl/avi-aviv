@@ -2008,13 +2008,18 @@
   }
 
   /* מודאל הודעה קבוצתית — נשלחת כהתראת פוש לכל הלקוחות שהפעילו התראות */
-  function openBroadcast() {
+  // כמה לקוחות ייתכן שיקבלו את ההודעה (מי שהזמין דרך האפליקציה)
+  function broadcastRecipients() {
     const st = Store.get();
-    const recipients = new Set(
+    return new Set(
       (st.bookings || [])
         .filter((b) => b.userId && b.userId.indexOf("owner") !== 0)
         .map((b) => b.userId)
     ).size;
+  }
+
+  function openBroadcast() {
+    const recipients = broadcastRecipients();
     openModal(`
       <div class="m-title">📢 הודעה לכל הלקוחות</div>
       <div class="m-sub">ההודעה תגיע כהתראה לטלפון של הלקוחות שהזמינו דרך האפליקציה והפעילו התראות</div>
@@ -2026,13 +2031,30 @@
     setTimeout(() => $("#bc-text") && $("#bc-text").focus(), 100);
   }
 
-  async function doBroadcast() {
-    const text = (($("#bc-text") && $("#bc-text").value) || "").trim();
+  /* שליחת ההודעה הקבוצתית. sel — תיבת הטקסט (מודאל הלקוחות או הכרטיס בלשונית פרסום) */
+  async function doBroadcast(sel, act) {
+    const el = $(sel || "#bc-text");
+    const text = ((el && el.value) || "").trim();
     if (!text) { toast("נא לכתוב הודעה", "", "✋"); return; }
-    const btn = $("[data-act='do-broadcast']"); if (btn) { btn.disabled = true; btn.textContent = "שולח…"; }
+    const btn = $("[data-act='" + (act || "do-broadcast") + "']");
+    const label = btn ? btn.textContent : "";
+    if (btn) { btn.disabled = true; btn.textContent = "שולח…"; }
     const entry = await Store.addBroadcast(text);
-    closeModal();
+    if (sel === "#pb-text") {                       // כרטיס בעמוד — מנקים ומשחררים
+      if (el && entry) el.value = "";
+      if (btn) { btn.disabled = false; btn.textContent = label; }
+    } else {
+      closeModal();
+    }
     toast(entry ? "ההודעה תישלח ללקוחות בקרוב 📢" : "לא ניתן לשלוח כרגע", entry ? "good" : "", "📢");
+  }
+
+  /* מילוי מהיר של תבנית הודעה בכרטיס שבלשונית פרסום */
+  function fillBroadcast(text) {
+    const el = $("#pb-text");
+    if (!el) return;
+    el.value = text || "";
+    el.focus();
   }
 
   function clientDetail(key) {
@@ -2280,6 +2302,21 @@
       </div>
 
       ${qrShareCard()}
+
+      <div class="section-title">📢 הודעה לכל הלקוחות</div>
+      <div class="card">
+        <div class="hint" style="margin:0 0 11px">כתבו הודעה — היא תגיע כהתראה לטלפון של כל הלקוחות שהזמינו דרך האפליקציה, גם כשהיא סגורה.</div>
+        <div class="bc-tpls">
+          <button class="bc-tpl" data-act="bc-tpl" data-t="עברנו לאפליקציית תורים חדשה! מעכשיו אפשר לקבוע תור ישירות מהטלפון, בלי טלפונים והודעות 💈">📱 עברנו לאפליקציה</button>
+          <button class="bc-tpl" data-act="bc-tpl" data-t="מבצע חדש החודש! מוזמנים לקבוע תור ולנצל 💈">🎉 מבצע חדש</button>
+          <button class="bc-tpl" data-act="bc-tpl" data-t="השקנו שירות חדש במחיר השקה מנצח — מוזמנים לקבוע תור ולהתרשם ✂️">✨ שירות חדש</button>
+        </div>
+        <textarea class="input" id="pb-text" rows="3" maxlength="180"
+          placeholder="לדוגמה: מבצע החודש — תספורת + עיצוב זקן ב-60₪ בלבד! מוזמנים לקבוע תור 💈"
+          style="resize:vertical;line-height:1.6"></textarea>
+        <div class="hint" style="margin:8px 0 12px">עד 180 תווים · יגיע ל-${broadcastRecipients()} לקוחות · נשלח תוך כמה דקות</div>
+        <button class="btn btn-primary" data-act="do-broadcast-pub">📢 שליחה לכל הלקוחות</button>
+      </div>
 
       <div class="section-title">איך זה עובד?</div>
       <div class="card">
@@ -3183,7 +3220,9 @@
 
         // הודעה קבוצתית ללקוחות
         case "broadcast": openBroadcast(); break;
-        case "do-broadcast": doBroadcast(); break;
+        case "do-broadcast": doBroadcast("#bc-text", "do-broadcast"); break;
+        case "bc-tpl": fillBroadcast(t.dataset.t); break;
+        case "do-broadcast-pub": doBroadcast("#pb-text", "do-broadcast-pub"); break;
 
         // מנוי
         case "show-upgrade": handleUpgrade(); break;
