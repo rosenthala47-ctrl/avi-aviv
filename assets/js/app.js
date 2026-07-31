@@ -565,6 +565,153 @@
     </div>`;
   }
 
+  /* ---------- מנוי (מודל עסקי) ---------- */
+  // מצב המנוי של המספרה הפעילה: off / grandfathered / trial / active / expired
+  function subStatus() {
+    const cfg = UG_CONFIG.subscription || {};
+    if (!cfg.enabled) return { state: "off" };
+    const st = Store.get();
+    if (!st || !st.shop) return { state: "off" };
+    const now = Date.now();
+    const sub = (Store.getSub && Store.getSub()) || null;
+    const paidUntil = (sub && Number(sub.paidUntil)) || 0;
+    if (paidUntil > now) return { state: "active", until: paidUntil, daysLeft: Math.ceil((paidUntil - now) / 86400000) };
+    const created = Number(st.shop.createdAt) || 0;
+    if (!created) return { state: "grandfathered" };   // מספרות ותיקות — לא ננעלות
+    const trialEnd = created + (Number(cfg.trialDays) || 30) * 86400000;
+    if (now < trialEnd) return { state: "trial", until: trialEnd, daysLeft: Math.ceil((trialEnd - now) / 86400000) };
+    return { state: "expired" };
+  }
+
+  // באנר עדין במסך הניהול — ספירת ימי ניסיון / התראה על מנוי שמסתיים
+  function subBanner() {
+    const cfg = UG_CONFIG.subscription || {};
+    const s = subStatus();
+    if (s.state === "trial") {
+      const soon = s.daysLeft <= 7;
+      return `
+      <div class="banner ${soon ? "warn" : "sky"}">
+        <span class="bn-ico">${soon ? "⏳" : "🎁"}</span>
+        <div class="bn-body">
+          <div class="bn-title">תקופת ניסיון — נותרו ${s.daysLeft} ימים</div>
+          <div class="bn-sub">בסיום הניסיון יידרש מנוי (${esc(cfg.priceText || "")}) כדי להמשיך לנהל</div>
+        </div>
+        <button class="btn btn-primary btn-sm" data-act="show-upgrade" style="width:auto">פרטים</button>
+      </div>`;
+    }
+    if (s.state === "active" && s.daysLeft <= 5) {
+      return `
+      <div class="banner warn">
+        <span class="bn-ico">⏳</span>
+        <div class="bn-body">
+          <div class="bn-title">המנוי מסתיים בעוד ${s.daysLeft} ימים</div>
+          <div class="bn-sub">חדשו את המנוי כדי להמשיך ללא הפרעה</div>
+        </div>
+        <button class="btn btn-primary btn-sm" data-act="show-upgrade" style="width:auto">חידוש</button>
+      </div>`;
+    }
+    return "";
+  }
+
+  // מסך "המנוי הסתיים" — מחליף את הניהול כשהניסיון נגמר ולא שולם
+  function paywallBody() {
+    const cfg = UG_CONFIG.subscription || {};
+    const st = Store.get();
+    const name = (st && st.shop && st.shop.name) || "";
+    return `
+      <div class="paywall">
+        <div class="pw-ico">🔒</div>
+        <h2>תקופת הניסיון הסתיימה</h2>
+        <p>${esc(name)} — כדי להמשיך לנהל תורים, לקוחות והגדרות יש להפעיל מנוי.</p>
+        <div class="pw-price">${esc(cfg.priceText || "")}</div>
+        <div class="pw-card">
+          <div class="pw-card-t">להפעלת המנוי</div>
+          <div class="pw-card-b">${esc(cfg.payInfo || "")}</div>
+        </div>
+        <p class="hint">הלקוחות שלך עדיין יכולים לקבוע תור בינתיים. ההפעלה מיידית לאחר התשלום.</p>
+      </div>`;
+  }
+
+  function handleUpgrade() {
+    const cfg = UG_CONFIG.subscription || {};
+    openModal(`
+      <div class="m-title">💳 הפעלת מנוי</div>
+      <div class="m-sub">${esc(cfg.priceText || "")}</div>
+      <div class="pw-card" style="margin-top:12px">
+        <div class="pw-card-b">${esc(cfg.payInfo || "")}</div>
+      </div>
+      <p class="hint" style="margin-top:12px">לאחר התשלום המספרה שלך תופעל והגישה לניהול תחזור — בדרך כלל תוך זמן קצר.</p>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:12px">סגירה</button>
+    `);
+  }
+
+  /* ---------- פאנל-על: ניהול מנויים (אתה בלבד) ---------- */
+  let adminShops = [];
+  async function openAdminPanel() {
+    openModal(`
+      <div class="m-title">🛠️ ניהול מנויים</div>
+      <div class="m-sub">הפעל או חדש מנוי למספרות ששילמו</div>
+      <div id="adm-list" style="max-height:60vh;overflow-y:auto;margin-top:12px">טוען…</div>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:12px">סגירה</button>
+    `);
+    try {
+      adminShops = await Store.adminListShops();
+      renderAdminList();
+    } catch (e) {
+      const el = $("#adm-list"); if (el) el.textContent = "שגיאה בטעינת המספרות";
+    }
+  }
+
+  function admShopStatus(s) {
+    const cfg = UG_CONFIG.subscription || {};
+    const now = Date.now();
+    if (s.paidUntil && s.paidUntil > now) {
+      return { label: "מנוי פעיל · עד " + u.longDate(u.dateKey(new Date(s.paidUntil))), cls: "ok" };
+    }
+    if (!s.createdAt) return { label: "מספרה ותיקה (ללא הגבלה)", cls: "ok" };
+    const trialEnd = s.createdAt + (Number(cfg.trialDays) || 30) * 86400000;
+    if (now < trialEnd) return { label: "ניסיון · " + Math.ceil((trialEnd - now) / 86400000) + " ימים נותרו", cls: "trial" };
+    return { label: "הסתיים — ממתין לתשלום", cls: "exp" };
+  }
+
+  function renderAdminList() {
+    const el = $("#adm-list"); if (!el) return;
+    if (!adminShops.length) { el.innerHTML = `<p class="hint">אין עדיין מספרות</p>`; return; }
+    el.innerHTML = adminShops.map((s) => {
+      const st = admShopStatus(s);
+      return `
+      <div class="adm-shop">
+        <div class="adm-name">${esc(s.name)} <span style="color:var(--muted);font-weight:400">· ${esc(s.id)}</span></div>
+        <div class="adm-meta">${s.phone ? esc(s.phone) + " · " : ""}${s.paidUntil ? "שולם עד " + esc(u.longDate(u.dateKey(new Date(s.paidUntil)))) : "טרם שולם"}</div>
+        <span class="adm-badge ${st.cls}">${esc(st.label)}</span>
+        <div class="adm-btns">
+          <button class="btn btn-sm" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="1">+ חודש</button>
+          <button class="btn btn-sm" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="3">+ 3 חודשים</button>
+          <button class="btn btn-sm" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="12">+ שנה</button>
+          <button class="btn btn-sm btn-danger" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="0">איפוס</button>
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  async function admExtend(sid, months) {
+    const s = adminShops.find((x) => x.id === sid);
+    if (!s) return;
+    const now = Date.now();
+    let until = 0;
+    if (months > 0) {
+      const base = (s.paidUntil && s.paidUntil > now) ? s.paidUntil : now;
+      const d = new Date(base);
+      d.setMonth(d.getMonth() + months);
+      until = d.getTime();
+    }
+    const ok = await Store.adminSetPaid(sid, until);
+    if (!ok) { toast("הפעולה זמינה רק במצב ענן", "", "⚠️"); return; }
+    s.paidUntil = until;   // עדכון מקומי לתצוגה מיידית
+    renderAdminList();
+    toast(months === 0 ? "המנוי אופס" : (months === 12 ? "הופעל לשנה ✓" : `הופעל ל-${months} חודשים ✓`), "good", "💳");
+  }
+
   function arrivalBanner(st) {
     const now = Date.now();
     const upcoming = st.bookings
@@ -1344,8 +1491,11 @@
     const todayKey = u.dateKey(new Date());
     const now = Date.now();
     const todayCount = st.bookings.filter((b) => b.status !== "cancelled" && b.date === todayKey).length;
+    // מנוי הסתיים — נועלים את הניהול ומציגים מסך הפעלה
+    const locked = subStatus().state === "expired";
     let body;
-    if (view.ownerTab === "cal") body = ownerCal(st);
+    if (locked) body = paywallBody();
+    else if (view.ownerTab === "cal") body = ownerCal(st);
     else if (view.ownerTab === "hours") body = ownerHours(st);
     else if (view.ownerTab === "services") body = ownerServices(st);
     else if (view.ownerTab === "bookings") body = ownerBookings(st);
@@ -1357,10 +1507,13 @@
     const upcomingCount = st.bookings.filter((b) =>
       b.status !== "cancelled" && u.dateTime(b.date, b.start).getTime() > now).length;
 
+    const banners = locked ? "" :
+      subBanner() + (view.ownerTab !== "settings" ? ownerNotifBanner() : "");
+
     return `
     <div class="screen active">
       ${topbar("ניהול העסק", {})}
-      <div class="content" id="oscroll">${view.ownerTab !== "settings" ? ownerNotifBanner() : ""}${body}</div>
+      <div class="content" id="oscroll">${banners}${body}</div>
       <div class="tabbar scroll">
         <button data-otab="cal" class="${view.ownerTab === "cal" ? "active" : ""}"><span class="tb-ico">🗓️</span>יומן</button>
         <button data-otab="hours" class="${view.ownerTab === "hours" ? "active" : ""}"><span class="tb-ico">🕐</span>שעות</button>
@@ -2964,6 +3117,10 @@
         // הודעה קבוצתית ללקוחות
         case "broadcast": openBroadcast(); break;
         case "do-broadcast": doBroadcast(); break;
+
+        // מנוי
+        case "show-upgrade": handleUpgrade(); break;
+        case "adm-extend": admExtend(t.dataset.sid, Number(t.dataset.m)); break;
         case "del-contact":
           await Store.removeContact(t.dataset.id);
           toast("הלקוח הוסר מהרשימה", "", "🗑️"); render(); break;
@@ -3142,6 +3299,9 @@
     const check = () => {
       const v = (($("#own-code") && $("#own-code").value) || "").trim();
       const shop = (Store.get() && Store.get().shop) || {};
+      // קוד-על לניהול מנויים (אתה בלבד) — פותח את פאנל האדמין במקום מצב מנהל
+      const adminPass = String((UG_CONFIG.subscription || {}).adminPasscode || "");
+      if (adminPass && v === adminPass) { closeModal(); openAdminPanel(); return; }
       const configCodes = [UG_CONFIG.ownerPasscode].concat(UG_CONFIG.ownerPasscodesExtra || []).map(String);
       const ok = (shop.ownerPass && v === String(shop.ownerPass)) ||
         (SHOP === "main" && configCodes.includes(v));   // סיסמאות ה-config עובדות רק למספרה הראשית

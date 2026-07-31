@@ -22,6 +22,16 @@
         ".read": "auth != null",
         ".write": "auth != null"
       }
+    },
+
+    "subs": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "shopIndex": {
+      ".read": "auth != null",
+      ".write": "auth != null"
     }
   }
 }

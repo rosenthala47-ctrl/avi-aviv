@@ -1,6 +1,6 @@
 /* Service Worker — BarberTor
    מטרות: התקנת PWA + הצגת התראות פוש (תזכורות / תור חדש).            */
-const CACHE = "ug-barber-v61";
+const CACHE = "ug-barber-v62";
 const ASSETS = [
   "./",
   "./index.html",

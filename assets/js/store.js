@@ -16,6 +16,7 @@ UG.Store = (function () {
   let state = null;
   let backend = null;
   let notFound = false;
+  let subState = null;   // מידע המנוי של המספרה הפעילה (subs/<id>) — לקריאה בלבד
   const subs = new Set();
   let galleryCache = [];
   const gallerySubs = new Set();
@@ -243,6 +244,9 @@ UG.Store = (function () {
         });
       },
       exists() { return ref.once("value").then((snap) => snap.exists()); },
+      // מנוי — נשמר בצומת נפרד (subs/<id>) שהספר קורא אך לא כותב, כדי שלא ידרוס
+      readSub() { return db.ref("subs/" + id).once("value").then((s) => s.val() || null); },
+      onSub(cb) { db.ref("subs/" + id).on("value", (s) => cb(s.val() || null)); },
     };
   }
 
@@ -310,9 +314,54 @@ UG.Store = (function () {
     state = s;
     backend.onRemote((remote) => reloadFromRemote(remote));
     if (backend.onGallery) backend.onGallery((list) => reloadGallery(list));
+    // מנוי — קריאה ראשונית + מעקב בזמן אמת (אם אתה מפעיל את המספרה, זה יתעדכן מיד)
+    if (backend.readSub) {
+      try { subState = await backend.readSub(); } catch (e) { subState = null; }
+      if (backend.onSub) backend.onSub((v) => { subState = v; emit(); });
+    }
+    // אינדקס קליל לפאנל ניהול המנויים — שם/טלפון עסקי/תאריך יצירה בלבד (ללא נתוני לקוחות)
+    if (_conn && _conn.kind === "rtdb" && state && state.shop) {
+      try {
+        _conn.db.ref("shopIndex/" + shopId).set({
+          name: state.shop.name || shopId,
+          phone: state.shop.phone || "",
+          createdAt: state.shop.createdAt || 0,
+        });
+      } catch (e) {}
+    }
     reloadGallery();
     emit();
     return state;
+  }
+
+  function getSub() { return subState; }
+
+  /* ---------- פאנל-על: ניהול מנויים (אתה בלבד) — עובד רק במצב Realtime DB ---------- */
+  async function adminListShops() {
+    await connect();
+    if (!_conn || _conn.kind !== "rtdb") return [];
+    const db = _conn.db;
+    const [idxSnap, subsSnap] = await Promise.all([
+      db.ref("shopIndex").once("value"),
+      db.ref("subs").once("value"),
+    ]);
+    const idx = idxSnap.val() || {};
+    const subsV = subsSnap.val() || {};
+    return Object.keys(idx).map((k) => ({
+      id: k,
+      name: (idx[k] && idx[k].name) || k,
+      phone: (idx[k] && idx[k].phone) || "",
+      createdAt: (idx[k] && idx[k].createdAt) || 0,
+      paidUntil: (subsV[k] && subsV[k].paidUntil) || 0,
+    })).sort((a, z) => (z.createdAt || 0) - (a.createdAt || 0));
+  }
+  async function adminSetPaid(sid, paidUntil, note) {
+    await connect();
+    if (!_conn || _conn.kind !== "rtdb") return false;
+    await _conn.db.ref("subs/" + sid).set({
+      paidUntil: paidUntil || 0, note: note || "", updatedAt: Date.now(),
+    });
+    return true;
   }
 
   // יצירת מספרה חדשה (רישום ספר)
@@ -322,6 +371,7 @@ UG.Store = (function () {
     const exists = await b.exists();
     if (exists) return { ok: false, reason: "הכתובת הזו כבר תפוסה — בחרו אחרת" };
     const s = defaultState();
+    s.shop.createdAt = Date.now();   // תחילת תקופת הניסיון של המנוי
     s.shop.name = (data && data.name) || s.shop.name;
     s.shop.tagline = (data && data.tagline) || "מספרה";
     s.shop.ownerPass = String((data && data.ownerPass) || "");
@@ -621,6 +671,7 @@ UG.Store = (function () {
     joinWaitlist, leaveWaitlist, consumeAlert, addReview, savePushToken,
     subscribeGallery, getGallery, addPhoto, removePhoto,
     createShop, shopExists, peekShop,
+    getSub, adminListShops, adminSetPaid,
     get mode() { return backend ? backend.mode : "local"; },
     get shopId() { return shopId; },
     get notFound() { return notFound; },
