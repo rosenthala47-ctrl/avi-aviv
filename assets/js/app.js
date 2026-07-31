@@ -2024,7 +2024,7 @@
       <div class="m-title">📢 הודעה לכל הלקוחות</div>
       <div class="m-sub">ההודעה תגיע כהתראה לטלפון של הלקוחות שהזמינו דרך האפליקציה והפעילו התראות</div>
       <textarea class="input" id="bc-text" rows="4" maxlength="180" placeholder="לדוגמה: מבצע החודש — תספורת + עיצוב זקן ב-60₪ בלבד! מוזמנים לקבוע תור 💈" style="resize:vertical;line-height:1.6;margin-top:6px"></textarea>
-      <p class="hint" style="margin:8px 0 4px">עד 180 תווים · יגיע ל-${recipients} לקוחות שהפעילו התראות · נשלח תוך כמה דקות</p>
+      <p class="hint" style="margin:8px 0 4px">עד 180 תווים · עד ${recipients} לקוחות שהזמינו דרך האפליקציה — יקבלו רק מי שאישר התראות</p>
       <button class="btn btn-primary" data-act="do-broadcast" style="margin-top:8px">שליחה לכל הלקוחות</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
     `);
@@ -2314,7 +2314,7 @@
         <textarea class="input" id="pb-text" rows="3" maxlength="180"
           placeholder="לדוגמה: מבצע החודש — תספורת + עיצוב זקן ב-60₪ בלבד! מוזמנים לקבוע תור 💈"
           style="resize:vertical;line-height:1.6"></textarea>
-        <div class="hint" style="margin:8px 0 12px">עד 180 תווים · יגיע ל-${broadcastRecipients()} לקוחות · נשלח תוך כמה דקות</div>
+        <div class="hint" style="margin:8px 0 12px">עד 180 תווים · עד ${broadcastRecipients()} לקוחות שהזמינו דרך האפליקציה — יקבלו רק מי שאישר התראות בטלפון</div>
         <button class="btn btn-primary" data-act="do-broadcast-pub">📢 שליחה לכל הלקוחות</button>
       </div>
 
