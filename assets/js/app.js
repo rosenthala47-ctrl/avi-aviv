@@ -81,6 +81,7 @@
   };
   let ownerSeen = null;     // Set של מזהי תורים שהבעלים כבר ראה (זיהוי תור חדש)
   let clientCancelSeen = null;   // Set של תורים מבוטלים שהלקוח כבר טופלו (זיהוי ביטול חדש)
+  let ownerCancelSeen = null;    // Set של ביטולים ע״י לקוחות שהבעלים כבר קיבל עליהם התראה
   let authAvail = false;    // האם התחברות מאובטחת (Firebase Auth) זמינה
   let identity = loadIdentity();
 
@@ -1861,7 +1862,10 @@
         ? `<button class="btn btn-sm btn-danger" data-act="owner-cancel" data-id="${b.id}">בטל</button>`
         : (b.status === "noshow"
             ? `<button class="btn btn-sm" data-act="owner-unnoshow" data-id="${b.id}">בטל סימון</button>`
-            : `<button class="btn btn-sm" data-act="owner-noshow" data-id="${b.id}">לא הגיע</button>`);
+            : `<div class="bk-acts">
+                 ${b.status !== "confirmed" ? `<button class="btn btn-sm" data-act="owner-confirm" data-id="${b.id}">✓ הגיע</button>` : ""}
+                 <button class="btn btn-sm" data-act="owner-noshow" data-id="${b.id}">לא הגיע</button>
+               </div>`);
       return `
       <div class="booking" style="${isPast ? "opacity:.6" : ""}">
         <div class="bk-time">
@@ -1886,53 +1890,138 @@
     return html;
   }
 
-  /* מודאל הוספת תור ידנית ע״י הבעלים — בכל שעה מ-00:00 עד 23:45 (גם מחוץ לשעות הפעילות) */
+  /* ---------- הוספת תור ידנית ע״י הבעלים ----------
+     מציג בדיוק את בורר הימים והשעות שהלקוח רואה, כדי שקל יהיה לראות מה פנוי.
+     בנוסף יש «שעה אחרת» כדי לקבוע גם מחוץ לשעות הפעילות. */
+  let addBk = null;
+
   function ownerAddBooking() {
     const st = Store.get();
     if (!st.services.length) { toast("צריך להגדיר שירות אחד לפחות", "", "✂️"); return; }
-    const today = u.dateKey(new Date());
-    const svcOptions = st.services.map((s) => `<option value="${s.id}">${esc(s.name)} · ${u.fmtDuration(s.durationMin)}</option>`).join("");
-    const hourOptions = Array.from({ length: 24 }, (_, h) => { const v = String(h).padStart(2, "0"); return `<option value="${v}">${v}</option>`; }).join("");
-    const minOptions = ["00", "15", "30", "45"].map((m) => `<option value="${m}">${m}</option>`).join("");
-    const contacts = (st.contacts || []).slice().sort((a, b) => (a.name || "").localeCompare(b.name || "", "he"));
+    const now = new Date();
+    addBk = {
+      date: u.dateKey(now), start: "", custom: false,
+      hour: String(now.getHours()).padStart(2, "0"), min: "00",
+      svcId: st.services[0].id, staff: "", name: "", phone: "", email: "", contactId: "",
+    };
+    openModal(addBookingHtml());
+    wireAddBooking();
+    setTimeout(() => $("#ab-name") && $("#ab-name").focus(), 100);
+  }
+
+  // שמירת מה שהוקלד לפני ציור מחדש של המודאל
+  function captureAddBooking() {
+    if (!addBk) return;
+    const g = (id) => { const e = $(id); return e ? e.value : undefined; };
+    const map = { svcId: "#ab-svc", staff: "#ab-staff", name: "#ab-name", phone: "#ab-phone",
+                  email: "#ab-email", contactId: "#ab-contact", hour: "#ab-hour", min: "#ab-min",
+                  date: "#ab-date" };
+    Object.keys(map).forEach((k) => { const v = g(map[k]); if (v !== undefined) addBk[k] = v; });
+  }
+
+  function refreshAddBooking() {
+    captureAddBooking();
+    $("#modal").innerHTML = `<div class="m-handle"></div>` + addBookingHtml();
+    wireAddBooking();
+  }
+
+  function addBookingHtml() {
+    const st = Store.get();
+    const a = addBk;
+    const closed = new Set(st.closedDates || []);
+    const days = nextDays(14);
+    // ב«שעה אחרת» מותר גם תאריך רחוק מהיומן — אין להחזיר אותו לטווח הצ׳יפים
+    if (!a.custom && !days.includes(a.date)) a.date = days[0];
+
+    // בורר ימים — לבעלים כל הימים לחיצים, גם סגור/חופשה
+    const dayChips = days.map((k) => {
+      const d = u.parseKey(k);
+      const vac = closed.has(k);
+      const off = !st.schedule[d.getDay()].active || vac;
+      return `
+      <button class="day-chip ${a.date === k ? "selected" : ""} ${off ? "off" : ""}" data-abday="${k}">
+        <div class="dc-dow">${vac ? "חופשה" : off ? "סגור" : u.DOW_SHORT[d.getDay()]}</div>
+        <div class="dc-num">${d.getDate()}</div>
+        <div class="dc-mon">${u.MON[d.getMonth()]}</div>
+      </button>`;
+    }).join("");
+
+    // שעות — כמו אצל הלקוח, אבל התפוסות מוצגות חסומות ומשבצות שעברו עדיין נבחרות
+    // (כדי לתעד לקוח מזדמן שכבר היה)
+    const slots = gridSlots(a.date);
+    let slotsHtml;
+    if (!slots.length) {
+      slotsHtml = `<p class="hint" style="margin:2px 0 0">אין שעות פעילות ביום זה — סמנו «שעה אחרת» כדי לקבוע בכל זאת.</p>`;
+    } else {
+      slotsHtml = `<div class="slots-grid">` + slots.map((s) => {
+        if (s.booking) {
+          return `<button class="slot taken" disabled>${s.start}<span class="slot-tag">${esc(s.booking.userName || "תפוס")}</span></button>`;
+        }
+        const tag = s.blocked ? `<span class="slot-tag show">חסום</span>` : (s.past ? `<span class="slot-tag show">עבר</span>` : "");
+        return `<button class="slot ${(!a.custom && a.start === s.start) ? "selected" : ""} ${s.past ? "slot-past" : ""}" data-abslot="${s.start}">${s.start}${tag}</button>`;
+      }).join("") + `</div>`;
+    }
+
+    const svcOptions = st.services.map((s) =>
+      `<option value="${s.id}" ${a.svcId === s.id ? "selected" : ""}>${esc(s.name)} · ${u.fmtDuration(s.durationMin)}</option>`).join("");
+    const hourOptions = Array.from({ length: 24 }, (_, h) => { const v = String(h).padStart(2, "0"); return `<option value="${v}" ${a.hour === v ? "selected" : ""}>${v}</option>`; }).join("");
+    const minOptions = ["00", "15", "30", "45"].map((m) => `<option value="${m}" ${a.min === m ? "selected" : ""}>${m}</option>`).join("");
+    const contacts = (st.contacts || []).slice().sort((x, y) => (x.name || "").localeCompare(y.name || "", "he"));
     const staff = st.shop.staff || [];
-    openModal(`
+    const chosen = a.custom ? (a.hour + ":" + a.min) : a.start;
+
+    return `
       <div class="m-title">הוספת תור ידני</div>
-      <div class="m-sub">אפשר לקבוע בכל שעה — גם מחוץ לשעות הפעילות</div>
-      ${contacts.length ? `
-      <div class="field"><label>בחירת לקוח קיים (לא חובה)</label>
-        <select class="input" id="ab-contact">
-          <option value="">— לקוח חדש —</option>
-          ${contacts.map((c) => `<option value="${esc(c.id)}" data-name="${esc(c.name)}" data-phone="${esc(c.phone)}">${esc(c.name)}${c.phone ? " · " + esc(c.phone) : ""}</option>`).join("")}
-        </select></div>` : ""}
+      <div class="m-sub">${chosen
+        ? `נבחר: <b>${esc(chosen)}</b> · ${esc(u.relativeDay(a.date))}`
+        : "בחרו יום ושעה מהיומן"}</div>
+
       <div class="field"><label>שירות</label>
         <select class="input" id="ab-svc">${svcOptions}</select></div>
       ${staff.length ? `
       <div class="field"><label>ספר</label>
         <select class="input" id="ab-staff">
           <option value="">— ללא —</option>
-          ${staff.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("")}
+          ${staff.map((n) => `<option value="${esc(n)}" ${a.staff === n ? "selected" : ""}>${esc(n)}</option>`).join("")}
         </select></div>` : ""}
+
+      <label class="fld-lbl">יום</label>
+      <div class="days-scroll">${dayChips}</div>
+      <label class="fld-lbl" style="margin-top:12px">שעה</label>
+      ${slotsHtml}
+
+      <label class="ab-custom">
+        <input type="checkbox" id="ab-custom" ${a.custom ? "checked" : ""}>
+        <span>שעה אחרת — גם מחוץ לשעות הפעילות</span>
+      </label>
+      ${a.custom ? `
       <div class="field"><label>תאריך</label>
-        <input class="input" id="ab-date" type="date" value="${today}"></div>
-      <div class="field"><label>שעה</label>
-        <div style="display:flex;gap:8px;align-items:center;direction:ltr;justify-content:flex-start">
-          <select class="input" id="ab-hour" style="flex:1">${hourOptions}</select>
-          <span style="font-weight:800">:</span>
-          <select class="input" id="ab-min" style="flex:1">${minOptions}</select>
-        </div></div>
+        <input class="input" id="ab-date" type="date" value="${esc(a.date)}"></div>
+      <div style="display:flex;gap:8px;align-items:center;direction:ltr;justify-content:flex-start;margin-bottom:4px">
+        <select class="input" id="ab-hour" style="flex:1">${hourOptions}</select>
+        <span style="font-weight:800">:</span>
+        <select class="input" id="ab-min" style="flex:1">${minOptions}</select>
+      </div>` : ""}
+
+      ${contacts.length ? `
+      <div class="field" style="margin-top:12px"><label>בחירת לקוח קיים (לא חובה)</label>
+        <select class="input" id="ab-contact">
+          <option value="">— לקוח חדש —</option>
+          ${contacts.map((c) => `<option value="${esc(c.id)}" data-name="${esc(c.name)}" data-phone="${esc(c.phone)}" ${a.contactId === c.id ? "selected" : ""}>${esc(c.name)}${c.phone ? " · " + esc(c.phone) : ""}</option>`).join("")}
+        </select></div>` : ""}
       <div class="field"><label>שם הלקוח</label>
-        <input class="input" id="ab-name" placeholder="שם הלקוח"></div>
+        <input class="input" id="ab-name" placeholder="שם הלקוח" value="${esc(a.name)}"></div>
       <div class="field"><label>טלפון</label>
-        <input class="input" id="ab-phone" type="tel" inputmode="tel" placeholder="050-0000000"></div>
+        <input class="input" id="ab-phone" type="tel" inputmode="tel" placeholder="050-0000000" value="${esc(a.phone)}"></div>
       ${(UG.Email && UG.Email.configured()) ? `
       <div class="field"><label>אימייל לאישור (לא חובה)</label>
-        <input class="input" id="ab-email" type="email" inputmode="email" placeholder="name@email.com"></div>` : ""}
+        <input class="input" id="ab-email" type="email" inputmode="email" placeholder="name@email.com" value="${esc(a.email)}"></div>` : ""}
       <button class="btn btn-primary" data-act="save-add-booking">קביעת התור</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
-    `);
-    const hs = $("#ab-hour"); if (hs) hs.value = String(new Date().getHours()).padStart(2, "0");
-    // בחירת לקוח קיים — מילוי אוטומטי של שם וטלפון
+    `;
+  }
+
+  function wireAddBooking() {
     const cs = $("#ab-contact");
     if (cs) cs.addEventListener("change", () => {
       const opt = cs.options[cs.selectedIndex];
@@ -1941,34 +2030,42 @@
         if ($("#ab-phone")) $("#ab-phone").value = opt.dataset.phone || "";
       }
     });
-    setTimeout(() => $("#ab-name") && $("#ab-name").focus(), 100);
+    const cb = $("#ab-custom");
+    if (cb) cb.addEventListener("change", () => {
+      captureAddBooking();
+      addBk.custom = cb.checked;
+      refreshAddBooking();
+    });
   }
 
   async function saveAddBooking() {
-    const svcId = ($("#ab-svc") && $("#ab-svc").value) || "";
-    const date = ($("#ab-date") && $("#ab-date").value) || "";
-    const hh = ($("#ab-hour") && $("#ab-hour").value) || "00";
-    const mm = ($("#ab-min") && $("#ab-min").value) || "00";
-    const name = ($("#ab-name") && $("#ab-name").value.trim()) || "";
-    const phoneRaw = ($("#ab-phone") && $("#ab-phone").value.trim()) || "";
-    if (!svcId) { toast("בחרו שירות", "", "✋"); return; }
-    if (!date) { toast("בחרו תאריך", "", "✋"); return; }
+    captureAddBooking();
+    const a = addBk;
+    if (!a) return;
+    const start = a.custom ? (a.hour + ":" + a.min) : a.start;
+    const name = String(a.name || "").trim();
+    const phoneRaw = String(a.phone || "").trim();
+    if (!a.svcId) { toast("בחרו שירות", "", "✋"); return; }
+    if (!start) { toast("בחרו שעה מהיומן", "", "🕐"); return; }
     if (!name) { toast("הזינו שם לקוח", "", "✋"); return; }
     // טלפון חובה — בלעדיו אי אפשר לשלוח ללקוח הודעות בוואטסאפ
     if (!u.isValidPhone(phoneRaw)) { toast("נא להזין מספר טלפון תקין", "", "📵"); return; }
-    const start = hh + ":" + mm;
     const phone = u.fmtPhone(phoneRaw);
-    const email = ($("#ab-email") && $("#ab-email").value.trim()) || "";
+    const email = String(a.email || "").trim();
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("כתובת אימייל לא תקינה", "", "📧"); return; }
-    const staff = ($("#ab-staff") && $("#ab-staff").value) || "";
     const res = await Store.createBooking({
-      serviceId: svcId, date, start,
-      userId: "owner:" + (phone ? u.normalizePhone(phone) : u.uid()),
-      userName: name, phone, email, staff,
+      serviceId: a.svcId, date: a.date, start,
+      userId: "owner:" + u.normalizePhone(phone),
+      userName: name, phone, email, staff: a.staff || "",
     });
     if (!res.ok) { toast(res.reason || "לא ניתן לקבוע את התור", "", "⚠️"); return; }
-    closeModal(); toast("התור נוסף ✓", "good", "➕");
+    // תור שכבר עבר (לקוח מזדמן שהיה עכשיו) — נספר מיד בהכנסות ובביקורים
+    const past = u.dateTime(a.date, start).getTime() <= Date.now();
+    if (past) await Store.setBookingStatus(res.booking.id, "confirmed", "owner");
+    closeModal();
+    toast(past ? "התור נוסף ונספר בהכנסות ✓" : "התור נוסף ✓", "good", "➕");
     sendBookingEmail(res.booking);   // מייל אישור ללקוח (אם מוגדר והוזן אימייל)
+    addBk = null;
     render();
   }
 
@@ -3090,8 +3187,12 @@
       // כניסת מנהל נסתרת: 3 הקשות רצופות על הלוגו (בתצוגת לקוח בלבד)
       if (e.target.closest(".logo-dot") && view.route === "client") { onLogoTap(); return; }
 
-      const t = e.target.closest("[data-act],[data-svc],[data-day],[data-oday],[data-slot],[data-wait],[data-photo],[data-delphoto],[data-tab],[data-otab],[data-active]");
+      const t = e.target.closest("[data-act],[data-svc],[data-day],[data-oday],[data-slot],[data-wait],[data-photo],[data-delphoto],[data-tab],[data-otab],[data-active],[data-abday],[data-abslot]");
       if (!t) return;
+
+      // בורר היום/השעה במודאל «הוספת תור ידני» — לפני הבוררים של הלקוח
+      if (t.dataset.abday) { if (!addBk) return; captureAddBooking(); addBk.date = t.dataset.abday; addBk.start = ""; refreshAddBooking(); return; }
+      if (t.dataset.abslot) { if (!addBk) return; captureAddBooking(); addBk.start = t.dataset.abslot; addBk.custom = false; refreshAddBooking(); return; }
 
       if (t.dataset.photo) { openPhoto(t.dataset.photo); return; }
       if (t.dataset.delphoto !== undefined) {
@@ -3387,6 +3488,10 @@
           toast("הלקוח הוסר מהרשימה", "", "🗑️"); render(); break;
 
         // סימון "לא הגיע"
+        // סימון הגעה ע״י הספר — מכניס את התור לדוח ההכנסות ולביקורי הלקוח
+        case "owner-confirm":
+          await Store.setBookingStatus(t.dataset.id, "confirmed", "owner");
+          toast("סומן: הלקוח הגיע ✓", "good", "✓"); render(); break;
         case "owner-noshow":
           await Store.setBookingStatus(t.dataset.id, "noshow", "owner");
           toast("סומן: הלקוח לא הגיע", "", "❌"); render(); break;
@@ -3708,6 +3813,20 @@
           const warn = b.priorNoShow ? " · ⚠️ לא הגיע בעבר" : "";
           toast(`תור חדש: ${b.userName} · ${b.serviceName} ${u.relativeDay(b.date)} ${b.start}${warn}`, "sky", "🎉");
           Notify.show("📅 תור חדש נקבע", `${b.userName} — ${b.serviceName}\n${u.longDate(b.date)} בשעה ${b.start}${b.priorNoShow ? "\n⚠️ הלקוח לא הגיע בפעם הקודמת" : ""}`, { tag: "newbook-" + b.id });
+        });
+      }
+      // ביטול ע״י לקוח — התראה מיידית לספר (כשהאפליקציה פתוחה)
+      const clientCancels = st.bookings.filter((b) => b.status === "cancelled" && b.cancelledBy === "client");
+      if (!ownerCancelSeen) {
+        ownerCancelSeen = new Set(clientCancels.map((b) => b.id));   // זריעה — בלי התראה על ישנים
+      } else {
+        const now2 = Date.now();
+        clientCancels.forEach((b) => {
+          if (ownerCancelSeen.has(b.id)) return;
+          ownerCancelSeen.add(b.id);
+          if (u.dateTime(b.date, b.start).getTime() <= now2) return;   // רק תורים עתידיים
+          toast(`${b.userName || "לקוח"} ביטל תור · ${u.relativeDay(b.date)} ${b.start}`, "", "❌");
+          Notify.show("❌ לקוח ביטל תור", `${b.userName || "לקוח"} — ${b.serviceName}\n${u.longDate(b.date)} בשעה ${b.start}`, { tag: "ccancel-" + b.id });
         });
       }
     } else if (ownerSeen) {

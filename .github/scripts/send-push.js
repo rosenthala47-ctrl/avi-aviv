@@ -98,6 +98,10 @@ function apptTs(date, start) {
     const newCancels = bookings.filter((b) =>
       b && b.id && b.userId && b.status === "cancelled" && b.cancelledBy === "owner" &&
       !doneCancels.has(b.id) && apptTs(b.date, b.start) > now);
+    // ביטולים חדשים ע״י הלקוח — התראה לספר שהתפנתה משבצת
+    const newClientCancels = bookings.filter((b) =>
+      b && b.id && b.status === "cancelled" && b.cancelledBy === "client" &&
+      !doneCancels.has(b.id) && apptTs(b.date, b.start) > now);
     // הודעות קבוצתיות חדשות שהמנהל שלח ללקוחות
     const newBc = broadcasts.filter((b) => b && b.id && b.text && !doneBc.has(b.id));
 
@@ -114,6 +118,10 @@ function apptTs(date, start) {
       for (const b of newCancels) {
         sent += await sendToUid(b.userId, "❌ התור שלך בוטל",
           `${shopName}\n${b.serviceName} · ${relDay(b.date)} בשעה ${b.start}`, "cancel-" + b.id);
+      }
+      for (const b of newClientCancels) {
+        sent += await sendToUid("owner_" + sid, "❌ לקוח ביטל תור",
+          `${b.userName || "לקוח"} — ${b.serviceName}, ${relDay(b.date)} בשעה ${b.start}`, "ccancel-" + b.id);
       }
       // הודעה קבוצתית — נשלחת לכל הלקוחות שהזמינו דרך האפליקציה
       if (newBc.length) {
