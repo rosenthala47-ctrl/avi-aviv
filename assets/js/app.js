@@ -8,6 +8,10 @@
   const $ = (s, r) => (r || document).querySelector(s);
   const esc = u.escapeHtml;
 
+  /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
+     יש לעדכן יחד עם CACHE ב-sw.js. */
+  const APP_VERSION = "73";
+
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
     let h = (location.hash || "").replace(/^#/, "").trim().toLowerCase();
@@ -2692,6 +2696,10 @@
           <span class="conn-dot ${Store.mode === "cloud" ? "" : "local"}"></span>
           ${Store.mode === "cloud" ? "מחובר לענן (Firebase) — סנכרון מלא בין כל המכשירים" : "מצב מקומי — לסנכרון בין מכשירים ראו את קובץ README"}
         </div>
+        <div class="conn-line" style="margin-top:10px">
+          <span class="conn-dot"></span>גרסה ${APP_VERSION}
+        </div>
+        <button class="btn btn-sm" data-act="force-update" style="margin-top:12px">🔄 בדיקת עדכון</button>
       </div>
 
       <div class="section-title">יציאה</div>
@@ -3272,6 +3280,8 @@
 
         case "enable-notif": handleEnableNotif(); break;
         case "notif-help": notifHelp(); break;
+        // כפיית עדכון — מנקה מטמון ומרענן, למקרה שהדפדפן מחזיק גרסה ישנה
+        case "force-update": forceUpdate(); break;
         case "owner-login": promptOwner(); break;   // כניסת מנהל ייעודית (במקום 3 לחיצות על הלוגו)
         case "owner-logout": confirmOwnerLogout(); break;
         case "do-owner-logout":
@@ -3702,6 +3712,23 @@
       reminderMinutes: Number($("#set-remind").value),
     });
     toast("ההגדרות נשמרו ✓", "good", "⚙️"); render();
+  }
+
+  /* כפיית עדכון: מוחק את מטמון ה-Service Worker ומרענן מהרשת.
+     פותר מצב שבו הדפדפן/האפליקציה המותקנת מחזיקים גרסה ישנה. */
+  async function forceUpdate() {
+    toast("מוריד את הגרסה החדשה…", "sky", "🔄");
+    try {
+      if ("caches" in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+      if (navigator.serviceWorker) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.update().catch(() => {})));
+      }
+    } catch (e) {}
+    setTimeout(() => location.reload(true), 600);
   }
 
   async function handleEnableNotif() {
