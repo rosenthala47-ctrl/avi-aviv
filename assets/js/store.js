@@ -46,6 +46,8 @@ UG.Store = (function () {
       bookings: [],
       contacts: [],          // ספר הלקוחות שהספר ייבא (שם + טלפון)
       closedDates: [],       // ימי סגירה/חופשה מלאים: "YYYY-MM-DD"
+      dayOverrides: {},      // שעות מיוחדות ליום ספציפי: { "YYYY-MM-DD": { open, close } }
+      blockedClients: [],    // לקוחות חסומים (לא יכולים לקבוע תור אונליין)
       blocks: [],            // שעות שהבעלים סימן כלא-פנויות: "YYYY-MM-DD|HH:MM"
       waitlist: [],          // רשימת המתנה לשעות תפוסות
       alerts: [],            // "התפנה תור" — התראות ממתינות למשתמשים
@@ -67,6 +69,8 @@ UG.Store = (function () {
     if (!Array.isArray(s.bookings)) s.bookings = [];
     if (!Array.isArray(s.contacts)) s.contacts = [];
     if (!Array.isArray(s.closedDates)) s.closedDates = [];
+    if (!s.dayOverrides || typeof s.dayOverrides !== "object" || Array.isArray(s.dayOverrides)) s.dayOverrides = {};
+    if (!Array.isArray(s.blockedClients)) s.blockedClients = [];
     if (!Array.isArray(s.blocks)) s.blocks = [];
     if (!Array.isArray(s.waitlist)) s.waitlist = [];
     if (!Array.isArray(s.alerts)) s.alerts = [];
@@ -507,10 +511,45 @@ UG.Store = (function () {
     return persist();
   }
 
+  /* ---------- שעות מיוחדות ליום ספציפי (מעבר לשעות הקבועות) ---------- */
+  function setDayOverride(dateKey, open, close) {
+    state.dayOverrides = state.dayOverrides || {};
+    state.dayOverrides[dateKey] = { open, close };
+    return persist();
+  }
+  function removeDayOverride(dateKey) {
+    if (state.dayOverrides) delete state.dayOverrides[dateKey];
+    return persist();
+  }
+
+  /* ---------- חסימת לקוחות בעייתיים (לא יוכלו לקבוע תור אונליין) ---------- */
+  function blockClient(entry) {
+    state.blockedClients = state.blockedClients || [];
+    const p = entry.phone ? u.normalizePhone(entry.phone) : "";
+    const dup = state.blockedClients.some((b) =>
+      (p && b.phone === p) || (entry.userId && b.userId === entry.userId));
+    if (!dup) state.blockedClients.push({
+      id: u.uid(), name: entry.name || "", phone: p, userId: entry.userId || "", createdAt: Date.now(),
+    });
+    return persist();
+  }
+  function unblockClient(key) {
+    state.blockedClients = (state.blockedClients || []).filter((b) =>
+      b.id !== key && b.phone !== key && b.userId !== key);
+    return persist();
+  }
+
   /* ---------- הזמנת תור (עם הגנה מפני כפילויות) ---------- */
   function buildBooking(cur, data) {
     const svc = cur.services.find((s) => s.id === data.serviceId);
     if (!svc) return { ok: false, reason: "השירות אינו קיים יותר" };
+    const dphone = data.phone ? u.normalizePhone(data.phone) : "";
+    // לקוח חסום — לא יכול לקבוע אונליין (הספר עדיין יכול להוסיף ידנית)
+    const isBlocked = (cur.blockedClients || []).some((b) =>
+      (dphone && b.phone && b.phone === dphone) || (b.userId && b.userId === data.userId));
+    if (isBlocked && String(data.userId || "").indexOf("owner:") !== 0) {
+      return { ok: false, reason: "לא ניתן לקבוע תור אונליין — צרו קשר עם המספרה" };
+    }
     const startMin = u.toMin(data.start);
     const endMin = startMin + svc.durationMin;
     // האם הבעלים חסם את השעה הזו?
@@ -527,7 +566,6 @@ UG.Store = (function () {
     if (clash) return { ok: false, reason: "התור נתפס הרגע — נסו שעה אחרת" };
 
     // כמה פעמים הלקוח הזה כבר לא הגיע בעבר (לפי מזהה או טלפון) — כדי להתריע למנהל
-    const dphone = data.phone ? u.normalizePhone(data.phone) : "";
     const priorNoShow = cur.bookings.filter((b) =>
       b.status === "noshow" &&
       (b.userId === data.userId || (dphone && b.phone && u.normalizePhone(b.phone) === dphone))
@@ -681,6 +719,7 @@ UG.Store = (function () {
     init, subscribe, get,
     setDay, saveShop, upsertService, removeService,
     addContacts, removeContact, addBroadcast, addClosedDates, removeClosedDate,
+    setDayOverride, removeDayOverride, blockClient, unblockClient,
     createBooking, setBookingStatus, setBlock, deleteBooking,
     joinWaitlist, leaveWaitlist, consumeAlert, addReview, savePushToken,
     subscribeGallery, getGallery, addPhoto, removePhoto,

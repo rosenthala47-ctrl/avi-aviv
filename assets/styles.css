@@ -175,6 +175,8 @@
   font-size: 10.5px; font-weight: 700; color: var(--sky-2);
   background: var(--sky-glow); border-radius: 6px; padding: 1px 6px; vertical-align: middle;
 }
+.cli-badge.blocked { color: var(--bad); background: var(--bad-bg); }
+.card.cli-blocked { border-color: rgba(248,113,113,.4); opacity: .82; }
 /* דוגמת ייבוא */
 .import-eg {
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;

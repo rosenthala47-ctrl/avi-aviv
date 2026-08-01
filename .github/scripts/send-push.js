@@ -85,11 +85,12 @@ function apptTs(date, start) {
     const bookings = Array.isArray(shop.bookings) ? shop.bookings : [];
     const broadcasts = Array.isArray(shop.broadcasts) ? shop.broadcasts : [];
 
-    const st = perShop[sid] || { alertIds: [], bookingIds: [], cancelIds: [], bcIds: [] };
+    const st = perShop[sid] || { alertIds: [], bookingIds: [], cancelIds: [], bcIds: [], remIds: [] };
     const doneAlerts = new Set(st.alertIds || []);
     const doneBookings = new Set(st.bookingIds || []);
     const doneCancels = new Set(st.cancelIds || []);
     const doneBc = new Set(st.bcIds || []);
+    const doneRem = new Set(st.remIds || []);   // תזכורות שכבר נשלחו
 
     const newAlerts = alerts.filter((a) => a && a.id && !doneAlerts.has(a.id) && apptTs(a.date, a.start) > now);
     const newBookings = bookings.filter((b) =>
@@ -104,6 +105,13 @@ function apptTs(date, start) {
       !doneCancels.has(b.id) && apptTs(b.date, b.start) > now);
     // הודעות קבוצתיות חדשות שהמנהל שלח ללקוחות
     const newBc = broadcasts.filter((b) => b && b.id && b.text && !doneBc.has(b.id));
+    // תזכורות לפני התור — נשלחות כשנותר פחות מ-reminderMinutes עד המועד
+    const reminderMin = Number((shop.shop && shop.shop.reminderMinutes) || 60);
+    const dueReminders = bookings.filter((b) => {
+      if (!b || !b.id || !b.userId || b.status === "cancelled" || doneRem.has(b.id)) return false;
+      const lead = apptTs(b.date, b.start) - now;
+      return lead > 0 && lead <= reminderMin * 60000;
+    });
 
     if (!firstRun) {
       for (const a of newAlerts) {
@@ -123,6 +131,13 @@ function apptTs(date, start) {
         sent += await sendToUid("owner_" + sid, "❌ לקוח ביטל תור",
           `${b.userName || "לקוח"} — ${b.serviceName}, ${relDay(b.date)} בשעה ${b.start}`, "ccancel-" + b.id);
       }
+      // תזכורת לפני התור — מסמנים כנשלח רק אחרי השליחה בפועל
+      for (const b of dueReminders) {
+        const mins = Math.max(1, Math.round((apptTs(b.date, b.start) - now) / 60000));
+        sent += await sendToUid(b.userId, "⏰ תזכורת לתור",
+          `${b.serviceName} · ${relDay(b.date)} בשעה ${b.start} (בעוד ${mins} דק׳)\n${shopName}`, "rem-" + b.id);
+        doneRem.add(b.id);
+      }
       // הודעה קבוצתית — נשלחת לכל הלקוחות שהזמינו דרך האפליקציה
       if (newBc.length) {
         const clientIds = [...new Set(
@@ -136,7 +151,9 @@ function apptTs(date, start) {
       }
     }
 
-    // סמן הכל כטופל
+    // סמן הכל כטופל. שים לב: doneRem מתמלא רק מתזכורות שנשלחו בפועל —
+    // אסור לסמן כאן את כל התורים, אחרת אף תזכורת עתידית לא תישלח.
+    if (firstRun) dueReminders.forEach((b) => doneRem.add(b.id));
     alerts.forEach((a) => a && a.id && doneAlerts.add(a.id));
     bookings.forEach((b) => b && b.id && doneBookings.add(b.id));
     bookings.forEach((b) => b && b.id && b.status === "cancelled" && doneCancels.add(b.id));
@@ -146,6 +163,7 @@ function apptTs(date, start) {
       bookingIds: [...doneBookings].slice(-500),
       cancelIds: [...doneCancels].slice(-500),
       bcIds: [...doneBc].slice(-200),
+      remIds: [...doneRem].slice(-500),
     };
     totalNewA += newAlerts.length; totalNewB += newBookings.length;
   }

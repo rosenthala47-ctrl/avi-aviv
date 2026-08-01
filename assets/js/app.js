@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "76";
+  const APP_VERSION = "77";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -108,6 +108,45 @@
     return fresh;
   }
   function saveIdentity() { localStorage.setItem("ug_identity", JSON.stringify(identity)); }
+
+  /* מניפסט דינמי לכל מספרה — הבאג שתוקן כאן: המניפסט הסטטי מפנה ל-"./" בלי
+     כתובת המספרה, ולכן לחיצה על האייקון שהלקוח התקין פתחה את מסך פתיחת מספרה
+     חדשה במקום עמוד ההזמנה שלו. כאן נבנה מניפסט עם start_url הכולל #<shopId>
+     ועם שם המספרה, כך שהאייקון נפתח תמיד במקום הנכון. */
+  function applyShopManifest() {
+    try {
+      if (SHOP === "__new__") return;                   // מסך פתיחת מספרה — המניפסט הרגיל
+      const link = document.getElementById("ug-manifest");
+      if (!link) return;
+      const st = Store.get();
+      const shopName = (st && st.shop && st.shop.name) || "BarberTor";
+      const base = location.origin + location.pathname.replace(/[^/]*$/, "");
+      const mf = {
+        id: "./#" + SHOP,
+        name: shopName,
+        short_name: shopName.slice(0, 12),
+        description: "הזמנת תורים · " + shopName,
+        lang: "he", dir: "rtl",
+        start_url: base + "#" + SHOP,
+        scope: base,
+        display: "standalone",
+        orientation: "portrait",
+        background_color: "#0a0c10",
+        theme_color: "#0a0c10",
+        icons: [
+          { src: base + "assets/img/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: base + "assets/img/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+          { src: base + "assets/img/icon-192.png", sizes: "192x192", type: "image/png", purpose: "maskable" },
+          { src: base + "assets/img/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+        ],
+      };
+      const blob = new Blob([JSON.stringify(mf)], { type: "application/manifest+json" });
+      const url = URL.createObjectURL(blob);
+      if (link.dataset.blob) { try { URL.revokeObjectURL(link.dataset.blob); } catch (e) {} }
+      link.dataset.blob = url;
+      link.href = url;
+    } catch (e) { /* נכשל — נשאר המניפסט הסטטי */ }
+  }
 
   // רישום המכשיר לפוש (FCM) — כדי לקבל התראות גם כשהאפליקציה סגורה
   function ensureFcm() {
@@ -298,8 +337,10 @@
     if ((st.closedDates || []).includes(dateKey)) return [];   // יום חופשה/סגירה
     const dow = u.parseKey(dateKey).getDay();
     const sched = st.schedule[dow];
-    if (!sched || !sched.active) return [];
-    const open = u.toMin(sched.open), close = u.toMin(sched.close);
+    // שעות מיוחדות ליום זה — גוברות על השעות הקבועות (ואף פותחות יום סגור)
+    const ovr = (st.dayOverrides || {})[dateKey];
+    if (!ovr && (!sched || !sched.active)) return [];
+    const open = u.toMin(ovr ? ovr.open : sched.open), close = u.toMin(ovr ? ovr.close : sched.close);
     const step = st.shop.slotStep || 45;
     const now = new Date();
     const isToday = u.isSameDay(u.parseKey(dateKey), now);
@@ -897,7 +938,8 @@
 
     // בורר ימים (14 יום)
     const closed = new Set(st.closedDates || []);
-    const isOpen = (k) => st.schedule[u.parseKey(k).getDay()].active && !closed.has(k);
+    const ovrs = st.dayOverrides || {};
+    const isOpen = (k) => (st.schedule[u.parseKey(k).getDay()].active || !!ovrs[k]) && !closed.has(k);
     const days = nextDays(14);
     if (!view.selDate || !days.includes(view.selDate)) {
       view.selDate = days.find(isOpen) || days[0];
@@ -905,7 +947,7 @@
     const dayChips = days.map((k) => {
       const d = u.parseKey(k);
       const vac = closed.has(k);
-      const off = !st.schedule[d.getDay()].active || vac;
+      const off = (!st.schedule[d.getDay()].active && !ovrs[k]) || vac;
       return `
       <button class="day-chip ${view.selDate === k ? "selected" : ""} ${off ? "off" : ""}"
               data-day="${k}" ${off ? "disabled" : ""}>
@@ -921,7 +963,7 @@
     const hasFree = allSlots.some((s) => !s.booking);
     if (closed.has(view.selDate)) {
       slotsHtml = emptyState("🌴", "המספרה בחופשה ביום זה", "בחרו יום אחר מהיומן");
-    } else if (!st.schedule[u.parseKey(view.selDate).getDay()].active) {
+    } else if (!st.schedule[u.parseKey(view.selDate).getDay()].active && !ovrs[view.selDate]) {
       slotsHtml = emptyState("🚫", "סגור ביום זה", "בחרו יום אחר מהיומן");
     } else if (!allSlots.length || !hasFree) {
       slotsHtml = emptyState("⌛", "אין תורים פנויים", "כל התורים ליום זה תפוסים או שהיום הסתיים");
@@ -1682,16 +1724,17 @@
   // תצוגת יומן יומית — כל השעות של היום הנבחר, עם אפשרות לסמן פנוי/לא-פנוי
   function ownerCal(st) {
     const days = nextDays(14);
+    const ovrs = st.dayOverrides || {};
     if (!view.oDate || !days.includes(view.oDate)) {
-      view.oDate = days.find((k) => st.schedule[u.parseKey(k).getDay()].active) || days[0];
+      view.oDate = days.find((k) => st.schedule[u.parseKey(k).getDay()].active || ovrs[k]) || days[0];
     }
     const dayChips = days.map((k) => {
       const d = u.parseKey(k);
-      const off = !st.schedule[d.getDay()].active;
+      const off = !st.schedule[d.getDay()].active && !ovrs[k];
       return `
       <button class="day-chip ${view.oDate === k ? "selected" : ""} ${off ? "off" : ""}"
-              data-oday="${k}" ${off ? "disabled" : ""}>
-        <div class="dc-dow">${off ? "סגור" : u.DOW_SHORT[d.getDay()]}</div>
+              data-oday="${k}">
+        <div class="dc-dow">${off ? "סגור" : u.DOW_SHORT[d.getDay()]}${ovrs[k] ? " ⏰" : ""}</div>
         <div class="dc-num">${d.getDate()}</div>
         <div class="dc-mon">${u.MON[d.getMonth()]}</div>
       </button>`;
@@ -1699,15 +1742,21 @@
 
     const dow = u.parseKey(view.oDate).getDay();
     const sched = st.schedule[dow];
+    const ovr = ovrs[view.oDate];
+    // כפתור «שעות מיוחדות» — פתיחה חד-פעמית מעבר לשעות הקבועות (או פתיחת יום סגור)
+    const specialBtn = `
+      <button class="btn btn-sm" data-act="day-hours" style="margin:10px 0 12px">
+        ⏰ ${ovr ? `שעות מיוחדות ליום זה: ${esc(ovr.open)}–${esc(ovr.close)} · שינוי` : "שעות מיוחדות ליום זה"}
+      </button>`;
     let body;
-    if (!sched.active) {
-      body = emptyState("🚫", "היום סגור", "אפשר לפתוח את היום בלשונית ״שעות״");
+    if (!sched.active && !ovr) {
+      body = specialBtn + emptyState("🚫", "היום סגור", "אפשר לפתוח את היום בלשונית ״שעות״ — או לקבוע שעות מיוחדות רק ליום הזה בכפתור למעלה");
     } else {
       const slots = gridSlots(view.oDate).filter((s) => !s.past);
       if (!slots.length) {
-        body = emptyState("⌛", "אין שעות ליום זה", "בדקו את שעות הפעילות בלשונית ״שעות״");
+        body = specialBtn + emptyState("⌛", "אין שעות ליום זה", "בדקו את שעות הפעילות בלשונית ״שעות״");
       } else {
-        body = `<div class="card" style="padding:6px 14px">` + slots.map((s) => {
+        body = specialBtn + `<div class="card" style="padding:6px 14px">` + slots.map((s) => {
           if (s.booking) {
             return `
             <div class="slot-line booked">
@@ -1740,6 +1789,41 @@
       ${body}
       <p class="hint">כבו את המתג ליד שעה כדי לסמן אותה כ״לא פנוי״ — היא תיעלם מיד אצל הלקוחות. שעה שכבר נקבעה מסומנת ״תפוס״.</p>
     `;
+  }
+
+  /* שעות מיוחדות ליום אחד — פתיחה חריגה מעבר לשעות הקבועות (או פתיחת יום סגור) */
+  function openDayHours() {
+    const st = Store.get();
+    const key = view.oDate;
+    const dow = u.parseKey(key).getDay();
+    const sched = st.schedule[dow] || {};
+    const ovr = (st.dayOverrides || {})[key];
+    const open = (ovr && ovr.open) || sched.open || "09:00";
+    const close = (ovr && ovr.close) || sched.close || "19:00";
+    const regular = sched.active ? `${sched.open}–${sched.close}` : "סגור";
+    openModal(`
+      <div class="m-title">⏰ שעות מיוחדות</div>
+      <div class="m-sub">${esc(u.longDate(key))} · השעות הקבועות: ${esc(regular)}</div>
+      <p class="hint" style="margin:10px 0 4px">קבעו שעות רק ליום הזה — למשל אם היום אתם עובדים עד מאוחר. שאר הימים לא מושפעים.</p>
+      <div class="field-row">
+        <div class="field"><label>פתיחה</label>
+          <select class="input" id="dh-open">${timeOptions(open)}</select></div>
+        <div class="field"><label>סגירה</label>
+          <select class="input" id="dh-close">${timeOptions(close)}</select></div>
+      </div>
+      <button class="btn btn-primary" data-act="save-day-hours">שמירה ליום זה</button>
+      ${ovr ? `<button class="btn btn-danger" data-act="clear-day-hours" style="margin-top:8px">חזרה לשעות הרגילות</button>` : ""}
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
+    `);
+  }
+
+  async function saveDayHours() {
+    const open = ($("#dh-open") && $("#dh-open").value) || "";
+    const close = ($("#dh-close") && $("#dh-close").value) || "";
+    if (!open || !close) return;
+    if (u.toMin(close) <= u.toMin(open)) { toast("שעת הסגירה חייבת להיות אחרי הפתיחה", "", "⏰"); return; }
+    await Store.setDayOverride(view.oDate, open, close);
+    closeModal(); toast("השעות המיוחדות נשמרו ✓", "good", "⏰"); render();
   }
 
   // לשונית ״שעות״ — ימי הפעילות ושעות העבודה השבועיות
@@ -2078,6 +2162,49 @@
   /* ---------- רשימת לקוחות (CRM) ---------- */
   function clientKey(b) { return (b.phone && u.normalizePhone(b.phone)) || b.userId || b.userName || "לקוח"; }
 
+  /* ---------- חסימת לקוח בעייתי ---------- */
+  function blockedList() { return (Store.get() || {}).blockedClients || []; }
+  function isClientBlocked(c) {
+    const p = c.phone ? u.normalizePhone(c.phone) : "";
+    return blockedList().some((b) => (p && b.phone === p) || (b.userId && b.userId === c.key));
+  }
+  function blockKeyOf(c) {
+    const p = c.phone ? u.normalizePhone(c.phone) : "";
+    const hit = blockedList().find((b) => (p && b.phone === p) || (b.userId && b.userId === c.key));
+    return hit ? hit.id : "";
+  }
+  // מאתר את פרטי הלקוח לפי המפתח שלו ברשימה (טלפון מנורמל או userId)
+  function findClientByKey(key) {
+    const st = Store.get();
+    const b = (st.bookings || []).filter((x) => x.status !== "cancelled")
+      .reverse().find((x) => clientKey(x) === key);
+    if (b) return { name: b.userName || "לקוח", phone: b.phone || "", userId: b.userId || "" };
+    const c = (st.contacts || []).find((x) => ((x.phone && u.normalizePhone(x.phone)) || x.name) === key);
+    return c ? { name: c.name || "לקוח", phone: c.phone || "", userId: "" } : null;
+  }
+
+  function openBlockClient(key) {
+    const c = findClientByKey(key);
+    if (!c) { toast("לא נמצא לקוח", "", "✋"); return; }
+    blockTarget = c;
+    openModal(`
+      <div class="m-title">🚫 חסימת לקוח</div>
+      <div class="m-sub">${esc(c.name)}${c.phone ? " · " + esc(u.fmtPhone(c.phone)) : ""}</div>
+      <p class="hint" style="margin:12px 0 4px">לקוח חסום <b>לא יוכל לקבוע תור אונליין</b>. הוא יראה הודעה שתפנה אותו להתקשר למספרה.</p>
+      <p class="hint" style="margin:0 0 12px">התורים הקיימים שלו נשארים, ותוכלו עדיין להוסיף לו תור ידנית. אפשר לבטל את החסימה בכל רגע.</p>
+      <button class="btn btn-danger" data-act="do-block-client">חסימת הלקוח</button>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
+    `);
+  }
+  let blockTarget = null;
+  async function doBlockClient() {
+    if (!blockTarget) return;
+    await Store.blockClient(blockTarget);
+    const nm = blockTarget.name;
+    blockTarget = null;
+    closeModal(); toast(`${nm} נחסם — לא יוכל לקבוע אונליין`, "", "🚫"); render();
+  }
+
   function ownerClients(st) {
     const map = new Map();
     // אנשי הקשר שיובאו — מופיעים גם אם עדיין לא הזמינו תור
@@ -2118,17 +2245,23 @@
       </div>
       <div class="section-title">כל הלקוחות</div>
       ${clients.map((c) => `
-        <div class="card" style="padding:13px 15px">
+        <div class="card${isClientBlocked(c) ? " cli-blocked" : ""}" style="padding:13px 15px">
           <div style="display:flex;align-items:center;gap:12px">
             <div class="cli-ava">${esc((String(c.name).trim()[0]) || "?")}</div>
             <div style="flex:1;min-width:0">
-              <div class="bk-title">${esc(c.name)}${c.imported ? ` <span class="cli-badge">מיובא</span>` : ""}</div>
+              <div class="bk-title">${esc(c.name)}${c.imported ? ` <span class="cli-badge">מיובא</span>` : ""}${isClientBlocked(c) ? ` <span class="cli-badge blocked">🚫 חסום</span>` : ""}</div>
               <div class="bk-sub">${c.phone ? `<a href="tel:${esc(c.phone)}">${esc(c.phone)}</a>` : "ללא טלפון"}</div>
               <div class="bk-sub">${c.imported ? "עדיין לא הזמין תור" : `${c.visits} ביקורים · <b>${u.fmtPrice(c.spent)}</b> · אחרון ${esc(u.relativeDay(c.lastDate))}`}${c.noShows ? ` · <span class="noshow-cnt">❌ ${c.noShows} לא הגיע</span>` : ""}</div>
+              ${(!isClientBlocked(c) && c.noShows >= 2) ? `<div class="bk-sub" style="color:var(--bad)">⚠️ לא הגיע ${c.noShows} פעמים — כדאי לשקול חסימה</div>` : ""}
             </div>
-            ${c.imported
+            ${isClientBlocked(c)
+              ? `<button class="btn btn-sm" data-act="unblock-client" data-key="${esc(blockKeyOf(c))}">בטל חסימה</button>`
+              : c.imported
               ? `<button class="btn btn-sm" data-act="del-contact" data-id="${esc(c.contactId)}">הסר</button>`
-              : `<button class="btn btn-sm" data-act="client-detail" data-key="${esc(c.key)}">פרטים</button>`}
+              : `<div class="bk-acts">
+                   <button class="btn btn-sm" data-act="client-detail" data-key="${esc(c.key)}">פרטים</button>
+                   <button class="btn btn-sm btn-danger" data-act="block-client" data-key="${esc(c.key)}">חסום</button>
+                 </div>`}
           </div>
         </div>`).join("")}
       ${clients.some((c) => c.imported) ? `
@@ -3497,6 +3630,20 @@
         // סימון "נשלח" — הקישור עצמו נפתח כרגיל בוואטסאפ
         case "wa-sent": waSent.add(t.dataset.p); setTimeout(renderWaList, 400); break;
 
+        // שעות מיוחדות ליום ספציפי
+        case "day-hours": openDayHours(); break;
+        case "save-day-hours": saveDayHours(); break;
+        case "clear-day-hours":
+          await Store.removeDayOverride(view.oDate);
+          closeModal(); toast("חזרה לשעות הרגילות", "", "↩️"); render(); break;
+
+        // חסימת לקוח בעייתי
+        case "block-client": openBlockClient(t.dataset.key); break;
+        case "do-block-client": doBlockClient(); break;
+        case "unblock-client":
+          await Store.unblockClient(t.dataset.key);
+          toast("החסימה הוסרה ✓", "good", "🔓"); render(); break;
+
         // מנוי
         case "show-upgrade": handleUpgrade(); break;
         case "adm-extend": admExtend(t.dataset.sid, Number(t.dataset.m)); break;
@@ -3907,6 +4054,8 @@
     setupBackGuard();   // מלכודת "אחורה" — להפעיל מיד, לפני טעינת הענן
     Notify.registerSW();
     wire();
+    // מניפסט לכל מספרה — לפני initInstall, כדי שהתקנה תשתמש בכתובת הנכונה
+    applyShopManifest();
     initInstall();
     initCookies();
 
@@ -3917,6 +4066,7 @@
 
     // זכירת המספרה — כדי שפתיחת האפליקציה המותקנת (ללא כתובת) תחזיר לכאן
     try { if (SHOP !== "__new__") localStorage.setItem("ug_last_shop", SHOP); } catch (e) {}
+    applyShopManifest();   // מניפסט לכל מספרה — האייקון ייפתח בעמוד הנכון
 
     checkPaymentReturn();   // חזרה מעמוד התשלום של ספק הסליקה
     setTimeout(() => promptNotif(), 1200);   // הזמנה לאישור התראות — בכל כניסה עד שיאשר
