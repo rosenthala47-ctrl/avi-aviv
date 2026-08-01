@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "77";
+  const APP_VERSION = "78";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -332,34 +332,74 @@
      =======================================================================*/
   // רשת שעות אחידה ליום נתון (מרווחי slotStep, למשל 45 דק׳).
   // מחזיר לכל משבצת: האם תפוסה (תור קיים), האם חסומה ע״י הבעלים, האם עברה.
+  // שעות שהבעלים פתח ליום זה מעבר לשעות הפעילות (מהמערך opens)
+  function openedFor(st, dateKey) {
+    return (st.opens || []).filter((k) => k.indexOf(dateKey + "|") === 0)
+      .map((k) => k.split("|")[1]);
+  }
+
+  // רשת השעות שהלקוח רואה: שעות הפעילות (פחות חסומות) + שעות שנפתחו ידנית
   function gridSlots(dateKey) {
     const st = Store.get();
     if ((st.closedDates || []).includes(dateKey)) return [];   // יום חופשה/סגירה
     const dow = u.parseKey(dateKey).getDay();
     const sched = st.schedule[dow];
-    // שעות מיוחדות ליום זה — גוברות על השעות הקבועות (ואף פותחות יום סגור)
-    const ovr = (st.dayOverrides || {})[dateKey];
-    if (!ovr && (!sched || !sched.active)) return [];
-    const open = u.toMin(ovr ? ovr.open : sched.open), close = u.toMin(ovr ? ovr.close : sched.close);
+    const active = !!(sched && sched.active);
+    const opened = openedFor(st, dateKey);
+    if (!active && !opened.length) return [];
+    const open = active ? u.toMin(sched.open) : 0, close = active ? u.toMin(sched.close) : 0;
     const step = st.shop.slotStep || 45;
     const now = new Date();
     const isToday = u.isSameDay(u.parseKey(dateKey), now);
     const nowMin = now.getHours() * 60 + now.getMinutes();
     const blocks = new Set(st.blocks || []);
     const dayBookings = st.bookings.filter((b) => b.status !== "cancelled" && b.date === dateKey);
+    const bookingAt = (t) => dayBookings.find((b) => {
+      const bs = u.toMin(b.start), be = u.toMin(b.end);
+      return t < be && (t + step) > bs;
+    }) || null;
+    const byStart = new Map();
+    // שעות בתוך הפעילות
+    if (active) for (let t = open; t + step <= close; t += step) {
+      const start = u.toHHMM(t);
+      byStart.set(start, { start, booking: bookingAt(t), blocked: blocks.has(dateKey + "|" + start), past: isToday && t <= nowMin });
+    }
+    // שעות שנפתחו ידנית מחוץ לפעילות
+    opened.forEach((start) => {
+      if (byStart.has(start)) return;
+      const t = u.toMin(start);
+      byStart.set(start, { start, booking: bookingAt(t), blocked: false, past: isToday && t <= nowMin });
+    });
+    return [...byStart.values()].sort((a, z) => u.toMin(a.start) - u.toMin(z.start));
+  }
+
+  /* רשת יום מלאה לתצוגת הבעלים (06:00–24:00) — כדי לפתוח שעות מעבר לפעילות.
+     available = השעה זמינה ללקוחות; inHours = בתוך שעות הפעילות הקבועות. */
+  function ownerDayGrid(dateKey) {
+    const st = Store.get();
+    const dow = u.parseKey(dateKey).getDay();
+    const sched = st.schedule[dow];
+    const active = !!(sched && sched.active);
+    const open = active ? u.toMin(sched.open) : 0, close = active ? u.toMin(sched.close) : 0;
+    const step = st.shop.slotStep || 45;
+    const phase = active ? (open % step) : 0;      // יישור לרשת שעות הפעילות
+    const dayStart = 6 * 60, dayEnd = 24 * 60;
+    const now = new Date();
+    const isToday = u.isSameDay(u.parseKey(dateKey), now);
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const blocks = new Set(st.blocks || []);
+    const opens = new Set(st.opens || []);
+    const dayBookings = st.bookings.filter((b) => b.status !== "cancelled" && b.date === dateKey);
+    let t = dayStart; while (((t % step) + step) % step !== phase) t++;
     const slots = [];
-    for (let t = open; t + step <= close; t += step) {
+    for (; t + step <= dayEnd; t += step) {
       const start = u.toHHMM(t), end = t + step;
-      const booking = dayBookings.find((b) => {
-        const bs = u.toMin(b.start), be = u.toMin(b.end);
-        return t < be && end > bs;
-      }) || null;
-      slots.push({
-        start,
-        booking,
-        blocked: blocks.has(dateKey + "|" + start),
-        past: isToday && t <= nowMin,
-      });
+      const inHours = active && t >= open && end <= close;
+      const opened = opens.has(dateKey + "|" + start);
+      const blocked = blocks.has(dateKey + "|" + start);
+      const booking = dayBookings.find((b) => { const bs = u.toMin(b.start), be = u.toMin(b.end); return t < be && end > bs; }) || null;
+      slots.push({ start, booking, inHours, opened, past: isToday && t <= nowMin,
+        available: (inHours && !blocked) || opened });
     }
     return slots;
   }
@@ -938,8 +978,9 @@
 
     // בורר ימים (14 יום)
     const closed = new Set(st.closedDates || []);
-    const ovrs = st.dayOverrides || {};
-    const isOpen = (k) => (st.schedule[u.parseKey(k).getDay()].active || !!ovrs[k]) && !closed.has(k);
+    // יום פתוח = יש בו שעות פנויות (רגילות או שנפתחו ידנית) ואינו יום חופשה
+    const hasHours = (k) => st.schedule[u.parseKey(k).getDay()].active || openedFor(st, k).length > 0;
+    const isOpen = (k) => hasHours(k) && !closed.has(k);
     const days = nextDays(14);
     if (!view.selDate || !days.includes(view.selDate)) {
       view.selDate = days.find(isOpen) || days[0];
@@ -947,7 +988,7 @@
     const dayChips = days.map((k) => {
       const d = u.parseKey(k);
       const vac = closed.has(k);
-      const off = (!st.schedule[d.getDay()].active && !ovrs[k]) || vac;
+      const off = !hasHours(k) || vac;
       return `
       <button class="day-chip ${view.selDate === k ? "selected" : ""} ${off ? "off" : ""}"
               data-day="${k}" ${off ? "disabled" : ""}>
@@ -963,7 +1004,7 @@
     const hasFree = allSlots.some((s) => !s.booking);
     if (closed.has(view.selDate)) {
       slotsHtml = emptyState("🌴", "המספרה בחופשה ביום זה", "בחרו יום אחר מהיומן");
-    } else if (!st.schedule[u.parseKey(view.selDate).getDay()].active && !ovrs[view.selDate]) {
+    } else if (!hasHours(view.selDate)) {
       slotsHtml = emptyState("🚫", "סגור ביום זה", "בחרו יום אחר מהיומן");
     } else if (!allSlots.length || !hasFree) {
       slotsHtml = emptyState("⌛", "אין תורים פנויים", "כל התורים ליום זה תפוסים או שהיום הסתיים");
@@ -1721,109 +1762,60 @@
     return html;
   }
 
-  // תצוגת יומן יומית — כל השעות של היום הנבחר, עם אפשרות לסמן פנוי/לא-פנוי
+  // תצוגת יומן יומית — כל שעות היום (06:00–24:00) עם מתג לכל שעה.
+  // הספר יכול לפתוח כל שעה שירצה, גם מחוץ לשעות הפעילות הקבועות.
   function ownerCal(st) {
     const days = nextDays(14);
-    const ovrs = st.dayOverrides || {};
     if (!view.oDate || !days.includes(view.oDate)) {
-      view.oDate = days.find((k) => st.schedule[u.parseKey(k).getDay()].active || ovrs[k]) || days[0];
+      view.oDate = days.find((k) => st.schedule[u.parseKey(k).getDay()].active) || days[0];
     }
     const dayChips = days.map((k) => {
       const d = u.parseKey(k);
-      const off = !st.schedule[d.getDay()].active && !ovrs[k];
+      const off = !st.schedule[d.getDay()].active;
+      const hasExtra = openedFor(st, k).length > 0;
       return `
-      <button class="day-chip ${view.oDate === k ? "selected" : ""} ${off ? "off" : ""}"
+      <button class="day-chip ${view.oDate === k ? "selected" : ""} ${off && !hasExtra ? "off" : ""}"
               data-oday="${k}">
-        <div class="dc-dow">${off ? "סגור" : u.DOW_SHORT[d.getDay()]}${ovrs[k] ? " ⏰" : ""}</div>
+        <div class="dc-dow">${off ? "סגור" : u.DOW_SHORT[d.getDay()]}${hasExtra ? " ⏰" : ""}</div>
         <div class="dc-num">${d.getDate()}</div>
         <div class="dc-mon">${u.MON[d.getMonth()]}</div>
       </button>`;
     }).join("");
 
-    const dow = u.parseKey(view.oDate).getDay();
-    const sched = st.schedule[dow];
-    const ovr = ovrs[view.oDate];
-    // כפתור «שעות מיוחדות» — פתיחה חד-פעמית מעבר לשעות הקבועות (או פתיחת יום סגור)
-    const specialBtn = `
-      <button class="btn btn-sm" data-act="day-hours" style="margin:10px 0 12px">
-        ⏰ ${ovr ? `שעות מיוחדות ליום זה: ${esc(ovr.open)}–${esc(ovr.close)} · שינוי` : "שעות מיוחדות ליום זה"}
-      </button>`;
-    let body;
-    if (!sched.active && !ovr) {
-      body = specialBtn + emptyState("🚫", "היום סגור", "אפשר לפתוח את היום בלשונית ״שעות״ — או לקבוע שעות מיוחדות רק ליום הזה בכפתור למעלה");
-    } else {
-      const slots = gridSlots(view.oDate).filter((s) => !s.past);
-      if (!slots.length) {
-        body = specialBtn + emptyState("⌛", "אין שעות ליום זה", "בדקו את שעות הפעילות בלשונית ״שעות״");
-      } else {
-        body = specialBtn + `<div class="card" style="padding:6px 14px">` + slots.map((s) => {
-          if (s.booking) {
-            return `
-            <div class="slot-line booked">
-              <span class="sl-time">${s.start}</span>
-              <div class="sl-mid">
-                <span class="sl-name">${esc(s.booking.userName || "לקוח")}</span>
-                <span class="sl-sub">${esc(s.booking.serviceName)}</span>
-              </div>
-              <span class="status-tag status-booked">תפוס</span>
-            </div>`;
-          }
-          const available = !s.blocked;
-          return `
-          <div class="slot-line ${s.blocked ? "off" : ""}">
-            <span class="sl-time">${s.start}</span>
-            <div class="sl-mid"><span class="sl-state ${available ? "free" : "blocked"}">${available ? "פנוי" : "לא פנוי"}</span></div>
-            <label class="switch">
-              <input type="checkbox" data-block="${view.oDate}|${s.start}" ${available ? "checked" : ""}>
-              <span class="track"></span><span class="thumb"></span>
-            </label>
-          </div>`;
-        }).join("") + `</div>`;
+    const slots = ownerDayGrid(view.oDate).filter((s) => !s.past);
+    const body = `<div class="card" style="padding:6px 14px">` + slots.map((s) => {
+      if (s.booking) {
+        return `
+        <div class="slot-line booked">
+          <span class="sl-time">${s.start}</span>
+          <div class="sl-mid">
+            <span class="sl-name">${esc(s.booking.userName || "לקוח")}</span>
+            <span class="sl-sub">${esc(s.booking.serviceName)}</span>
+          </div>
+          <span class="status-tag status-booked">תפוס</span>
+        </div>`;
       }
-    }
+      const state = s.available
+        ? (s.inHours ? "פנוי" : "פתוח")
+        : (s.inHours ? "לא פנוי" : "מחוץ לשעות");
+      return `
+      <div class="slot-line ${s.available ? "" : "off"} ${s.inHours ? "" : "extra"}">
+        <span class="sl-time">${s.start}</span>
+        <div class="sl-mid"><span class="sl-state ${s.available ? "free" : "blocked"}">${state}${(s.available && !s.inHours) ? " ⏰" : ""}</span></div>
+        <label class="switch">
+          <input type="checkbox" data-slot-open="${view.oDate}|${s.start}" data-inhours="${s.inHours ? "1" : "0"}" ${s.available ? "checked" : ""}>
+          <span class="track"></span><span class="thumb"></span>
+        </label>
+      </div>`;
+    }).join("") + `</div>`;
 
     return `
       <div class="section-title">בחירת יום</div>
       <div class="days-scroll">${dayChips}</div>
       <div class="section-title">${esc(u.longDate(view.oDate))} · סימון זמינות</div>
       ${body}
-      <p class="hint">כבו את המתג ליד שעה כדי לסמן אותה כ״לא פנוי״ — היא תיעלם מיד אצל הלקוחות. שעה שכבר נקבעה מסומנת ״תפוס״.</p>
+      <p class="hint">כל השעות מ-06:00 עד חצות מוצגות כאן. הדליקו מתג כדי לפתוח שעה ללקוחות — <b>גם מחוץ לשעות הפעילות הרגילות</b> (מסומן ⏰). כבו מתג כדי לסמן שעה כלא-פנויה. שעה שכבר נקבעה מסומנת ״תפוס״.</p>
     `;
-  }
-
-  /* שעות מיוחדות ליום אחד — פתיחה חריגה מעבר לשעות הקבועות (או פתיחת יום סגור) */
-  function openDayHours() {
-    const st = Store.get();
-    const key = view.oDate;
-    const dow = u.parseKey(key).getDay();
-    const sched = st.schedule[dow] || {};
-    const ovr = (st.dayOverrides || {})[key];
-    const open = (ovr && ovr.open) || sched.open || "09:00";
-    const close = (ovr && ovr.close) || sched.close || "19:00";
-    const regular = sched.active ? `${sched.open}–${sched.close}` : "סגור";
-    openModal(`
-      <div class="m-title">⏰ שעות מיוחדות</div>
-      <div class="m-sub">${esc(u.longDate(key))} · השעות הקבועות: ${esc(regular)}</div>
-      <p class="hint" style="margin:10px 0 4px">קבעו שעות רק ליום הזה — למשל אם היום אתם עובדים עד מאוחר. שאר הימים לא מושפעים.</p>
-      <div class="field-row">
-        <div class="field"><label>פתיחה</label>
-          <select class="input" id="dh-open">${timeOptions(open)}</select></div>
-        <div class="field"><label>סגירה</label>
-          <select class="input" id="dh-close">${timeOptions(close)}</select></div>
-      </div>
-      <button class="btn btn-primary" data-act="save-day-hours">שמירה ליום זה</button>
-      ${ovr ? `<button class="btn btn-danger" data-act="clear-day-hours" style="margin-top:8px">חזרה לשעות הרגילות</button>` : ""}
-      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
-    `);
-  }
-
-  async function saveDayHours() {
-    const open = ($("#dh-open") && $("#dh-open").value) || "";
-    const close = ($("#dh-close") && $("#dh-close").value) || "";
-    if (!open || !close) return;
-    if (u.toMin(close) <= u.toMin(open)) { toast("שעת הסגירה חייבת להיות אחרי הפתיחה", "", "⏰"); return; }
-    await Store.setDayOverride(view.oDate, open, close);
-    closeModal(); toast("השעות המיוחדות נשמרו ✓", "good", "⏰"); render();
   }
 
   // לשונית ״שעות״ — ימי הפעילות ושעות העבודה השבועיות
@@ -3630,13 +3622,6 @@
         // סימון "נשלח" — הקישור עצמו נפתח כרגיל בוואטסאפ
         case "wa-sent": waSent.add(t.dataset.p); setTimeout(renderWaList, 400); break;
 
-        // שעות מיוחדות ליום ספציפי
-        case "day-hours": openDayHours(); break;
-        case "save-day-hours": saveDayHours(); break;
-        case "clear-day-hours":
-          await Store.removeDayOverride(view.oDate);
-          closeModal(); toast("חזרה לשעות הרגילות", "", "↩️"); render(); break;
-
         // חסימת לקוח בעייתי
         case "block-client": openBlockClient(t.dataset.key); break;
         case "do-block-client": doBlockClient(); break;
@@ -3733,10 +3718,10 @@
         a.value = "";
         return;
       }
-      if (a.dataset.block !== undefined && a.type === "checkbox") {
-        // מתג פנוי/לא-פנוי ליד שעה (checked = פנוי)
-        const [dk, time] = a.dataset.block.split("|");
-        await Store.setBlock(dk, time, !a.checked);
+      if (a.dataset.slotOpen !== undefined && a.type === "checkbox") {
+        // מתג פנוי/פתוח ליד שעה (checked = זמין ללקוחות)
+        const [dk, time] = a.dataset.slotOpen.split("|");
+        await Store.setSlotOpen(dk, time, a.checked, a.dataset.inhours === "1");
         render();
       } else if (a.dataset.active !== undefined && a.type === "checkbox") {
         await Store.setDay(Number(a.dataset.active), { active: a.checked });

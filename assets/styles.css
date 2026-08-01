@@ -458,6 +458,9 @@ select.input {
 .slot-line .sl-sub { font-size: 12px; color: var(--muted); }
 .slot-line.off .sl-time { color: var(--muted-2); }
 .slot-line.booked .sl-time { color: var(--sky-2); }
+/* שעה מחוץ לשעות הפעילות שנפתחה/ניתנת לפתיחה — קו מקווקו עדין להבחנה */
+.slot-line.extra { border-bottom-style: dashed; }
+.slot-line.extra.off .sl-time { opacity: .6; }
 
 /* ==== שירותים ==== */
 .service-item { display: flex; align-items: center; gap: 12px; }

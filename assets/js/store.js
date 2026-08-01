@@ -46,9 +46,9 @@ UG.Store = (function () {
       bookings: [],
       contacts: [],          // ספר הלקוחות שהספר ייבא (שם + טלפון)
       closedDates: [],       // ימי סגירה/חופשה מלאים: "YYYY-MM-DD"
-      dayOverrides: {},      // שעות מיוחדות ליום ספציפי: { "YYYY-MM-DD": { open, close } }
       blockedClients: [],    // לקוחות חסומים (לא יכולים לקבוע תור אונליין)
-      blocks: [],            // שעות שהבעלים סימן כלא-פנויות: "YYYY-MM-DD|HH:MM"
+      blocks: [],            // שעות בתוך הפעילות שהבעלים סימן כלא-פנויות: "YYYY-MM-DD|HH:MM"
+      opens: [],             // שעות מחוץ לפעילות שהבעלים פתח ליום ספציפי: "YYYY-MM-DD|HH:MM"
       waitlist: [],          // רשימת המתנה לשעות תפוסות
       alerts: [],            // "התפנה תור" — התראות ממתינות למשתמשים
       reviews: [],           // דירוגים וביקורות של לקוחות
@@ -69,9 +69,9 @@ UG.Store = (function () {
     if (!Array.isArray(s.bookings)) s.bookings = [];
     if (!Array.isArray(s.contacts)) s.contacts = [];
     if (!Array.isArray(s.closedDates)) s.closedDates = [];
-    if (!s.dayOverrides || typeof s.dayOverrides !== "object" || Array.isArray(s.dayOverrides)) s.dayOverrides = {};
     if (!Array.isArray(s.blockedClients)) s.blockedClients = [];
     if (!Array.isArray(s.blocks)) s.blocks = [];
+    if (!Array.isArray(s.opens)) s.opens = [];
     if (!Array.isArray(s.waitlist)) s.waitlist = [];
     if (!Array.isArray(s.alerts)) s.alerts = [];
     if (!Array.isArray(s.reviews)) s.reviews = [];
@@ -511,14 +511,21 @@ UG.Store = (function () {
     return persist();
   }
 
-  /* ---------- שעות מיוחדות ליום ספציפי (מעבר לשעות הקבועות) ---------- */
-  function setDayOverride(dateKey, open, close) {
-    state.dayOverrides = state.dayOverrides || {};
-    state.dayOverrides[dateKey] = { open, close };
-    return persist();
-  }
-  function removeDayOverride(dateKey) {
-    if (state.dayOverrides) delete state.dayOverrides[dateKey];
+  /* ---------- פתיחה/סגירה של שעה ביום ספציפי ----------
+     available=true פותח את השעה ללקוחות. inHours מבדיל בין שעה שבתוך הפעילות
+     (מנוהלת דרך blocks) לבין שעה מחוץ לפעילות (מנוהלת דרך opens). */
+  async function setSlotOpen(dateKey, start, available, inHours) {
+    if (backend.mode === "local") { const latest = backend.read(); if (latest) state = latest; }
+    const key = dateKey + "|" + start;
+    state.blocks = state.blocks || [];
+    state.opens = state.opens || [];
+    if (available) {
+      if (inHours) state.blocks = state.blocks.filter((k) => k !== key);
+      else if (!state.opens.includes(key)) state.opens.push(key);
+    } else {
+      if (inHours) { if (!state.blocks.includes(key)) state.blocks.push(key); }
+      else state.opens = state.opens.filter((k) => k !== key);
+    }
     return persist();
   }
 
@@ -704,23 +711,12 @@ UG.Store = (function () {
     await persist();
   }
 
-  // סימון/ביטול חסימה של שעה (בעלים)
-  async function setBlock(dateKey, time, blocked) {
-    if (backend.mode === "local") { const latest = backend.read(); if (latest) state = latest; }
-    const key = dateKey + "|" + time;
-    state.blocks = state.blocks || [];
-    const has = state.blocks.includes(key);
-    if (blocked && !has) state.blocks.push(key);
-    else if (!blocked && has) state.blocks = state.blocks.filter((k) => k !== key);
-    await persist();
-  }
-
   return {
     init, subscribe, get,
     setDay, saveShop, upsertService, removeService,
     addContacts, removeContact, addBroadcast, addClosedDates, removeClosedDate,
-    setDayOverride, removeDayOverride, blockClient, unblockClient,
-    createBooking, setBookingStatus, setBlock, deleteBooking,
+    setSlotOpen, blockClient, unblockClient,
+    createBooking, setBookingStatus, deleteBooking,
     joinWaitlist, leaveWaitlist, consumeAlert, addReview, savePushToken,
     subscribeGallery, getGallery, addPhoto, removePhoto,
     createShop, shopExists, peekShop,
