@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "73";
+  const APP_VERSION = "74";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1261,15 +1261,15 @@
         <div class="hint" style="margin-top:5px">* בקשה בלבד — ייתכן שהתור יתקיים עם ספר אחר.</div>
       </div>` : ""}
       <div class="field-row">
-        <div class="field"><label>שם פרטי</label>
+        <div class="field"><label>שם פרטי <span class="req">*</span></label>
           <input class="input" id="cf-first" placeholder="שם פרטי" value="${esc(identity.firstName || "")}"></div>
-        <div class="field"><label>שם משפחה</label>
+        <div class="field"><label>שם משפחה <span class="req">*</span></label>
           <input class="input" id="cf-last" placeholder="שם משפחה" value="${esc(identity.lastName || "")}"></div>
       </div>
-      <div class="field"><label>טלפון נייד</label>
+      <div class="field"><label>טלפון נייד <span class="req">*</span></label>
         <input class="input" id="cf-phone" type="tel" inputmode="tel" placeholder="050-0000000" value="${esc(identity.phone)}"></div>
       ${(UG.Email && UG.Email.configured()) ? `
-      <div class="field"><label>אימייל (לקבלת אישור למייל)</label>
+      <div class="field"><label>אימייל <span class="opt">(לא חובה — לקבלת אישור למייל)</span></label>
         <input class="input" id="cf-email" type="email" inputmode="email" autocomplete="email" placeholder="name@email.com" value="${esc(identity.email || "")}"></div>` : ""}
       <button class="btn btn-primary" data-act="do-book">${isResched ? "אישור המועד החדש" : "אישור וקביעת התור"}</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
@@ -1287,10 +1287,8 @@
     const phone = u.fmtPhone(phoneRaw);
     const emailEl = $("#cf-email");
     const email = emailEl ? emailEl.value.trim() : (identity.email || "");
-    if (emailEl) {   // כשהמייל פעיל — הוא חובה כדי שנוכל לשלוח אישור ללקוח
-      if (!email) { toast("נא להזין כתובת אימייל", "", "📧"); return null; }
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("כתובת אימייל לא תקינה", "", "📧"); return null; }
-    }
+    // מייל אינו חובה — נבדק רק אם הוזן, כדי שנשלח אישור לכתובת תקינה
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("כתובת אימייל לא תקינה", "", "📧"); return null; }
     const name = first + " " + last;
     identity.firstName = first; identity.lastName = last; identity.name = name; identity.phone = phone;
     identity.email = email;
@@ -1535,12 +1533,12 @@
       <div class="summary-row"><span class="sr-k">שעה</span><span class="sr-v">${esc(start)}</span></div>
       <div style="height:16px"></div>
       <div class="field-row">
-        <div class="field"><label>שם פרטי</label>
+        <div class="field"><label>שם פרטי <span class="req">*</span></label>
           <input class="input" id="cf-first" placeholder="שם פרטי" value="${esc(identity.firstName || "")}"></div>
-        <div class="field"><label>שם משפחה</label>
+        <div class="field"><label>שם משפחה <span class="req">*</span></label>
           <input class="input" id="cf-last" placeholder="שם משפחה" value="${esc(identity.lastName || "")}"></div>
       </div>
-      <div class="field"><label>טלפון נייד</label>
+      <div class="field"><label>טלפון נייד <span class="req">*</span></label>
         <input class="input" id="cf-phone" type="tel" inputmode="tel" placeholder="050-0000000" value="${esc(identity.phone)}"></div>
       <button class="btn btn-primary" data-act="join-wait" data-key="${dateKey}|${start}">🔔 הצטרפות לרשימת ההמתנה</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
