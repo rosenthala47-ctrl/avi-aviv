@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "74";
+  const APP_VERSION = "75";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1855,18 +1855,22 @@
 
     const row = (x, isPast) => {
       const b = x.b;
+      // בתצוגת ההיסטוריה מצב ההגעה מוצג ע״י כפתור «הגיע» עצמו (לבן→שחור), בלי תג כפול
       const stg = b.status === "noshow"
         ? `<span class="status-tag status-noshow">❌ לא הגיע</span>`
+        : (b.status === "confirmed" && isPast)
+        ? ``
         : b.status === "confirmed"
         ? `<span class="status-tag status-confirmed">✓ אישר הגעה</span>`
         : `<span class="status-tag status-booked">ממתין</span>`;
+      const arrived = b.status === "confirmed";
       const action = !isPast
         ? `<button class="btn btn-sm btn-danger" data-act="owner-cancel" data-id="${b.id}">בטל</button>`
         : (b.status === "noshow"
             ? `<button class="btn btn-sm" data-act="owner-unnoshow" data-id="${b.id}">בטל סימון</button>`
             : `<div class="bk-acts">
-                 ${b.status !== "confirmed" ? `<button class="btn btn-sm" data-act="owner-confirm" data-id="${b.id}">✓ הגיע</button>` : ""}
-                 <button class="btn btn-sm" data-act="owner-noshow" data-id="${b.id}">לא הגיע</button>
+                 <button class="arrive-btn ${arrived ? "done" : ""}" data-act="owner-confirm" data-id="${b.id}">${arrived ? "✓ הגיע" : "סמן הגעה"}</button>
+                 ${arrived ? "" : `<button class="btn btn-sm" data-act="owner-noshow" data-id="${b.id}">לא הגיע</button>`}
                </div>`);
       return `
       <div class="booking" style="${isPast ? "opacity:.6" : ""}">
@@ -3496,10 +3500,15 @@
           toast("הלקוח הוסר מהרשימה", "", "🗑️"); render(); break;
 
         // סימון "לא הגיע"
-        // סימון הגעה ע״י הספר — מכניס את התור לדוח ההכנסות ולביקורי הלקוח
-        case "owner-confirm":
-          await Store.setBookingStatus(t.dataset.id, "confirmed", "owner");
-          toast("סומן: הלקוח הגיע ✓", "good", "✓"); render(); break;
+        // סימון הגעה ע״י הספר — מכניס את התור לדוח ההכנסות ולביקורי הלקוח.
+        // מתג: לחיצה שנייה מבטלת את הסימון.
+        case "owner-confirm": {
+          const bk = Store.get().bookings.find((x) => x.id === t.dataset.id);
+          const on = bk && bk.status === "confirmed";
+          await Store.setBookingStatus(t.dataset.id, on ? "booked" : "confirmed", "owner");
+          toast(on ? "בוטל סימון ההגעה" : "סומן: הלקוח הגיע ✓", on ? "" : "good", on ? "↩️" : "✓");
+          render(); break;
+        }
         case "owner-noshow":
           await Store.setBookingStatus(t.dataset.id, "noshow", "owner");
           toast("סומן: הלקוח לא הגיע", "", "❌"); render(); break;

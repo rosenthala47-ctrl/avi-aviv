@@ -630,8 +630,20 @@ select.input {
   font-size: 13px; font-weight: 600; margin: 13px 0 10px;
 }
 .ab-custom input { width: 17px; height: 17px; accent-color: var(--sky); flex: none; }
-.bk-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.bk-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
 .bk-acts .btn { width: auto; }
+/* כפתור «סמן הגעה» — לבן ובולט; הופך לשחור אחרי לחיצה */
+.arrive-btn {
+  font: inherit; font-weight: 800; font-size: 13.5px; cursor: pointer; white-space: nowrap;
+  padding: 9px 16px; border-radius: 11px;
+  background: #ffffff; color: #0a0c10; border: 1.5px solid rgba(0,0,0,.14);
+  box-shadow: 0 3px 11px rgba(0,0,0,.22);
+}
+.arrive-btn.done {
+  background: #0a0c10; color: #ffffff; border-color: #0a0c10; box-shadow: none;
+}
+:root[data-theme="light"] .arrive-btn.done { background: #111827; border-color: #111827; }
+.arrive-btn:active { transform: scale(.95); }
 
 /* ==== שליחה בוואטסאפ לרשימת הלקוחות ==== */
 .wa-msg {
