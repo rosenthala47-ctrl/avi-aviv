@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "75";
+  const APP_VERSION = "76";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -3102,16 +3102,20 @@
     localStorage.setItem("ug_route__" + d.handle, "owner");
     localStorage.setItem("ug_otab__" + d.handle, "publish");
     // המספרה שבבעלות המכשיר הזה — פתיחת האפליקציה תוביל ישר לניהול שלה (כניסת הספר)
-    try { localStorage.setItem("ug_my_shop", d.handle); } catch (e) {}
+    try { localStorage.setItem("ug_my_shop", d.handle); localStorage.setItem("ug_known_handle", d.handle); } catch (e) {}
     setTimeout(() => { location.hash = d.handle; location.reload(); }, 800);
   }
 
   function wizExisting() {
+    // הכתובת נזכרת מהכניסה הקודמת במכשיר — הספר בדרך כלל רק מקליד סיסמה
+    let known = "";
+    try { known = (localStorage.getItem("ug_known_handle") || "").trim(); } catch (e) {}
     openModal(`
       ${authHeader()}
-      <div class="field"><label>הכתובת האישית שלך</label>
-        <input class="input" id="lg-handle" placeholder="dani" autocapitalize="off" autocomplete="off" spellcheck="false"></div>
-      <div class="field pw-field"><label>סיסמת ניהול</label>
+      <div class="field"><label>הכתובת האישית שלך <span class="req">*</span></label>
+        <input class="input" id="lg-handle" placeholder="dani" value="${esc(known)}" autocapitalize="off" autocomplete="off" spellcheck="false">
+        <div class="hint" style="margin-top:5px">הכתובת שבחרת ברישום — זו שאחרי הסלאש בקישור ללקוחות (למשל barbertor.web.app/#<b>dani</b>)</div></div>
+      <div class="field pw-field"><label>סיסמת ניהול <span class="req">*</span></label>
         <input class="input" id="lg-pass" type="password" placeholder="הסיסמה שקבעת ברישום">
         <button type="button" class="pw-eye" data-act="toggle-pw" style="bottom:0" aria-label="הצג סיסמה">👁️</button></div>
       <p class="hint" id="lg-err" style="min-height:15px;margin-top:0"></p>
@@ -3137,13 +3141,14 @@
       localStorage.setItem("ug_owner_auth__" + handle, "1");
       localStorage.setItem("ug_route__" + handle, "owner");
       // המספרה שבבעלות המכשיר הזה — פתיחת האפליקציה תוביל ישר לניהול שלה (כניסת הספר)
-      try { localStorage.setItem("ug_my_shop", handle); } catch (e) {}
+      try { localStorage.setItem("ug_my_shop", handle); localStorage.setItem("ug_known_handle", handle); } catch (e) {}
       haptic(16);
       location.hash = handle; location.reload();
     };
     const lb = $("[data-act2='do-existing-login']"); if (lb) lb.addEventListener("click", login);
     const pw = $("#lg-pass"); if (pw) pw.addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
-    setTimeout(() => $("#lg-handle") && $("#lg-handle").focus(), 100);
+    // כתובת כבר ממולאת → מדלגים ישר לסיסמה
+    setTimeout(() => { const el = known ? $("#lg-pass") : $("#lg-handle"); if (el) el.focus(); }, 100);
   }
 
   function renderNotFound() {
