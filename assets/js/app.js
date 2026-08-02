@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "78";
+  const APP_VERSION = "79";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1733,11 +1733,16 @@
     const banners = locked ? "" :
       subBanner() + (view.ownerTab !== "settings" ? ownerNotifBanner() : "");
 
+    const tabLabel = {
+      cal: "יומן", hours: "שעות", services: "שירותים", bookings: "תורים",
+      clients: "לקוחות", report: "דוח", publish: "פרסום", settings: "הגדרות",
+    }[view.ownerTab] || "ניהול העסק";
+
     return `
     <div class="screen active">
-      ${topbar("ניהול העסק", {})}
+      ${topbar(tabLabel, {})}
       <div class="content" id="oscroll">${banners}${body}</div>
-      <div class="tabbar scroll">
+      <div class="tabbar scroll" id="otabbar">
         <button data-otab="cal" class="${view.ownerTab === "cal" ? "active" : ""}"><span class="tb-ico">🗓️</span>יומן</button>
         <button data-otab="hours" class="${view.ownerTab === "hours" ? "active" : ""}"><span class="tb-ico">🕐</span>שעות</button>
         <button data-otab="services" class="${view.ownerTab === "services" ? "active" : ""}"><span class="tb-ico">✂️</span>שירותים</button>
@@ -2879,7 +2884,21 @@
     } catch (e) {}
     // שמירת הלשונית הנוכחית — כדי שרענון הדף לא יחזיר להתחלה
     if (view.route === "client") { try { localStorage.setItem("ug_ctab__" + SHOP, view.clientTab); } catch (e) {} }
+    // גלילת סרגל התפריט התחתון (אצל הבעלים) — נשמרת בין רינדורים כדי שלא תקפוץ
+    // להתחלה מעצמה; זזה רק כשהספר עצמו גולל.
+    const prevTabbar = $("#otabbar");
+    const tabbarScroll = prevTabbar ? prevTabbar.scrollLeft : null;
     $("#root").innerHTML = view.route === "owner" ? renderOwner() : renderClient();
+    const newTabbar = $("#otabbar");
+    if (newTabbar) {
+      if (tabbarScroll !== null) {
+        newTabbar.scrollLeft = tabbarScroll;   // נשארים בדיוק איפה שהיו — לא קופצים לבד
+      } else {
+        // רינדור ראשון (למשל נכנסים ישר ללשונית ״הגדרות״ שנשמרה) — לוודא שהלשונית הפעילה נראית
+        const activeBtn = newTabbar.querySelector("button.active");
+        if (activeBtn) activeBtn.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+    }
   }
 
   /* =======================================================================
