@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "80";
+  const APP_VERSION = "81";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -4031,6 +4031,42 @@
     toast("ההגדרות נשמרו ✓", "good", "⚙️"); render();
   }
 
+  /* ---------- בדיקת עדכון אוטומטית ----------
+     אפליקציה מותקנת בדרך כלל *ממשיכה* מהמצב הקודם במקום לטעון מחדש, ולכן קוד
+     ישן נשאר בזיכרון גם אחרי שהעלינו גרסה חדשה. כאן משווים מול version.json
+     (שמוגש ללא מטמון) ומרעננים פעם אחת כשיש פער. */
+  let updateChecking = false;
+  async function checkForUpdate(silent) {
+    if (updateChecking) return;
+    updateChecking = true;
+    try {
+      const res = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
+      if (!res.ok) return;
+      const live = String(((await res.json()) || {}).version || "");
+      if (!live || live === APP_VERSION) return;
+      // הגנה מלולאת רענון: מרעננים פעם אחת בלבד לכל גרסה
+      let tried = "";
+      try { tried = sessionStorage.getItem("ug_upd_try") || ""; } catch (e) {}
+      if (tried === live) {
+        if (!silent) toast("יש גרסה חדשה (" + live + ") — נסו ״בדיקת עדכון״ בהגדרות", "", "⚠️");
+        return;
+      }
+      // לא קוטעים באמצע עבודה — מודאל פתוח או הקלדה. ננסה שוב בכניסה הבאה לחזית.
+      const busy = ($("#modalBack") && $("#modalBack").classList.contains("open")) || isEditingRoot();
+      if (busy) return;
+      try { sessionStorage.setItem("ug_upd_try", live); } catch (e) {}
+      toast("מתעדכן לגרסה " + live + "…", "sky", "⬆️");
+      try {
+        if ("caches" in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((k) => caches.delete(k)));
+        }
+      } catch (e) {}
+      setTimeout(() => location.reload(), 500);
+    } catch (e) { /* אין רשת — ננסה בפעם הבאה */ }
+    finally { updateChecking = false; }
+  }
+
   /* כפיית עדכון: מוחק את מטמון ה-Service Worker ומרענן מהרשת.
      פותר מצב שבו הדפדפן/האפליקציה המותקנת מחזיקים גרסה ישנה. */
   async function forceUpdate() {
@@ -4227,6 +4263,11 @@
     applyShopManifest();   // מניפסט לכל מספרה — האייקון ייפתח בעמוד הנכון
 
     checkPaymentReturn();   // חזרה מעמוד התשלום של ספק הסליקה
+    checkForUpdate(true);   // גרסה חדשה? לרענן לבד (חשוב באפליקציה מותקנת)
+    // האפליקציה חזרה לחזית — בודקים שוב, כי מותקנת ממשיכה מהמצב ולא טוענת מחדש
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) checkForUpdate(true);
+    });
     setTimeout(() => promptNotif(), 1200);   // הזמנה לאישור התראות — בכל כניסה עד שיאשר
     Store.subscribe(onStoreChange);
     Store.subscribeGallery(() => {
