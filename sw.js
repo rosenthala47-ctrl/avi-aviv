@@ -1,6 +1,6 @@
 /* Service Worker — BarberTor
    מטרות: התקנת PWA + הצגת התראות פוש (תזכורות / תור חדש).            */
-const CACHE = "ug-barber-v83";
+const CACHE = "ug-barber-v84";
 /* קליפת האפליקציה בלבד. קובצי ה-JS/CSS נטענים עם ‎?v=NN‎ (ראו tools/bump-version.sh)
    ולכן אין טעם לרשום אותם כאן — הם ייכנסו למטמון בטעינה הראשונה דרך ה-fetch,
    וכתובת חדשה בכל גרסה מבטיחה שלא יוגש קובץ ישן. */
@@ -18,11 +18,19 @@ self.addEventListener("install", (e) => {
 });
 
 self.addEventListener("activate", (e) => {
-  e.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
-    ).then(() => self.clients.claim())
-  );
+  e.waitUntil((async () => {
+    // ניקוי מטמונים ישנים
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
+    await self.clients.claim();
+    // "גשר עדכון" ללקוחות שכבר מותקנים: כשה-SW החדש תופס שליטה, מרעננים חלונות
+    // פתוחים פעם אחת כדי שיטענו את הקוד החדש (עם ‎?v=NN‎). ה-SW הוא השכבה היחידה
+    // שהדפדפן תמיד בודק מחדש, ולכן זה עובד גם על קוד ישן שאין בו בדיקת-עדכון.
+    try {
+      const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const c of wins) { if ("navigate" in c) { try { await c.navigate(c.url); } catch (e2) {} } }
+    } catch (e3) {}
+  })());
 });
 
 /* network-first עבור הקבצים כדי לקבל עדכונים, עם נפילה למטמון.
