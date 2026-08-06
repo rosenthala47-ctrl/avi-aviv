@@ -610,6 +610,53 @@ select.input {
 .banner.good { border-color: rgba(52,211,153,.35); background: linear-gradient(120deg, rgba(52,211,153,.10), var(--surface)); }
 .banner.warn { border-color: rgba(251,191,36,.45); background: linear-gradient(120deg, rgba(251,191,36,.13), var(--surface)); }
 
+/* ==== שלבי אשף חדשים: תיאור, אינסטגרם, אייקון, מקור הגעה, סיכום ==== */
+.wiz-count { text-align: start; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.wiz-logo-pick { text-align: center; }
+.wiz-logo-pick .logo-preview { margin: 0 auto; }
+
+/* קישור אינסטגרם בעמוד הלקוח */
+.ig-link {
+  display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
+  font-weight: 700; font-size: 14px; color: var(--sky-2);
+}
+.ig-link .ig-ico { font-size: 17px; }
+
+/* בורר "מאיפה הגעת אלינו" */
+.src-picker { display: flex; flex-direction: column; gap: 9px; }
+.src-opt {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: start;
+  font: inherit; cursor: pointer; padding: 14px 15px; border-radius: var(--radius);
+  border: 1.5px solid var(--line); background: var(--surface); color: var(--text);
+}
+.src-opt .src-radio {
+  width: 20px; height: 20px; flex: none; border-radius: 50%;
+  border: 2px solid var(--muted-2); position: relative;
+}
+.src-opt.selected { border-color: var(--sky); background: var(--sky-glow); }
+.src-opt.selected .src-radio { border-color: var(--sky); }
+.src-opt.selected .src-radio::after {
+  content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--sky);
+}
+.src-opt .src-name { font-weight: 700; font-size: 14px; }
+.src-opt:active { transform: scale(.985); }
+
+/* כרטיס הסיכום */
+.sum-card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+.sum-row { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line-soft); }
+.sum-row:last-child { border-bottom: none; }
+.sum-ico { font-size: 17px; flex: none; }
+.sum-label { font-size: 13px; color: var(--muted); flex: none; min-width: 88px; text-align: start; }
+.sum-value { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; text-align: start;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sum-value.empty { color: var(--muted-2); font-weight: 400; }
+.sum-edit {
+  flex: none; font-size: 14px; cursor: pointer; line-height: 1;
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--surface-2);
+}
+.sum-edit:active { transform: scale(.92); }
+
 /* ==== יתרונות אישור התראות (חלון הזמנה ללקוח) ==== */
 .nb-list { list-style: none; margin: 15px 0 17px; padding: 0; display: flex; flex-direction: column; gap: 12px; }
 .nb-list li { display: flex; align-items: flex-start; gap: 11px; text-align: start; }

@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "79";
+  const APP_VERSION = "80";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1158,13 +1158,27 @@
     </div>`;
   }
 
+  /* שם משתמש נקי לאינסטגרם — מקבל גם קישור מלא או @ ומחזיר את השם בלבד */
+  function igHandle(v) {
+    let s = String(v || "").trim();
+    if (!s) return "";
+    s = s.replace(/^https?:\/\/(www\.)?instagram\.com\//i, "").replace(/^@/, "");
+    s = s.split(/[/?#]/)[0];
+    return s.replace(/[^A-Za-z0-9._]/g, "").slice(0, 40);
+  }
+
   /* ---------- כרטיס "קצת עלינו" ---------- */
   function aboutCard(st) {
     const about = (st.shop.about || "").trim();
-    if (!about) return "";
+    const ig = igHandle(st.shop.instagram || "");
+    if (!about && !ig) return "";
     return `
       <div class="section-title">✨ קצת עלינו</div>
-      <div class="card"><p style="margin:0;line-height:1.65;font-size:14.5px;white-space:pre-line">${esc(about)}</p></div>`;
+      <div class="card">
+        ${about ? `<p style="margin:0;line-height:1.65;font-size:14.5px;white-space:pre-line">${esc(about)}</p>` : ""}
+        ${ig ? `<a class="ig-link" href="https://instagram.com/${esc(ig)}" target="_blank" rel="noopener"${about ? ` style="margin-top:12px"` : ""}>
+          <span class="ig-ico">📷</span><span>@${esc(ig)}</span></a>` : ""}
+      </div>`;
   }
 
   /* ---------- כרטיס שעות פעילות ---------- */
@@ -2794,6 +2808,8 @@
           <input class="input" id="set-tag" value="${esc(st.shop.tagline || "")}"></div>
         <div class="field"><label>קצת עלינו (יוצג ללקוחות בעמוד ההזמנה)</label>
           <textarea class="input" id="set-about" rows="3" placeholder="ספרו על המספרה — ותק, התמחות, אווירה…" style="resize:vertical;line-height:1.6">${esc(st.shop.about || "")}</textarea></div>
+        <div class="field"><label>אינסטגרם <span class="opt">(לא חובה)</span></label>
+          <input class="input" id="set-ig" value="${esc(st.shop.instagram || "")}" placeholder="dani.barber" autocapitalize="off" spellcheck="false"></div>
         <div class="field"><label>כתובת המספרה (לכפתור ״איך מגיעים״)</label>
           <input class="input" id="set-addr" value="${esc(st.shop.address || "")}" placeholder="רבי טרפון 12, ירושלים"></div>
         <div class="field-row">
@@ -2919,20 +2935,32 @@
   }
 
   const wiz = {
-    step: 0, busy: false,
+    step: 0, busy: false, returnTo: 0,
     data: {
       owner: "", name: "", handle: "", phone: "", city: "", street: "", houseNo: "", address: "",
       services: [{ name: "תספורת גבר", price: 60, durationMin: 30 }],
       multiStaff: false, staff: [""],
+      about: "", instagram: "", logo: "", heardFrom: "",
       style: "sky", pass: "", pass2: "",
     },
   };
+
+  // "מאיפה הגעת אלינו" — לדעת מאיפה מגיעים ספרים חדשים
+  const WIZ_SOURCES = [
+    { id: "friend", label: "שמעתי מחבר" },
+    { id: "social", label: "ראיתי אתכם ברשתות החברתיות", sub: "אינסטגרם, פייסבוק או טיקטוק" },
+    { id: "store", label: "ראיתי אתכם בחנות האפליקציות", sub: "App Store, Google Play" },
+    { id: "google", label: "חיפוש בגוגל" },
+    { id: "other", label: "אחר" },
+  ];
   // הרכבת כתובת מלאה מהשדות הנפרדים (רחוב + מספר, עיר)
   function wizComposeAddress(d) {
     const line1 = [d.street, d.houseNo].filter(Boolean).join(" ").trim();
     return [line1, d.city].filter(Boolean).join(", ").trim();
   }
-  const WIZ_QUESTIONS = 8;   // שלבים 1..8 הם שאלות
+  const WIZ_QUESTIONS = 13;  // שלבים 1..13 (13 = מסך הסיכום)
+  // שלבים שאפשר לדלג עליהם — פרטים שאפשר להשלים אחר כך מההגדרות
+  const WIZ_SKIPPABLE = [4, 7, 8, 9, 12];
 
   // רטט קצר למשוב מגע (נתמך באנדרואיד; באייפון פשוט מתעלם)
   function haptic(ms) { try { if (navigator.vibrate) navigator.vibrate(ms || 12); } catch (e) {} }
@@ -3000,6 +3028,29 @@
              <button type="button" class="btn btn-sm" data-act="wiz-staff-add" style="width:100%;margin-top:6px">＋ הוספת ספר</button>
            </div>` : ""}`);
       case 7:
+        return wizQ("📝", "כמה מילים על העסק", "עוזר ללקוחות להבין מה מייחד אתכם — יופיע בעמוד ההזמנה. אפשר לדלג ולמלא אחר כך.",
+          `<textarea class="input wiz-input" id="wz-about" rows="4" maxlength="170"
+                     placeholder="למשל: אצלנו תקבלו שירות ייחודי עם מגע אישי ומותאם ללקוח"
+                     style="resize:vertical;line-height:1.6">${esc(d.about)}</textarea>
+           <div class="wiz-count"><span id="wz-about-n">${(d.about || "").length}</span>/170</div>`);
+      case 8:
+        return wizQ("📷", "אינסטגרם העסק", "הלקוחות יוכלו לעבור לעמוד האינסטגרם שלכם ישירות מדף ההזמנה. אפשר לדלג.",
+          `<input class="input wiz-input" id="wz-ig" placeholder="dani.barber" value="${esc(d.instagram)}"
+                  autocapitalize="off" autocomplete="off" spellcheck="false" inputmode="latin">
+           <div class="hint" style="margin-top:8px">אפשר להזין שם משתמש או את הקישור המלא לפרופיל</div>`);
+      case 9:
+        return wizQ("🖼️", "אייקון המספרה", "התמונה שהלקוחות יראו בראש העמוד ובאייקון האפליקציה. אפשר לדלג ולהעלות אחר כך.",
+          `<div class="wiz-logo-pick">
+             <div class="logo-preview${d.logo ? " has-img" : ""}" id="wz-logo-prev">${d.logo
+               ? `<img src="${esc(d.logo)}" alt="לוגו">`
+               : esc((d.name || "מ").trim()[0] || "מ")}</div>
+             <div class="btn-row" style="margin-top:12px;justify-content:center">
+               <button type="button" class="btn btn-sm" data-act="wiz-logo-pick">${d.logo ? "החלפת תמונה" : "העלאת תמונה"}</button>
+               ${d.logo ? `<button type="button" class="btn btn-danger btn-sm" data-act="wiz-logo-clear">הסרה</button>` : ""}
+             </div>
+             <input type="file" accept="image/*" data-wizlogofile style="display:none">
+           </div>`);
+      case 10:
         return wizQ("🎨", "בחרו סגנון עיצוב", "ככה ייראה האתר שלכם — גם אצלכם וגם אצל הלקוחות. אפשר לשנות בכל רגע מההגדרות.",
           `<div class="style-picker">${WIZ_STYLES.map((s) => `
              <button type="button" class="style-opt ${d.style === s.id ? "selected" : ""}" data-act="wiz-style" data-style="${s.id}">
@@ -3007,13 +3058,55 @@
                <span class="so-body"><span class="so-name">${esc(s.name)}</span><span class="hint" style="display:block">${esc(s.desc)}</span></span>
                <span class="so-check">✓</span>
              </button>`).join("")}</div>`);
-      case 8:
+      case 11:
         return wizQ("🔒", "סיסמת ניהול", "רק איתה נכנסים לנהל את המספרה. שמור/י אותה במקום בטוח!",
           `<div class="pw-field">
              <input class="input wiz-input" id="wz-pass" type="password" placeholder="בחר/י סיסמה" value="${esc(d.pass)}">
              <button type="button" class="pw-eye" data-act="toggle-pw" aria-label="הצג סיסמה">👁️</button>
            </div>
            <input class="input wiz-input" id="wz-pass2" type="password" placeholder="הקלד/י שוב לאימות" value="${esc(d.pass2 || "")}" style="margin-top:10px">`);
+      case 12:
+        return wizQ("💬", "מאיפה הגעת אלינו?", "שאלה אחרונה — זה עוזר לנו לדעת איפה כדאי לספר על BarberTor.",
+          `<div class="src-picker">${WIZ_SOURCES.map((s) => `
+             <button type="button" class="src-opt ${d.heardFrom === s.id ? "selected" : ""}" data-act="wiz-src" data-src="${s.id}">
+               <span class="src-radio"></span>
+               <span class="src-body"><span class="src-name">${esc(s.label)}</span>${s.sub ? `<span class="hint" style="display:block">${esc(s.sub)}</span>` : ""}</span>
+             </button>`).join("")}</div>`);
+      case 13: {
+        const addr = wizComposeAddress(d);
+        const ig = igHandle(d.instagram);
+        const styleName = (WIZ_STYLES.find((s) => s.id === d.style) || {}).name || d.style;
+        const row = (ico, label, value, step) => `
+          <div class="sum-row">
+            <span class="sum-ico">${ico}</span>
+            <span class="sum-label">${esc(label)}</span>
+            <span class="sum-value${value ? "" : " empty"}">${esc(value || "ללא")}</span>
+            <button type="button" class="sum-edit" data-act="wiz-goto" data-step="${step}" aria-label="עריכה">✏️</button>
+          </div>`;
+        const svcCount = (d.services || []).filter((s) => s && s.name).length;
+        return `
+          <div class="wiz-q-wrap">
+            <div class="wiz-emoji">✅</div>
+            <h2 class="wiz-q">סיכום</h2>
+            <p class="wiz-sub">בדקו שהכול נכון. כל הפרטים ניתנים לשינוי מאוחר יותר בהגדרות.</p>
+            <div class="wiz-field">
+              <div class="logo-preview${d.logo ? " has-img" : ""}" style="margin:0 auto 16px">${d.logo
+                ? `<img src="${esc(d.logo)}" alt="לוגו">`
+                : esc((d.name || "מ").trim()[0] || "מ")}</div>
+              <div class="sum-card">
+                ${row("💈", "שם המספרה", d.name, 2)}
+                ${row("🔗", "כתובת אישית", d.handle, 3)}
+                ${row("📞", "טלפון", d.phone, 4)}
+                ${row("📍", "כתובת", addr, 4)}
+                ${row("✂️", "שירותים", svcCount ? svcCount + " שירותים" : "", 5)}
+                ${row("🧑‍🔧", "ספרים", d.multiStaff ? (d.staff || []).filter(Boolean).join(", ") : "ספר יחיד", 6)}
+                ${row("📝", "תיאור", d.about, 7)}
+                ${row("📷", "אינסטגרם", ig ? "@" + ig : "", 8)}
+                ${row("🎨", "עיצוב", styleName, 10)}
+              </div>
+            </div>
+          </div>`;
+      }
       default:
         return "";
     }
@@ -3054,8 +3147,8 @@
     const nav = wiz.step === 0
       ? `<button class="btn btn-primary btn-lg" data-act="wiz-next">בוא נתחיל 🚀</button>
          <button class="btn btn-ghost btn-sm" data-act="wiz-existing" style="margin-top:10px;width:100%">כבר יש לי מערכת</button>`
-      : `<button class="btn btn-primary btn-lg" data-act="wiz-next">${isLast ? "סיום ובניית המספרה ✨" : "המשך ›"}</button>
-         ${wiz.step === 4 ? `<button class="btn btn-ghost btn-sm" data-act="wiz-skip" style="margin-top:8px;width:100%">דלג/י על זה</button>` : ""}
+      : `<button class="btn btn-primary btn-lg" data-act="wiz-next">${isLast ? "יצירת המספרה ✨" : "המשך ›"}</button>
+         ${WIZ_SKIPPABLE.includes(wiz.step) ? `<button class="btn btn-ghost btn-sm" data-act="wiz-skip" style="margin-top:8px;width:100%">דלג/י על זה</button>` : ""}
          <button class="btn btn-ghost btn-sm" data-act="wiz-back" style="margin-top:6px;width:100%">‹ חזרה</button>`;
 
     return `
@@ -3080,12 +3173,21 @@
         if (p) p.innerHTML = esc(shareBase() + "#") + "<b>" + esc(v || "הכתובת-שלך") + "</b>";
       });
     }
-    // Enter = המשך (למעט שלב השירותים, שם יש כמה שדות בשורה)
+    // מונה תווים חי בשלב התיאור
+    const ab = $("#wz-about");
+    if (ab && !ab.__bound) {
+      ab.__bound = true;
+      ab.addEventListener("input", () => {
+        const n = $("#wz-about-n");
+        if (n) n.textContent = String(ab.value.length);
+      });
+    }
+    // Enter = המשך (למעט שלבים עם כמה שדות / טקסט חופשי)
     const body = $("#wizBody");
     if (body && !body.__bound) {
       body.__bound = true;
       body.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && wiz.step !== 5) { e.preventDefault(); wizNext(); }
+        if (e.key === "Enter" && wiz.step !== 5 && wiz.step !== 7) { e.preventDefault(); wizNext(); }
       });
     }
   }
@@ -3125,6 +3227,9 @@
   }
 
   function wizGo(step) {
+    // עריכה שהתחילה ממסך הסיכום — אחרי אישור השלב חוזרים ישר לסיכום
+    if (wiz.returnTo && step > wiz.step && step !== wiz.returnTo) step = wiz.returnTo;
+    if (step === wiz.returnTo) wiz.returnTo = 0;
     wiz.step = step;
     haptic(14);
     render();
@@ -3179,14 +3284,25 @@
       } else { d.staff = []; }
       wizGo(7); return;
     }
-    if (wiz.step === 7) { wizGo(8); return; }
+    if (wiz.step === 7) {
+      d.about = ($("#wz-about") && $("#wz-about").value.trim()) || "";
+      wizGo(8); return;
+    }
     if (wiz.step === 8) {
+      d.instagram = igHandle(($("#wz-ig") && $("#wz-ig").value) || "");
+      wizGo(9); return;
+    }
+    if (wiz.step === 9) { wizGo(10); return; }   // אייקון — נשמר בעת הבחירה
+    if (wiz.step === 10) { wizGo(11); return; }  // סגנון — נשמר בעת הבחירה
+    if (wiz.step === 11) {
       d.pass = ($("#wz-pass") && $("#wz-pass").value.trim()) || "";
       d.pass2 = ($("#wz-pass2") && $("#wz-pass2").value.trim()) || "";
       if (d.pass.length < 4) { toast("סיסמה קצרה מדי (לפחות 4 תווים)", "", "✋"); haptic(40); return; }
       if (d.pass !== d.pass2) { toast("הסיסמאות אינן תואמות", "", "🔁"); haptic(40); return; }
-      wizBuild(); return;
+      wizGo(12); return;
     }
+    if (wiz.step === 12) { wizGo(13); return; }  // מקור ההגעה — נשמר בעת הבחירה
+    if (wiz.step === 13) { wizBuild(); return; } // סיכום — יוצרים את המספרה
   }
 
   // קריאת שמות הספרים מהטופס אל wiz.data
@@ -3199,15 +3315,24 @@
 
   function wizBack() {
     if (wiz.step <= 0) return;
-    // שמירת מה שהוקלד לפני חזרה
-    const map = { 1: ["owner", "#wz-owner"], 2: ["name", "#wz-name"], 3: ["handle", "#wz-handle"], 8: ["pass", "#wz-pass"] };
+    wizCaptureCurrent();
+    wiz.returnTo = 0;    // חזרה ידנית מבטלת את החזרה האוטומטית לסיכום
+    wizGo(wiz.step - 1);
+  }
+
+  /* שמירת מה שהוקלד בשלב הנוכחי — לפני מעבר אחורה או קפיצה מהסיכום */
+  function wizCaptureCurrent() {
+    const map = {
+      1: ["owner", "#wz-owner"], 2: ["name", "#wz-name"], 3: ["handle", "#wz-handle"],
+      7: ["about", "#wz-about"], 11: ["pass", "#wz-pass"],
+    };
     const m = map[wiz.step];
     if (m && $(m[1])) wiz.data[m[0]] = $(m[1]).value.trim();
-    if (wiz.step === 8 && $("#wz-pass2")) wiz.data.pass2 = $("#wz-pass2").value.trim();
+    if (wiz.step === 8 && $("#wz-ig")) wiz.data.instagram = igHandle($("#wz-ig").value);
+    if (wiz.step === 11 && $("#wz-pass2")) wiz.data.pass2 = $("#wz-pass2").value.trim();
     if (wiz.step === 4) wizCaptureStep4();
     if (wiz.step === 5) wizCaptureServices();
     if (wiz.step === 6) wizCaptureStaff();
-    wizGo(wiz.step - 1);
   }
 
   // מסך "בונים לך את המספרה" + יצירה בפועל
@@ -3231,6 +3356,7 @@
     const res = await Store.createShop(d.handle, {
       name: d.name, ownerPass: d.pass, phone: d.phone, address: d.address, ownerName: d.owner,
       style: d.style, services: d.services, staff: d.multiStaff ? d.staff : [],
+      about: d.about, instagram: d.instagram, logo: d.logo, heardFrom: d.heardFrom,
     });
     clearInterval(timer);
     if (!res.ok) {
@@ -3486,7 +3612,22 @@
         // שאלון פתיחת מספרה
         case "wiz-next": wizNext(); break;
         case "wiz-back": wizBack(); break;
-        case "wiz-skip": wizCaptureStep4(); wizGo(5); break;
+        case "wiz-skip": wizCaptureCurrent(); wizGo(wiz.step + 1); break;
+        case "wiz-goto":
+          wizCaptureCurrent();
+          wiz.returnTo = wiz.step;               // לחזור לסיכום אחרי העריכה
+          wizGo(Number(t.dataset.step)); break;
+        case "wiz-src":
+          wiz.data.heardFrom = t.dataset.src;
+          haptic(14); wizRenderBody(); break;
+        case "wiz-logo-pick": {
+          const f = document.querySelector("[data-wizlogofile]");
+          if (f) f.click();
+          break;
+        }
+        case "wiz-logo-clear":
+          wiz.data.logo = "";
+          haptic(14); wizRenderBody(); break;
         case "wiz-svc-add":
           wizCaptureServices();
           wiz.data.services.push({ name: "", price: "", durationMin: 30 });
@@ -3732,6 +3873,18 @@
         a.value = "";
         return;
       }
+      // לוגו באשף ההרשמה — נשמר ב-wiz.data עד יצירת המספרה
+      if (a.dataset.wizlogofile !== undefined && a.type === "file") {
+        const f = a.files && a.files[0];
+        a.value = "";
+        if (!f) return;
+        if (!f.type || f.type.indexOf("image/") !== 0) { toast("נא לבחור קובץ תמונה", "", "🖼️"); return; }
+        try {
+          wiz.data.logo = await compressLogo(f);
+          haptic(14); wizRenderBody();
+        } catch (e) { toast("לא הצלחנו לטעון את התמונה", "", "⚠️"); }
+        return;
+      }
       if (a.dataset.coverfile !== undefined && a.type === "file") {
         if (a.files && a.files[0]) handleCoverUpload(a.files[0]);
         a.value = "";
@@ -3869,6 +4022,7 @@
       name: $("#set-name").value.trim() || "המספרה",
       tagline: $("#set-tag").value.trim(),
       about: ($("#set-about") && $("#set-about").value.trim()) || "",
+      instagram: igHandle(($("#set-ig") && $("#set-ig").value) || ""),
       address: $("#set-addr").value.trim(),
       phone: $("#set-phone").value.trim(),
       slotStep: Number($("#set-step").value),

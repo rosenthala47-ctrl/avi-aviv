@@ -396,6 +396,10 @@ UG.Store = (function () {
     s.shop.phone = (data && data.phone) || "";
     s.shop.address = (data && data.address) || "";
     s.shop.ownerName = (data && data.ownerName) || "";
+    s.shop.about = (data && data.about) || "";
+    s.shop.instagram = (data && data.instagram) || "";
+    s.shop.logo = (data && data.logo) || "";
+    s.shop.heardFrom = (data && data.heardFrom) || "";   // מאיפה הספר הגיע אלינו
     s.shop.style = (data && data.style) || "sky";
     // שמות הספרים (אם המספרה בחרה כמה ספרים בשאלון)
     if (data && Array.isArray(data.staff)) {
