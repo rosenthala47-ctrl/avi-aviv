@@ -1,22 +1,15 @@
 /* Service Worker — BarberTor
    מטרות: התקנת PWA + הצגת התראות פוש (תזכורות / תור חדש).            */
-const CACHE = "ug-barber-v81";
+const CACHE = "ug-barber-v83";
+/* קליפת האפליקציה בלבד. קובצי ה-JS/CSS נטענים עם ‎?v=NN‎ (ראו tools/bump-version.sh)
+   ולכן אין טעם לרשום אותם כאן — הם ייכנסו למטמון בטעינה הראשונה דרך ה-fetch,
+   וכתובת חדשה בכל גרסה מבטיחה שלא יוגש קובץ ישן. */
 const ASSETS = [
   "./",
   "./index.html",
-  "./assets/styles.css",
-  "./assets/js/qrcode.js",
-  "./assets/js/util.js",
-  "./assets/js/store.js",
-  "./assets/js/auth.js",
-  "./assets/js/notify.js",
-  "./assets/js/fcm.js",
-  "./assets/js/email.js",
-  "./assets/js/app.js",
   "./assets/img/icon.svg",
   "./assets/img/icon-192.png",
   "./assets/img/icon-512.png",
-  "./manifest.json",
 ];
 
 self.addEventListener("install", (e) => {
@@ -39,7 +32,8 @@ self.addEventListener("fetch", (e) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // אל תיגע בבקשות ל-Firebase/גופנים
-  const noStore = /\/config\.js(\?|$)/.test(url.pathname);
+  // config.js (מפתחות) ו-version.json (בדיקת עדכון) — תמיד מהרשת, לעולם לא מהמטמון
+  const noStore = /\/config\.js$/.test(url.pathname) || /\/version\.json$/.test(url.pathname);
   e.respondWith(
     fetch(req)
       .then((res) => {
