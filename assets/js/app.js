@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "84";
+  const APP_VERSION = "85";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1167,6 +1167,136 @@
     return s.replace(/[^A-Za-z0-9._]/g, "").slice(0, 40);
   }
 
+  /* ---------- תמיכה — דיווח תקלה בוואטסאפ (המספר עצמו לא מוצג) ---------- */
+  function supportCard() {
+    const sup = UG_CONFIG.support || {};
+    if (!sup.waPhone) return "";
+    const hours = Number(sup.slaHours) || 30;
+    return `
+      <div class="section-title">🛟 תמיכה</div>
+      <div class="card">
+        <p class="hint" style="margin:0 0 12px">נתקלתם בתקלה או שמשהו לא עובד כמו שצריך? שלחו לנו הודעה — <b>מתחייבים לטפל בה תוך עד ${hours} שעות</b>.</p>
+        <button class="btn btn-wa" data-act="support-wa">
+          <svg class="wa-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M.057 24l1.687-6.163a11.867 11.867 0 01-1.587-5.945C.16 5.335 5.495 0 12.05 0a11.82 11.82 0 018.413 3.488 11.824 11.824 0 013.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 01-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.767.967-.94 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
+          שליחת הודעה בוואטסאפ
+        </button>
+      </div>`;
+  }
+
+  function openSupportWa() {
+    const sup = UG_CONFIG.support || {};
+    if (!sup.waPhone) return;
+    const st = Store.get();
+    const shop = (st && st.shop && st.shop.name) || "";
+    const msg = `שלום, יש לי תקלה ב-BarberTor.\nהמספרה: ${shop} (${SHOP})\nגרסה: ${APP_VERSION}\n\nהתקלה:\n`;
+    openExternal("https://wa.me/" + sup.waPhone + "?text=" + encodeURIComponent(msg));
+  }
+
+  /* ---------- אישור מדיניות פרטיות ---------- */
+  const PRIVACY_KEY = "ug_privacy_ok_v1";
+  function privacyAccepted() {
+    try { return localStorage.getItem(PRIVACY_KEY) === "1"; } catch (e) { return true; }
+  }
+  function acceptPrivacy() {
+    try { localStorage.setItem(PRIVACY_KEY, "1"); } catch (e) {}
+    closeModal();
+    toast("תודה! אפשר להתחיל 🙂", "good", "✓");
+    render();
+    setTimeout(() => promptNotif(), 700);   // עכשיו אפשר להציע התראות
+  }
+  // חלון חסימה שמוצג פעם אחת עד לאישור
+  function promptPrivacy() {
+    if (privacyAccepted()) return;
+    if ($("#modalBack") && $("#modalBack").classList.contains("open")) return;
+    openModal(`
+      <div class="m-title">🔒 פרטיות ותנאי שימוש</div>
+      <div class="m-sub">רגע לפני שמתחילים</div>
+      <p class="hint" style="margin:12px 0 6px;line-height:1.7">
+        כדי לקבוע תור אנחנו שומרים את השם, הטלפון והתורים שלכם — ומשתמשים בהם רק
+        לניהול התורים ולשליחת תזכורות. לא מוכרים ולא מעבירים את הפרטים לאף אחד.
+      </p>
+      <p class="hint" style="margin:0 0 14px">
+        <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--sky)">קראו את מדיניות הפרטיות המלאה ›</a>
+      </p>
+      <button class="btn btn-primary" data-act="accept-privacy">אני מאשר/ת ומסכים/ה</button>
+    `);
+  }
+
+  /* ---------- תשלום מראש בביט ----------
+     חשוב: לביט אין ממשק ציבורי שמאפשר לאפליקציה חיצונית ליצור תשלום עם סכום
+     ונמען מוכנים מראש, ואין דרך לאמת אוטומטית שהכסף הועבר. לכן: פותחים את ביט
+     (או מציגים את פרטי ההעברה להעתקה), והלקוח מסמן ״שילמתי״. אצל הספר זה מופיע
+     כ״הלקוח סימן ששילם״ עד שהוא מאמת באפליקציית ביט ומאשר. */
+  function bitOn(st) {
+    return !!(st && st.shop && st.shop.bitEnabled && u.normalizePhone(st.shop.bitPhone || ""));
+  }
+  function openBitApp(phone, amount, note) {
+    // ניסיון לפתוח את אפליקציית ביט; אם אינה מותקנת — האתר של ביט
+    const deep = "bitpay://";
+    const web = "https://www.bitpay.co.il/app/";
+    let moved = false;
+    const onHide = () => { moved = true; };
+    document.addEventListener("visibilitychange", onHide, { once: true });
+    try { location.href = deep; } catch (e) {}
+    setTimeout(() => {
+      document.removeEventListener("visibilitychange", onHide);
+      if (!moved) openExternal(web);
+    }, 1200);
+  }
+
+  let payCtx = null;   // { bookingId, price, tip }
+  function openPaySheet(booking) {
+    const st = Store.get();
+    if (!bitOn(st) || !booking) return;
+    payCtx = { bookingId: booking.id, price: Number(booking.price) || 0, tip: 0 };
+    renderPaySheet();
+  }
+  function renderPaySheet() {
+    const st = Store.get();
+    const p = payCtx; if (!p) return;
+    const tipOn = st.shop.tipEnabled !== false;
+    const total = p.price + p.tip;
+    const phone = u.fmtPhone(st.shop.bitPhone || "");
+    const tips = [0, 5, 10, 20];
+    openModal(`
+      <div class="m-title">💳 תשלום בביט</div>
+      <div class="m-sub">תשלום מראש — התור כבר נשמר עבורכם</div>
+      <div class="summary-row"><span class="sr-k">שירות</span><span class="sr-v">${esc(booking_serviceName(p.bookingId))}</span></div>
+      <div class="summary-row"><span class="sr-k">מחיר</span><span class="sr-v">${u.fmtPrice(p.price)}</span></div>
+      ${tipOn ? `
+      <div style="margin:14px 0 6px"><label class="fld-lbl">רוצים להוסיף טיפ? (לא חובה)</label>
+        <div class="tip-row">${tips.map((t) => `
+          <button type="button" class="tip-opt ${p.tip === t ? "selected" : ""}" data-act="pay-tip" data-t="${t}">${t === 0 ? "בלי" : "₪" + t}</button>`).join("")}
+        </div>
+      </div>` : ""}
+      <div class="summary-row" style="margin-top:10px"><span class="sr-k">סה״כ לתשלום</span><span class="sr-v big">${u.fmtPrice(total)}</span></div>
+
+      <div class="pay-box">
+        <div class="pay-line"><span>מספר לביט</span><b>${esc(phone)}</b>
+          <button type="button" class="btn btn-sm" data-act="pay-copy-phone">העתקה</button></div>
+        <div class="pay-line"><span>סכום</span><b>${u.fmtPrice(total)}</b>
+          <button type="button" class="btn btn-sm" data-act="pay-copy-amount">העתקה</button></div>
+      </div>
+      <p class="hint" style="margin:10px 0 12px">פתחו את ביט, שלחו את הסכום למספר שלמעלה, וחזרו לכאן כדי לסמן שהתשלום בוצע.</p>
+
+      <button class="btn btn-primary" data-act="pay-open-bit">פתיחת ביט</button>
+      <button class="btn btn-wa" data-act="pay-done" style="margin-top:8px">✓ שילמתי — סיימתי</button>
+      <button class="btn btn-ghost" data-act="pay-later" style="margin-top:8px">אשלם במספרה</button>
+    `);
+  }
+  function booking_serviceName(id) {
+    const b = (Store.get().bookings || []).find((x) => x.id === id);
+    return (b && b.serviceName) || "";
+  }
+  async function payDone() {
+    const p = payCtx; if (!p) return;
+    await Store.markPaid(p.bookingId, p.price + p.tip, p.tip);
+    payCtx = null;
+    closeModal();
+    toast("תודה! סימנו שהתשלום בוצע ✓", "good", "💳");
+    render();
+  }
+
   /* ---------- כרטיס "קצת עלינו" ---------- */
   function aboutCard(st) {
     const about = (st.shop.about || "").trim();
@@ -1368,6 +1498,11 @@
       ${(UG.Email && UG.Email.configured()) ? `
       <div class="field"><label>אימייל <span class="opt">(לא חובה — לקבלת אישור למייל)</span></label>
         <input class="input" id="cf-email" type="email" inputmode="email" autocomplete="email" placeholder="name@email.com" value="${esc(identity.email || "")}"></div>` : ""}
+      ${(!isResched && bitOn(st)) ? `
+      <div class="pay-note">
+        <span>💳</span>
+        <div>אחרי אישור התור תוכלו <b>לשלם מראש בביט</b> — או לשלם במספרה, כרצונכם.</div>
+      </div>` : ""}
       <button class="btn btn-primary" data-act="do-book">${isResched ? "אישור המועד החדש" : "אישור וקביעת התור"}</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
     `);
@@ -1482,6 +1617,8 @@
       }
     }
     render();
+    // תשלום מראש בביט — רק אחרי שהתור כבר נשמר, כדי שלא ישלמו על משבצת שנתפסה
+    if (!reschedId && bitOn(Store.get())) setTimeout(() => openPaySheet(res.booking), 400);
   }
 
   /* ---------- העלאת תמונה לגלריה (דחיסה בצד הלקוח) ---------- */
@@ -1978,6 +2115,10 @@
           <div class="bk-sub">${esc(b.serviceName)} · ${b.phone ? `<a href="tel:${esc(b.phone)}">${esc(b.phone)}</a>` : "ללא טלפון"}</div>
           <div class="bk-sub">${esc(u.longDate(b.date))}${b.staff ? ` · <span class="staff-req">🧑‍🔧 ביקש: ${esc(b.staff)}</span>` : ""}</div>
           ${b.priorNoShow ? `<div class="noshow-warn">⚠️ הלקוח לא הגיע בעבר${b.priorNoShow > 1 ? ` (${b.priorNoShow} פעמים)` : ""}</div>` : ""}
+          ${b.paidClaimed ? `<div class="paid-line ${b.paidConfirmed ? "ok" : ""}">
+            💳 ${b.paidConfirmed ? "שולם ואומת" : "הלקוח סימן ששילם"} · ${u.fmtPrice(b.paidAmount || b.price)}${b.tipAmount ? ` (כולל ₪${b.tipAmount} טיפ)` : ""}
+            ${b.paidConfirmed ? "" : `<button class="btn btn-sm" data-act="confirm-paid" data-id="${b.id}">אימות</button>`}
+          </div>` : ""}
         </div>
         <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
           ${stg}
@@ -2838,6 +2979,24 @@
         <button class="btn" data-act="enable-notif">${Notify.permission() === "granted" ? "בדיקת התראה" : "אפשר קבלת התראות על תורים חדשים"}</button>
       </div>
 
+      <div class="section-title">💳 תשלום מראש בביט</div>
+      <div class="card">
+        <label class="ab-custom" style="margin-top:0">
+          <input type="checkbox" id="set-bit" ${st.shop.bitEnabled ? "checked" : ""}>
+          <span>לאפשר ללקוחות לשלם מראש בביט</span>
+        </label>
+        <div class="field"><label>מספר הביט שלכם ${st.shop.bitEnabled ? `<span class="req">*</span>` : ""}</label>
+          <input class="input" id="set-bitphone" type="tel" inputmode="tel" placeholder="050-0000000" value="${esc(st.shop.bitPhone || "")}"></div>
+        <label class="ab-custom">
+          <input type="checkbox" id="set-tip" ${st.shop.tipEnabled !== false ? "checked" : ""}>
+          <span>לאפשר ללקוח להוסיף טיפ</span>
+        </label>
+        <p class="hint" style="margin:4px 0 0">הלקוח מעביר לכם ישירות בביט ומסמן ״שילמתי״. ודאו באפליקציית ביט שהכסף התקבל ואז לחצו ״אימות״ ליד התור.</p>
+        <button class="btn btn-primary" data-act="save-settings" style="margin-top:12px">שמירה</button>
+      </div>
+
+      ${supportCard()}
+
       <div class="section-title">חיבור</div>
       <div class="card">
         <div class="conn-line">
@@ -2941,6 +3100,7 @@
       services: [{ name: "תספורת גבר", price: 60, durationMin: 30 }],
       multiStaff: false, staff: [""],
       about: "", instagram: "", logo: "", heardFrom: "",
+      bitEnabled: false, bitPhone: "", tipEnabled: true, privacyOk: false,
       style: "sky", pass: "", pass2: "",
     },
   };
@@ -2958,9 +3118,9 @@
     const line1 = [d.street, d.houseNo].filter(Boolean).join(" ").trim();
     return [line1, d.city].filter(Boolean).join(", ").trim();
   }
-  const WIZ_QUESTIONS = 13;  // שלבים 1..13 (13 = מסך הסיכום)
+  const WIZ_QUESTIONS = 14;  // שלבים 1..14 (14 = מסך הסיכום)
   // שלבים שאפשר לדלג עליהם — פרטים שאפשר להשלים אחר כך מההגדרות
-  const WIZ_SKIPPABLE = [4, 7, 8, 9, 12];
+  const WIZ_SKIPPABLE = [4, 7, 8, 9, 10, 13];
 
   // רטט קצר למשוב מגע (נתמך באנדרואיד; באייפון פשוט מתעלם)
   function haptic(ms) { try { if (navigator.vibrate) navigator.vibrate(ms || 12); } catch (e) {} }
@@ -3051,6 +3211,23 @@
              <input type="file" accept="image/*" data-wizlogofile style="display:none">
            </div>`);
       case 10:
+        return wizQ("💳", "לקבל תשלום מראש בביט?", "הלקוח יוכל לשלם לכם בביט כבר בעת קביעת התור — מפחית ביטולים ואי-הגעות. אפשר לדלג ולהפעיל אחר כך מההגדרות.",
+          `<div class="staff-mode">
+             <button type="button" class="staff-opt ${!d.bitEnabled ? "selected" : ""}" data-act="wiz-bit-mode" data-on="0">
+               <span class="stm-emoji">🏪</span><span class="stm-name">תשלום במספרה בלבד</span><span class="so-check">✓</span></button>
+             <button type="button" class="staff-opt ${d.bitEnabled ? "selected" : ""}" data-act="wiz-bit-mode" data-on="1">
+               <span class="stm-emoji">💳</span><span class="stm-name">גם תשלום בביט</span><span class="so-check">✓</span></button>
+           </div>
+           ${d.bitEnabled ? `
+           <div class="field" style="margin-top:14px"><label>מספר הביט שלכם <span class="req">*</span></label>
+             <input class="input wiz-input" id="wz-bitphone" type="tel" inputmode="tel" placeholder="050-0000000" value="${esc(d.bitPhone)}">
+             <div class="hint" style="margin-top:6px">לכאן הלקוחות יעבירו את התשלום. ודאו שזה המספר המשויך לחשבון הביט שלכם.</div>
+           </div>
+           <label class="ab-custom">
+             <input type="checkbox" id="wz-tip" ${d.tipEnabled ? "checked" : ""}>
+             <span>לאפשר ללקוח להוסיף טיפ</span>
+           </label>` : ""}`);
+      case 11:
         return wizQ("🎨", "בחרו סגנון עיצוב", "ככה ייראה האתר שלכם — גם אצלכם וגם אצל הלקוחות. אפשר לשנות בכל רגע מההגדרות.",
           `<div class="style-picker">${WIZ_STYLES.map((s) => `
              <button type="button" class="style-opt ${d.style === s.id ? "selected" : ""}" data-act="wiz-style" data-style="${s.id}">
@@ -3058,21 +3235,21 @@
                <span class="so-body"><span class="so-name">${esc(s.name)}</span><span class="hint" style="display:block">${esc(s.desc)}</span></span>
                <span class="so-check">✓</span>
              </button>`).join("")}</div>`);
-      case 11:
+      case 12:
         return wizQ("🔒", "סיסמת ניהול", "רק איתה נכנסים לנהל את המספרה. שמור/י אותה במקום בטוח!",
           `<div class="pw-field">
              <input class="input wiz-input" id="wz-pass" type="password" placeholder="בחר/י סיסמה" value="${esc(d.pass)}">
              <button type="button" class="pw-eye" data-act="toggle-pw" aria-label="הצג סיסמה">👁️</button>
            </div>
            <input class="input wiz-input" id="wz-pass2" type="password" placeholder="הקלד/י שוב לאימות" value="${esc(d.pass2 || "")}" style="margin-top:10px">`);
-      case 12:
+      case 13:
         return wizQ("💬", "מאיפה הגעת אלינו?", "שאלה אחרונה — זה עוזר לנו לדעת איפה כדאי לספר על BarberTor.",
           `<div class="src-picker">${WIZ_SOURCES.map((s) => `
              <button type="button" class="src-opt ${d.heardFrom === s.id ? "selected" : ""}" data-act="wiz-src" data-src="${s.id}">
                <span class="src-radio"></span>
                <span class="src-body"><span class="src-name">${esc(s.label)}</span>${s.sub ? `<span class="hint" style="display:block">${esc(s.sub)}</span>` : ""}</span>
              </button>`).join("")}</div>`);
-      case 13: {
+      case 14: {
         const addr = wizComposeAddress(d);
         const ig = igHandle(d.instagram);
         const styleName = (WIZ_STYLES.find((s) => s.id === d.style) || {}).name || d.style;
@@ -3102,8 +3279,13 @@
                 ${row("🧑‍🔧", "ספרים", d.multiStaff ? (d.staff || []).filter(Boolean).join(", ") : "ספר יחיד", 6)}
                 ${row("📝", "תיאור", d.about, 7)}
                 ${row("📷", "אינסטגרם", ig ? "@" + ig : "", 8)}
-                ${row("🎨", "עיצוב", styleName, 10)}
+                ${row("💳", "תשלום בביט", d.bitEnabled ? u.fmtPhone(d.bitPhone) : "", 10)}
+                ${row("🎨", "עיצוב", styleName, 11)}
               </div>
+              <label class="ab-custom privacy-agree">
+                <input type="checkbox" id="wz-privacy" ${d.privacyOk ? "checked" : ""}>
+                <span>קראתי ואני מסכים/ה ל<a href="privacy.html" target="_blank" rel="noopener">מדיניות הפרטיות</a> ולתנאי השימוש</span>
+              </label>
             </div>
           </div>`;
       }
@@ -3293,16 +3475,34 @@
       wizGo(9); return;
     }
     if (wiz.step === 9) { wizGo(10); return; }   // אייקון — נשמר בעת הבחירה
-    if (wiz.step === 10) { wizGo(11); return; }  // סגנון — נשמר בעת הבחירה
-    if (wiz.step === 11) {
+    if (wiz.step === 10) {                        // תשלום בביט
+      wizCaptureBit();
+      if (d.bitEnabled && !u.isValidPhone(d.bitPhone)) {
+        toast("להפעלת תשלום בביט צריך מספר טלפון תקין", "", "📵"); haptic(40); return;
+      }
+      wizGo(11); return;
+    }
+    if (wiz.step === 11) { wizGo(12); return; }  // סגנון — נשמר בעת הבחירה
+    if (wiz.step === 12) {
       d.pass = ($("#wz-pass") && $("#wz-pass").value.trim()) || "";
       d.pass2 = ($("#wz-pass2") && $("#wz-pass2").value.trim()) || "";
       if (d.pass.length < 4) { toast("סיסמה קצרה מדי (לפחות 4 תווים)", "", "✋"); haptic(40); return; }
       if (d.pass !== d.pass2) { toast("הסיסמאות אינן תואמות", "", "🔁"); haptic(40); return; }
-      wizGo(12); return;
+      wizGo(13); return;
     }
-    if (wiz.step === 12) { wizGo(13); return; }  // מקור ההגעה — נשמר בעת הבחירה
-    if (wiz.step === 13) { wizBuild(); return; } // סיכום — יוצרים את המספרה
+    if (wiz.step === 13) { wizGo(14); return; }  // מקור ההגעה — נשמר בעת הבחירה
+    if (wiz.step === 14) {                        // סיכום — אישור פרטיות ואז יצירה
+      d.privacyOk = !!($("#wz-privacy") && $("#wz-privacy").checked);
+      if (!d.privacyOk) { toast("יש לאשר את מדיניות הפרטיות כדי להמשיך", "", "🔒"); haptic(40); return; }
+      wizBuild(); return;
+    }
+  }
+
+  // שמירת שדות שלב הביט
+  function wizCaptureBit() {
+    const d = wiz.data;
+    if ($("#wz-bitphone")) d.bitPhone = $("#wz-bitphone").value.trim();
+    if ($("#wz-tip")) d.tipEnabled = $("#wz-tip").checked;
   }
 
   // קריאת שמות הספרים מהטופס אל wiz.data
@@ -3324,12 +3524,14 @@
   function wizCaptureCurrent() {
     const map = {
       1: ["owner", "#wz-owner"], 2: ["name", "#wz-name"], 3: ["handle", "#wz-handle"],
-      7: ["about", "#wz-about"], 11: ["pass", "#wz-pass"],
+      7: ["about", "#wz-about"], 12: ["pass", "#wz-pass"],
     };
     const m = map[wiz.step];
     if (m && $(m[1])) wiz.data[m[0]] = $(m[1]).value.trim();
     if (wiz.step === 8 && $("#wz-ig")) wiz.data.instagram = igHandle($("#wz-ig").value);
-    if (wiz.step === 11 && $("#wz-pass2")) wiz.data.pass2 = $("#wz-pass2").value.trim();
+    if (wiz.step === 10) wizCaptureBit();
+    if (wiz.step === 12 && $("#wz-pass2")) wiz.data.pass2 = $("#wz-pass2").value.trim();
+    if (wiz.step === 14 && $("#wz-privacy")) wiz.data.privacyOk = $("#wz-privacy").checked;
     if (wiz.step === 4) wizCaptureStep4();
     if (wiz.step === 5) wizCaptureServices();
     if (wiz.step === 6) wizCaptureStaff();
@@ -3357,6 +3559,7 @@
       name: d.name, ownerPass: d.pass, phone: d.phone, address: d.address, ownerName: d.owner,
       style: d.style, services: d.services, staff: d.multiStaff ? d.staff : [],
       about: d.about, instagram: d.instagram, logo: d.logo, heardFrom: d.heardFrom,
+      bitEnabled: d.bitEnabled, bitPhone: d.bitPhone, tipEnabled: d.tipEnabled,
     });
     clearInterval(timer);
     if (!res.ok) {
@@ -3620,6 +3823,10 @@
         case "wiz-src":
           wiz.data.heardFrom = t.dataset.src;
           haptic(14); wizRenderBody(); break;
+        case "wiz-bit-mode":
+          wizCaptureBit();
+          wiz.data.bitEnabled = t.dataset.on === "1";
+          haptic(14); wizRenderBody(); break;
         case "wiz-logo-pick": {
           const f = document.querySelector("[data-wizlogofile]");
           if (f) f.click();
@@ -3788,6 +3995,38 @@
         case "unblock-client":
           await Store.unblockClient(t.dataset.key);
           toast("החסימה הוסרה ✓", "good", "🔓"); render(); break;
+
+        // תמיכה ופרטיות
+        case "support-wa": openSupportWa(); break;
+        case "accept-privacy": acceptPrivacy(); break;
+
+        // תשלום בביט
+        case "pay-tip":
+          if (payCtx) { payCtx.tip = Number(t.dataset.t) || 0; haptic(12); renderPaySheet(); }
+          break;
+        case "pay-open-bit": {
+          const shopSt = Store.get();
+          openBitApp(shopSt.shop.bitPhone, payCtx ? payCtx.price + payCtx.tip : 0, shopSt.shop.name);
+          break;
+        }
+        case "pay-copy-phone": {
+          const ph = u.normalizePhone(Store.get().shop.bitPhone || "");
+          try { await navigator.clipboard.writeText(ph); toast("המספר הועתק", "good", "📋"); } catch (e2) {}
+          break;
+        }
+        case "pay-copy-amount": {
+          const amt = payCtx ? String(payCtx.price + payCtx.tip) : "";
+          try { await navigator.clipboard.writeText(amt); toast("הסכום הועתק", "good", "📋"); } catch (e2) {}
+          break;
+        }
+        case "pay-done": payDone(); break;
+        case "pay-later":
+          payCtx = null; closeModal();
+          toast("אין בעיה — אפשר לשלם במספרה", "sky", "👍"); break;
+        // אישור תשלום ע״י הספר
+        case "confirm-paid":
+          await Store.setPaidConfirmed(t.dataset.id, true);
+          toast("התשלום אומת ✓", "good", "💳"); render(); break;
 
         // מנוי
         case "show-upgrade": handleUpgrade(); break;
@@ -4018,11 +4257,20 @@
   }
 
   async function saveSettings() {
+    // ביט פעיל מחייב מספר תקין — אחרת הלקוח יגיע למסך תשלום בלי לאן להעביר
+    const bitOnNow = !!($("#set-bit") && $("#set-bit").checked);
+    const bitPh = ($("#set-bitphone") && $("#set-bitphone").value.trim()) || "";
+    if (bitOnNow && !u.isValidPhone(bitPh)) {
+      toast("להפעלת תשלום בביט צריך מספר טלפון תקין", "", "📵"); return;
+    }
     await Store.saveShop({
       name: $("#set-name").value.trim() || "המספרה",
       tagline: $("#set-tag").value.trim(),
       about: ($("#set-about") && $("#set-about").value.trim()) || "",
       instagram: igHandle(($("#set-ig") && $("#set-ig").value) || ""),
+      bitEnabled: !!($("#set-bit") && $("#set-bit").checked),
+      bitPhone: ($("#set-bitphone") && $("#set-bitphone").value.trim()) || "",
+      tipEnabled: !($("#set-tip") && !$("#set-tip").checked),
       address: $("#set-addr").value.trim(),
       phone: $("#set-phone").value.trim(),
       slotStep: Number($("#set-step").value),
@@ -4268,7 +4516,9 @@
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) checkForUpdate(true);
     });
-    setTimeout(() => promptNotif(), 1200);   // הזמנה לאישור התראות — בכל כניסה עד שיאשר
+    // אישור מדיניות פרטיות — חוסם עד שמאשרים; רק אחריו מציעים התראות
+    if (!privacyAccepted()) setTimeout(() => promptPrivacy(), 600);
+    else setTimeout(() => promptNotif(), 1200);   // הזמנה לאישור התראות — בכל כניסה עד שיאשר
     Store.subscribe(onStoreChange);
     Store.subscribeGallery(() => {
       // רענון כשמסתכלים על גלריה ולא באמצע הקלדה

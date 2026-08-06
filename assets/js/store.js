@@ -37,6 +37,9 @@ UG.Store = (function () {
         name: d.shopName, tagline: d.tagline, phone: d.phone, address: d.address,
         slotStep: d.slotStep, reminderMinutes: d.reminderMinutes,
         staff: [],           // שמות הספרים (אם יש כמה) — לבחירת ספר מועדף ע״י הלקוח
+        bitEnabled: false,   // תשלום מראש בביט
+        bitPhone: "",        // מספר הביט של הספר (אליו הלקוח מעביר)
+        tipEnabled: true,    // אפשרות להוסיף טיפ בתשלום
       },
       schedule,
       services: [
@@ -400,6 +403,9 @@ UG.Store = (function () {
     s.shop.instagram = (data && data.instagram) || "";
     s.shop.logo = (data && data.logo) || "";
     s.shop.heardFrom = (data && data.heardFrom) || "";   // מאיפה הספר הגיע אלינו
+    s.shop.bitEnabled = !!(data && data.bitEnabled);
+    s.shop.bitPhone = (data && data.bitPhone) || "";
+    s.shop.tipEnabled = data && data.tipEnabled != null ? !!data.tipEnabled : true;
     s.shop.style = (data && data.style) || "sky";
     // שמות הספרים (אם המספרה בחרה כמה ספרים בשאלון)
     if (data && Array.isArray(data.staff)) {
@@ -662,6 +668,28 @@ UG.Store = (function () {
     return b;
   }
 
+  /* סימון שהלקוח שילם בביט. הצהרת הלקוח בלבד — הספר מאמת מול אפליקציית ביט
+     ומאשר סופית (paidConfirmed) מצד הניהול. */
+  async function markPaid(bookingId, amount, tip) {
+    refreshLocal();
+    const b = (state.bookings || []).find((x) => x.id === bookingId);
+    if (!b) return null;
+    b.paidClaimed = true;
+    b.paidAmount = Number(amount) || 0;
+    b.tipAmount = Number(tip) || 0;
+    b.paidAt = Date.now();
+    await persist();
+    return b;
+  }
+  async function setPaidConfirmed(bookingId, confirmed) {
+    refreshLocal();
+    const b = (state.bookings || []).find((x) => x.id === bookingId);
+    if (!b) return null;
+    b.paidConfirmed = !!confirmed;
+    await persist();
+    return b;
+  }
+
   /* ---------- רשימת המתנה ---------- */
   async function joinWaitlist(data) {
     refreshLocal();
@@ -720,7 +748,7 @@ UG.Store = (function () {
     setDay, saveShop, upsertService, removeService,
     addContacts, removeContact, addBroadcast, addClosedDates, removeClosedDate,
     setSlotOpen, blockClient, unblockClient,
-    createBooking, setBookingStatus, deleteBooking,
+    createBooking, setBookingStatus, deleteBooking, markPaid, setPaidConfirmed,
     joinWaitlist, leaveWaitlist, consumeAlert, addReview, savePushToken,
     subscribeGallery, getGallery, addPhoto, removePhoto,
     createShop, shopExists, peekShop,

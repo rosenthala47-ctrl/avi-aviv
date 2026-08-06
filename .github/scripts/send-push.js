@@ -91,6 +91,7 @@ function apptTs(date, start) {
     const doneCancels = new Set(st.cancelIds || []);
     const doneBc = new Set(st.bcIds || []);
     const doneRem = new Set(st.remIds || []);   // תזכורות שכבר נשלחו
+    const donePaid = new Set(st.paidIds || []); // הודעות "הלקוח שילם" שכבר נשלחו
 
     const newAlerts = alerts.filter((a) => a && a.id && !doneAlerts.has(a.id) && apptTs(a.date, a.start) > now);
     const newBookings = bookings.filter((b) =>
@@ -105,6 +106,9 @@ function apptTs(date, start) {
       !doneCancels.has(b.id) && apptTs(b.date, b.start) > now);
     // הודעות קבוצתיות חדשות שהמנהל שלח ללקוחות
     const newBc = broadcasts.filter((b) => b && b.id && b.text && !doneBc.has(b.id));
+    // לקוחות שסימנו שהעבירו תשלום בביט — התראה לספר כדי שיאמת
+    const newPaid = bookings.filter((b) =>
+      b && b.id && b.paidClaimed && !donePaid.has(b.id) && b.status !== "cancelled");
     // תזכורות לפני התור — נשלחות כשנותר פחות מ-reminderMinutes עד המועד
     const reminderMin = Number((shop.shop && shop.shop.reminderMinutes) || 60);
     const dueReminders = bookings.filter((b) => {
@@ -131,6 +135,14 @@ function apptTs(date, start) {
         sent += await sendToUid("owner_" + sid, "❌ לקוח ביטל תור",
           `${b.userName || "לקוח"} — ${b.serviceName}, ${relDay(b.date)} בשעה ${b.start}`, "ccancel-" + b.id);
       }
+      // הלקוח שילם בביט — לספר, כדי שיאמת מול אפליקציית ביט
+      for (const b of newPaid) {
+        const tip = b.tipAmount ? ` (כולל ₪${b.tipAmount} טיפ)` : "";
+        sent += await sendToUid("owner_" + sid, "💳 לקוח שילם בביט",
+          `${b.userName || "לקוח"} — ₪${b.paidAmount || b.price}${tip}\n${b.serviceName} · ${relDay(b.date)} בשעה ${b.start}`,
+          "paid-" + b.id);
+        donePaid.add(b.id);
+      }
       // תזכורת לפני התור — מסמנים כנשלח רק אחרי השליחה בפועל
       for (const b of dueReminders) {
         const mins = Math.max(1, Math.round((apptTs(b.date, b.start) - now) / 60000));
@@ -153,7 +165,7 @@ function apptTs(date, start) {
 
     // סמן הכל כטופל. שים לב: doneRem מתמלא רק מתזכורות שנשלחו בפועל —
     // אסור לסמן כאן את כל התורים, אחרת אף תזכורת עתידית לא תישלח.
-    if (firstRun) dueReminders.forEach((b) => doneRem.add(b.id));
+    if (firstRun) { dueReminders.forEach((b) => doneRem.add(b.id)); newPaid.forEach((b) => donePaid.add(b.id)); }
     alerts.forEach((a) => a && a.id && doneAlerts.add(a.id));
     bookings.forEach((b) => b && b.id && doneBookings.add(b.id));
     bookings.forEach((b) => b && b.id && b.status === "cancelled" && doneCancels.add(b.id));
@@ -164,6 +176,7 @@ function apptTs(date, start) {
       cancelIds: [...doneCancels].slice(-500),
       bcIds: [...doneBc].slice(-200),
       remIds: [...doneRem].slice(-500),
+      paidIds: [...donePaid].slice(-500),
     };
     totalNewA += newAlerts.length; totalNewB += newBookings.length;
   }

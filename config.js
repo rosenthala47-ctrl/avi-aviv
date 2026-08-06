@@ -114,6 +114,13 @@ window.UG_CONFIG = {
     adminPasscodeHash: "2c5d46fcd359fb0a9ffd0f74d4a6486da78546f7110d4dd208be4937238bb245",
   },
 
+  /* תמיכה — כפתור וואטסאפ לדיווח על תקלה (המספר עצמו לא מוצג למשתמש).
+     slaHours = ההתחייבות שמוצגת לספר ("נטפל תוך עד X שעות"). */
+  support: {
+    waPhone: "972512626522",   // פורמט בינלאומי, בלי + ובלי 0 בהתחלה
+    slaHours: 30,
+  },
+
   /* מפתח Web Push (VAPID) — לשליחת התראות פוש גם כשהאפליקציה סגורה לגמרי (FCM).
      איפה משיגים: Firebase Console → Project Settings → Cloud Messaging →
      "Web Push certificates" → Generate key pair → להעתיק לכאן.
