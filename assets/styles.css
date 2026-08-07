@@ -657,6 +657,18 @@ select.input {
 }
 .sum-edit:active { transform: scale(.92); }
 
+/* ==== סרגל "תצוגת לקוח" לבעלים ==== */
+.preview-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 9px 14px; font-size: 13px; font-weight: 700; color: #fff;
+  background: linear-gradient(120deg, #6366f1, #38bdf8);
+}
+.preview-bar .btn {
+  width: auto; flex: none; padding: 6px 12px; font-size: 12.5px;
+  background: rgba(255,255,255,.22); color: #fff; border: none;
+}
+.preview-bar .btn:active { background: rgba(255,255,255,.34); }
+
 /* ==== תשלום בביט ==== */
 .pay-note {
   display: flex; align-items: flex-start; gap: 10px; margin: 4px 0 14px;
