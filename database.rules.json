@@ -32,6 +32,13 @@
     "shopIndex": {
       ".read": "auth != null",
       ".write": "auth != null"
+    },
+
+    "passHashes": {
+      "$hash": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
     }
   }
 }

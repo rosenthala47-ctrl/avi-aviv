@@ -385,12 +385,42 @@ UG.Store = (function () {
     return true;
   }
 
-  // יצירת מספרה חדשה (רישום ספר)
-  async function createShop(id, data) {
+  /* ---------- ייחודיות קוד הכניסה בין מספרות ----------
+     שומרים רק hash של הקוד (passHashes/<hash> = true), כך שאפשר לזהות התנגשות
+     בלי לחשוף את הקודים עצמם. עובד רק במצב ענן. */
+  async function passcodeTaken(passHash) {
+    await connect();
+    if (!_conn || _conn.kind !== "rtdb" || !passHash) return false;
+    try {
+      const snap = await _conn.db.ref("passHashes/" + passHash).once("value");
+      return snap.exists();
+    } catch (e) { return false; }
+  }
+  async function registerPasscode(passHash, id) {
+    if (!_conn || _conn.kind !== "rtdb" || !passHash) return;
+    try { await _conn.db.ref("passHashes/" + passHash).set({ at: Date.now() }); } catch (e) {}
+  }
+  // שריון קוד של מספרה ותיקה (backfill) — כותב רק אם עוד לא רשום, בלי לדרוס
+  async function registerPasscodeIfFree(passHash) {
+    await connect();
+    if (!_conn || _conn.kind !== "rtdb" || !passHash) return;
+    try {
+      const ref = _conn.db.ref("passHashes/" + passHash);
+      const snap = await ref.once("value");
+      if (!snap.exists()) await ref.set({ at: Date.now() });
+    } catch (e) {}
+  }
+
+  // יצירת מספרה חדשה (רישום ספר). passHash — hash של קוד הכניסה לבדיקת ייחודיות.
+  async function createShop(id, data, passHash) {
     await connect();
     const b = makeBackend(id);
     const exists = await b.exists();
     if (exists) return { ok: false, reason: "הכתובת הזו כבר תפוסה — בחרו אחרת" };
+    // קוד כניסה שכבר בשימוש במספרה אחרת — דורשים קוד ייחודי
+    if (passHash && await passcodeTaken(passHash)) {
+      return { ok: false, reason: "קוד הכניסה הזה כבר בשימוש — בחרו קוד אחר" };
+    }
     const s = defaultState();
     s.shop.createdAt = Date.now();   // תחילת תקופת הניסיון של המנוי
     s.shop.name = (data && data.name) || s.shop.name;
@@ -423,6 +453,7 @@ UG.Store = (function () {
         }));
     }
     await b.write(s);
+    if (passHash) await registerPasscode(passHash, id);   // שריון הקוד למניעת כפילות
     return { ok: true, id: id };
   }
   async function shopExists(id) { await connect(); return makeBackend(id).exists(); }
@@ -751,7 +782,7 @@ UG.Store = (function () {
     createBooking, setBookingStatus, deleteBooking, markPaid, setPaidConfirmed,
     joinWaitlist, leaveWaitlist, consumeAlert, addReview, savePushToken,
     subscribeGallery, getGallery, addPhoto, removePhoto,
-    createShop, shopExists, peekShop,
+    createShop, shopExists, peekShop, passcodeTaken, registerPasscodeIfFree,
     getSub, markPaymentPending, adminListShops, adminSetPaid,
     get mode() { return backend ? backend.mode : "local"; },
     get shopId() { return shopId; },

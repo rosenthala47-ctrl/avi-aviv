@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "85";
+  const APP_VERSION = "86";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -3488,6 +3488,14 @@
       d.pass2 = ($("#wz-pass2") && $("#wz-pass2").value.trim()) || "";
       if (d.pass.length < 4) { toast("סיסמה קצרה מדי (לפחות 4 תווים)", "", "✋"); haptic(40); return; }
       if (d.pass !== d.pass2) { toast("הסיסמאות אינן תואמות", "", "🔁"); haptic(40); return; }
+      // קוד כניסה חייב להיות ייחודי בין כל המספרות
+      wiz.busy = true;
+      const btn = $("[data-act='wiz-next']"); if (btn) { btn.disabled = true; btn.textContent = "בודקים…"; }
+      let taken = false;
+      try { taken = await Store.passcodeTaken(await sha256Hex(d.pass)); } catch (e) {}
+      wiz.busy = false;
+      if (btn) { btn.disabled = false; btn.textContent = "המשך ›"; }
+      if (taken) { toast("קוד הכניסה הזה כבר בשימוש — בחרו קוד אחר", "", "🔁"); haptic(40); return; }
       wizGo(13); return;
     }
     if (wiz.step === 13) { wizGo(14); return; }  // מקור ההגעה — נשמר בעת הבחירה
@@ -3555,16 +3563,19 @@
     }, 620);
 
     const d = wiz.data;
+    let passHash = "";
+    try { passHash = await sha256Hex(d.pass); } catch (e) {}
     const res = await Store.createShop(d.handle, {
       name: d.name, ownerPass: d.pass, phone: d.phone, address: d.address, ownerName: d.owner,
       style: d.style, services: d.services, staff: d.multiStaff ? d.staff : [],
       about: d.about, instagram: d.instagram, logo: d.logo, heardFrom: d.heardFrom,
       bitEnabled: d.bitEnabled, bitPhone: d.bitPhone, tipEnabled: d.tipEnabled,
-    });
+    }, passHash);
     clearInterval(timer);
     if (!res.ok) {
       toast(res.reason || "שגיאה ביצירת המספרה", "", "⚠️");
-      wizGo(3);
+      // חוזרים לשלב הרלוונטי: קוד כניסה תפוס → שלב הסיסמה, אחרת → הכתובת
+      wizGo(/קוד/.test(res.reason || "") ? 12 : 3);
       return;
     }
     const f = $("#build-fill"); if (f) f.style.width = "100%";
@@ -3610,7 +3621,9 @@
       const ok = (data.shop.ownerPass && pass === String(data.shop.ownerPass)) ||
         (handle === "main" && configCodes.includes(pass));   // סיסמאות אורי (config) עובדות למספרה הראשית
       if (!ok) { err("סיסמה שגויה"); haptic(40); return; }
-      // כניסה מוצלחת — ישר לניהול
+      // כניסה מוצלחת — ישר לניהול. משריינים את קוד הכניסה של המספרה הוותיקה
+      // (backfill) כדי שמספרה חדשה לא תוכל להשתמש בו.
+      if (data.shop.ownerPass) { sha256Hex(String(data.shop.ownerPass)).then((h) => Store.registerPasscodeIfFree(h)).catch(() => {}); }
       localStorage.setItem("ug_owner_auth__" + handle, "1");
       localStorage.setItem("ug_route__" + handle, "owner");
       // המספרה שבבעלות המכשיר הזה — פתיחת האפליקציה תוביל ישר לניהול שלה (כניסת הספר)
@@ -3647,7 +3660,9 @@
     if (handle === "main" || handle === "new" || handle === "signup") { toast("כתובת שמורה — בחרו אחרת", "", "✋"); return; }
     if (pass.length < 3) { toast("סיסמה קצרה מדי (לפחות 3 תווים)", "", "✋"); return; }
     const btn = $("[data-act='create-shop']"); if (btn) { btn.disabled = true; btn.textContent = "יוצר…"; }
-    const res = await Store.createShop(handle, { name: name, ownerPass: pass });
+    let passHash = "";
+    try { passHash = await sha256Hex(pass); } catch (e) {}
+    const res = await Store.createShop(handle, { name: name, ownerPass: pass }, passHash);
     if (!res.ok) {
       toast(res.reason || "שגיאה ביצירת המספרה", "", "⚠️");
       if (btn) { btn.disabled = false; btn.textContent = "יצירת המספרה"; }
