@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "87";
+  const APP_VERSION = "88";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1180,13 +1180,15 @@
     </div>`;
   }
 
-  /* שם משתמש נקי לאינסטגרם — מקבל גם קישור מלא או @ ומחזיר את השם בלבד */
+  /* שם משתמש נקי לאינסטגרם — מקבל גם קישור מלא או @ ומחזיר את השם בלבד.
+     חוקי שם משתמש: אותיות/מספרים/נקודה/קו-תחתון, עד 30 תווים, בלי נקודה בקצוות. */
   function igHandle(v) {
     let s = String(v || "").trim();
     if (!s) return "";
     s = s.replace(/^https?:\/\/(www\.)?instagram\.com\//i, "").replace(/^@/, "");
     s = s.split(/[/?#]/)[0];
-    return s.replace(/[^A-Za-z0-9._]/g, "").slice(0, 40);
+    s = s.replace(/[^A-Za-z0-9._]/g, "").replace(/^\.+|\.+$/g, "");   // הסרת נקודות בקצוות
+    return s.slice(0, 30);
   }
 
   /* ---------- תמיכה — דיווח תקלה בוואטסאפ (המספר עצמו לא מוצג) ---------- */
@@ -2977,7 +2979,12 @@
         <div class="field"><label>קצת עלינו (יוצג ללקוחות בעמוד ההזמנה)</label>
           <textarea class="input" id="set-about" rows="3" placeholder="ספרו על המספרה — ותק, התמחות, אווירה…" style="resize:vertical;line-height:1.6">${esc(st.shop.about || "")}</textarea></div>
         <div class="field"><label>אינסטגרם <span class="opt">(לא חובה)</span></label>
-          <input class="input" id="set-ig" value="${esc(st.shop.instagram || "")}" placeholder="dani.barber" autocapitalize="off" spellcheck="false"></div>
+          <input class="input" id="set-ig" value="${esc(st.shop.instagram || "")}" placeholder="dani.barber" autocapitalize="off" autocomplete="off" spellcheck="false" inputmode="latin">
+          <div class="ig-help">
+            <span class="ig-prev" id="ig-prev-set">instagram.com/<b>${esc(igHandle(st.shop.instagram || "") || "השם-שלך")}</b></span>
+            <button type="button" class="btn btn-sm" data-act="ig-test" data-src="#set-ig">פתחו לבדיקה ↗</button>
+          </div>
+          <div class="hint" style="margin-top:6px">הדביקו את שם המשתמש שלכם (או את הקישור לפרופיל). לחצו ״פתחו לבדיקה״ כדי לוודא שזה מוביל לעמוד שלכם.</div></div>
         <div class="field"><label>כתובת המספרה (לכפתור ״איך מגיעים״)</label>
           <input class="input" id="set-addr" value="${esc(st.shop.address || "")}" placeholder="רבי טרפון 12, ירושלים"></div>
         <div class="field-row">
@@ -3224,7 +3231,11 @@
         return wizQ("📷", "אינסטגרם העסק", "הלקוחות יוכלו לעבור לעמוד האינסטגרם שלכם ישירות מדף ההזמנה. אפשר לדלג.",
           `<input class="input wiz-input" id="wz-ig" placeholder="dani.barber" value="${esc(d.instagram)}"
                   autocapitalize="off" autocomplete="off" spellcheck="false" inputmode="latin">
-           <div class="hint" style="margin-top:8px">אפשר להזין שם משתמש או את הקישור המלא לפרופיל</div>`);
+           <div class="ig-help">
+             <span class="ig-prev" id="ig-prev-wz">instagram.com/<b>${esc(igHandle(d.instagram) || "השם-שלך")}</b></span>
+             <button type="button" class="btn btn-sm" data-act="ig-test" data-src="#wz-ig">פתחו לבדיקה ↗</button>
+           </div>
+           <div class="hint" style="margin-top:8px">אפשר להזין שם משתמש או את הקישור המלא לפרופיל. לחצו ״פתחו לבדיקה״ כדי לוודא שזה מוביל לעמוד שלכם.</div>`);
       case 9:
         return wizQ("🖼️", "אייקון המספרה", "התמונה שהלקוחות יראו בראש העמוד ובאייקון האפליקציה. אפשר לדלג ולהעלות אחר כך.",
           `<div class="wiz-logo-pick">
@@ -4042,6 +4053,15 @@
         case "preview-client": previewAsClient(); break;
         case "exit-preview": exitPreview(); break;
 
+        // בדיקת קישור אינסטגרם — פותח את הפרופיל כדי שהספר יוודא שזה שלו
+        case "ig-test": {
+          const el = $(t.dataset.src || "#set-ig");
+          const h = igHandle(el ? el.value : "");
+          if (!h) { toast("הזינו שם משתמש אינסטגרם", "", "📷"); break; }
+          openExternal("https://instagram.com/" + h);
+          break;
+        }
+
         // תמיכה ופרטיות
         case "support-wa": openSupportWa(); break;
         case "accept-privacy": acceptPrivacy(); break;
@@ -4197,6 +4217,11 @@
         const h = e.target.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
         const prev = $("#ob-linkPrev");
         if (prev) prev.textContent = "הקישור שלך: " + shareBase() + "#" + (h || "הכתובת-שלך");
+      }
+      // תצוגה מקדימה חיה של קישור האינסטגרם (בהגדרות ובאשף)
+      if (e.target && (e.target.id === "set-ig" || e.target.id === "wz-ig")) {
+        const prevEl = $(e.target.id === "set-ig" ? "#ig-prev-set" : "#ig-prev-wz");
+        if (prevEl) prevEl.innerHTML = "instagram.com/<b>" + esc(igHandle(e.target.value) || "השם-שלך") + "</b>";
       }
     });
   }
