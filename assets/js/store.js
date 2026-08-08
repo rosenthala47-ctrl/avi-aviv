@@ -276,7 +276,15 @@ UG.Store = (function () {
       }
       chain.then(() => {
         firebase.initializeApp(cfg);
-        if (useRtdb) { try { firebase.auth().signInAnonymously().catch(() => {}); } catch (e) {} }
+        if (useRtdb) {
+          try {
+            // מתחברים אנונימית רק אם אין משתמש מחובר (למשל ספר שנכנס עם Google).
+            // אחרת signInAnonymously היה דורס את חשבון הגוגל בכל טעינה מחדש.
+            firebase.auth().onAuthStateChanged((user) => {
+              if (!user) firebase.auth().signInAnonymously().catch(() => {});
+            });
+          } catch (e) {}
+        }
         resolve({ db: useRtdb ? firebase.database() : firebase.firestore(), kind: useRtdb ? "rtdb" : "firestore" });
       }).catch(reject);
     });

@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "88";
+  const APP_VERSION = "89";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -2721,15 +2721,32 @@
     return `
       <div class="section-title">🔒 אבטחה</div>
       <div class="card">
-        <p class="hint" style="margin-top:0">הגנו על המספרה עם חשבון אישי (אימייל+סיסמה) במקום קוד משותף.</p>
+        <p class="hint" style="margin-top:0">הגנו על המספרה עם חשבון אישי (Google או אימייל) במקום קוד משותף — רק אתם תוכלו להיכנס לניהול.</p>
         <button class="btn btn-primary" data-act="secure-shop" style="margin-top:10px">🔒 הגנה על המספרה שלי</button>
       </div>`;
+  }
+
+  // קישור החשבון (Google/מייל) למספרה — מוודא שלא מחובר כבר לבעלים אחר
+  async function linkAccountToShop(errEl) {
+    const uid = UG.Auth.currentUid();
+    if (!uid) { if (errEl) errEl.textContent = "ההתחברות לא הושלמה — נסו שוב"; return false; }
+    const shop = Store.get().shop;
+    if (shop.ownerUid && shop.ownerUid !== uid) {
+      if (errEl) errEl.textContent = "המספרה כבר מאובטחת בחשבון אחר";
+      await UG.Auth.signOut(); return false;
+    }
+    if (!shop.ownerUid) await Store.saveShop({ ownerUid: uid });
+    closeModal(); toast("המספרה מאובטחת בחשבון שלך 🔒", "good", "🔒"); render();
+    return true;
   }
 
   function openSecureShop() {
     openModal(`
       <div class="m-title">🔒 הגנה על המספרה</div>
-      <div class="m-sub">התחברו או הירשמו עם אימייל וסיסמה</div>
+      <div class="m-sub">התחברו כדי שרק אתם תוכלו לנהל את המספרה</div>
+      <button class="btn btn-google" data-act2="secure-google">
+        <span class="g-ico">${googleIcoSvg()}</span>המשך עם Google</button>
+      <div class="auth-or"><span>או עם אימייל</span></div>
       <div class="field"><label>אימייל</label>
         <input class="input" id="au-email" type="email" inputmode="email" autocomplete="username" placeholder="you@example.com"></div>
       <div class="field"><label>סיסמה (לפחות 6 תווים)</label>
@@ -2748,19 +2765,36 @@
       try {
         if (mode === "signup") await UG.Auth.signUp(email, pass);
         else await UG.Auth.signIn(email, pass);
-        const uid = UG.Auth.currentUid();
-        const shop = Store.get().shop;
-        if (shop.ownerUid && shop.ownerUid !== uid) {
-          if (errEl) errEl.textContent = "המספרה כבר מאובטחת בחשבון אחר";
-          await UG.Auth.signOut(); return;
-        }
-        if (!shop.ownerUid) await Store.saveShop({ ownerUid: uid });
-        closeModal(); toast("המספרה מאובטחת בחשבון שלך 🔒", "good", "🔒"); render();
+        await linkAccountToShop(errEl);
       } catch (e) { if (errEl) errEl.textContent = UG.Auth.humanError(e); }
+    };
+    const google = async () => {
+      const errEl = $("#au-err");
+      if (errEl) errEl.textContent = "מתחבר עם Google…";
+      try {
+        rememberGoogleIntent("secure");
+        const user = await UG.Auth.signInWithGoogle();
+        if (user) { clearGoogleIntent(); await linkAccountToShop(errEl); }   // popup הצליח; redirect ייטופל בטעינה
+      } catch (e) { clearGoogleIntent(); if (errEl) errEl.textContent = UG.Auth.humanError(e); }
     };
     const lb = $("[data-act2='do-secure-login']"); if (lb) lb.addEventListener("click", () => run("login"));
     const sb = $("[data-act2='do-secure-signup']"); if (sb) sb.addEventListener("click", () => run("signup"));
+    const gb = $("[data-act2='secure-google']"); if (gb) gb.addEventListener("click", google);
     setTimeout(() => $("#au-email") && $("#au-email").focus(), 100);
+  }
+
+  function googleIcoSvg() {
+    return `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.3c0-.9-.1-1.5-.2-2.2H12v4h6.5c-.1 1-.8 2.5-2.3 3.5v2.9h3.7c2.2-2 3.6-5 3.6-8.2z"/><path fill="#34A853" d="M12 24c3.1 0 5.7-1 7.6-2.8l-3.7-2.9c-1 .7-2.3 1.2-3.9 1.2-3 0-5.5-2-6.4-4.8H1.7v3C3.6 21.3 7.5 24 12 24z"/><path fill="#FBBC05" d="M5.6 14.7c-.2-.7-.4-1.4-.4-2.2s.1-1.5.4-2.2v-3H1.7C1 8.7.6 10.3.6 12s.4 3.3 1.1 4.7l3.9-2z"/><path fill="#EA4335" d="M12 4.8c1.7 0 2.9.7 3.5 1.3l2.7-2.6C16.5 1.9 14.4 1 12 1 7.5 1 3.6 3.7 1.7 7.3l3.9 3c.9-2.7 3.4-4.5 6.4-4.5z"/></svg>`;
+  }
+
+  /* זכירת כוונת ההתחברות עם Google לפני הפניה (redirect), כי הדף נטען מחדש */
+  function rememberGoogleIntent(mode) {
+    try { sessionStorage.setItem("ug_gauth", mode + ":" + SHOP); } catch (e) {}
+  }
+  function clearGoogleIntent() { try { sessionStorage.removeItem("ug_gauth"); } catch (e) {} }
+  function readGoogleIntent() {
+    try { const v = sessionStorage.getItem("ug_gauth") || ""; const [mode, sid] = v.split(":"); return sid === SHOP ? mode : ""; }
+    catch (e) { return ""; }
   }
 
   function ownerGallerySection() {
@@ -4253,6 +4287,9 @@
   function promptOwnerLogin(ownerUid) {
     openModal(`
       ${authHeader()}
+      <button class="btn btn-google" data-act2="owner-google">
+        <span class="g-ico">${googleIcoSvg()}</span>המשך עם Google</button>
+      <div class="auth-or"><span>או עם אימייל</span></div>
       <div class="field"><label>אימייל</label>
         <input class="input" id="au-email" type="email" inputmode="email" autocomplete="username" placeholder="name@email.com"></div>
       <div class="field"><label>סיסמה</label>
@@ -4264,17 +4301,27 @@
       <button class="btn btn-ghost btn-sm" data-act="close-modal" style="margin-top:4px;width:100%">ביטול</button>
     `);
     const err = (m, good) => { const e = $("#au-err"); if (e) { e.style.color = good ? "var(--good)" : "var(--bad)"; e.textContent = m; } };
+    const verify = async () => {
+      if (UG.Auth.currentUid() === ownerUid) { clearGoogleIntent(); closeModal(); go("owner"); }
+      else { err("החשבון הזה אינו הבעלים של המספרה"); await UG.Auth.signOut(); }
+    };
     const login = async () => {
       const email = ($("#au-email") && $("#au-email").value.trim()) || "";
       const pass = ($("#au-pass") && $("#au-pass").value) || "";
       if (!email || !pass) { err("נא למלא אימייל וסיסמה"); return; }
       err("רגע…", true);
-      try {
-        await UG.Auth.signIn(email, pass);
-        if (UG.Auth.currentUid() === ownerUid) { closeModal(); go("owner"); }
-        else { err("החשבון הזה אינו הבעלים של המספרה"); await UG.Auth.signOut(); }
-      } catch (e) { err(UG.Auth.humanError(e)); }
+      try { await UG.Auth.signIn(email, pass); await verify(); }
+      catch (e) { err(UG.Auth.humanError(e)); }
     };
+    const google = async () => {
+      err("מתחבר עם Google…", true);
+      try {
+        rememberGoogleIntent("login");
+        const user = await UG.Auth.signInWithGoogle();
+        if (user) await verify();   // popup הצליח; redirect ייטופל בטעינה מחדש
+      } catch (e) { clearGoogleIntent(); err(UG.Auth.humanError(e)); }
+    };
+    const gb = $("[data-act2='owner-google']"); if (gb) gb.addEventListener("click", google);
     const reset = async () => {
       const email = ($("#au-email") && $("#au-email").value.trim()) || "";
       if (!email) { err("הזינו אימייל לשחזור"); return; }
@@ -4606,8 +4653,26 @@
     }
     render();
     // בדיקת זמינות התחברות מאובטחת (Firebase Auth) — לרענון מסך ההגדרות + כניסה אוטומטית לבעלים
-    if (UG.Auth) UG.Auth.available().then((a) => {
+    if (UG.Auth) UG.Auth.available().then(async (a) => {
       authAvail = a;
+      // חזרה מהתחברות Google בהפניה (redirect) — משלימים לפי הכוונה שנשמרה
+      if (a && readGoogleIntent()) {
+        try {
+          const user = await UG.Auth.completeRedirect();
+          const mode = readGoogleIntent();
+          if (user && mode) {
+            clearGoogleIntent();
+            const cur = (Store.get() && Store.get().shop) || {};
+            if (mode === "secure") {
+              if (!cur.ownerUid) { await Store.saveShop({ ownerUid: user.uid }); }
+              if (!cur.ownerUid || cur.ownerUid === user.uid) { go("owner"); toast("המספרה מאובטחת בחשבון שלך 🔒", "good", "🔒"); }
+            } else if (mode === "login") {
+              if (cur.ownerUid === user.uid) go("owner");
+              else { toast("החשבון הזה אינו הבעלים של המספרה", "", "🔒"); await UG.Auth.signOut(); }
+            }
+          }
+        } catch (e) {}
+      }
       if (secured && a) {
         // ריענון סשן: אם המשתמש כבר מחובר כבעלים המספרה — כניסה אוטומטית לניהול
         const promote = () => {

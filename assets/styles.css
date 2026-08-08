@@ -657,6 +657,20 @@ select.input {
 }
 .sum-edit:active { transform: scale(.92); }
 
+/* ==== כפתור "המשך עם Google" + מפריד ==== */
+.btn-google {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  background: #fff; color: #1f2937; border: 1px solid rgba(0,0,0,.16);
+  font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,.12);
+}
+.btn-google:active { background: #f3f4f6; }
+.btn-google .g-ico { display: inline-flex; width: 18px; height: 18px; }
+.auth-or {
+  display: flex; align-items: center; gap: 12px; margin: 14px 0;
+  color: var(--muted); font-size: 12.5px;
+}
+.auth-or::before, .auth-or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
 /* ==== שדה אינסטגרם: תצוגה מקדימה + כפתור בדיקה ==== */
 .ig-help { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
 .ig-prev { flex: 1; min-width: 0; font-size: 12.5px; color: var(--muted); direction: ltr; text-align: left;

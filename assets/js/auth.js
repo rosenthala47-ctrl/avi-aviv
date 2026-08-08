@@ -46,8 +46,11 @@ UG.Auth = (function () {
     if (c === "auth/missing-password" || c === "auth/weak-password") return "סיסמה חלשה מדי (לפחות 6 תווים)";
     if (c === "auth/email-already-in-use") return "האימייל כבר רשום — נסו להתחבר";
     if (c === "auth/invalid-credential" || c === "auth/wrong-password" || c === "auth/user-not-found") return "אימייל/סיסמה שגויים — אם זו הפעם הראשונה, לחצו ״הרשמה (חשבון חדש)״";
-    if (c === "auth/operation-not-allowed") return "התחברות במייל עדיין לא הופעלה ב-Firebase";
+    if (c === "auth/operation-not-allowed") return "שיטת ההתחברות הזו עדיין לא הופעלה ב-Firebase";
     if (c === "auth/too-many-requests") return "יותר מדי ניסיונות — נסו שוב מאוחר יותר";
+    if (c === "auth/popup-closed-by-user") return "החלון נסגר לפני סיום ההתחברות";
+    if (c === "auth/unauthorized-domain") return "הדומיין לא מאושר ב-Firebase (Authentication → Settings → Authorized domains)";
+    if (c === "auth/account-exists-with-different-credential") return "כבר קיים חשבון עם האימייל הזה בשיטת התחברות אחרת";
     return "שגיאת התחברות";
   }
 
@@ -59,6 +62,33 @@ UG.Auth = (function () {
     currentEmail() { return _auth && _auth.currentUser ? _auth.currentUser.email : null; },
     async signIn(email, pass) { await ensure(); return _auth.signInWithEmailAndPassword(email, pass); },
     async signUp(email, pass) { await ensure(); return _auth.createUserWithEmailAndPassword(email, pass); },
+    /* התחברות עם Google. מנסה חלון קופץ (popup); אם הסביבה חוסמת אותו
+       (נפוץ באפליקציה מותקנת) — נופל להפניה (redirect) שתטען מחדש את הדף.
+       מחזיר את המשתמש כשה-popup הצליח, או null אם בוצעה הפניה. */
+    async signInWithGoogle() {
+      await ensure();
+      const provider = new firebase.auth.GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+      try {
+        const res = await _auth.signInWithPopup(provider);
+        return res && res.user;
+      } catch (e) {
+        const c = (e && e.code) || "";
+        if (c === "auth/popup-blocked" || c === "auth/cancelled-popup-request" ||
+            c === "auth/popup-closed-by-user" || c === "auth/operation-not-supported-in-this-environment") {
+          if (c === "auth/popup-closed-by-user") throw e;   // המשתמש סגר בכוונה — לא להפנות
+          await _auth.signInWithRedirect(provider);
+          return null;
+        }
+        throw e;
+      }
+    },
+    // השלמת התחברות שחזרה מהפניה (redirect); מחזיר את המשתמש או null
+    async completeRedirect() {
+      await ensure();
+      try { const r = await _auth.getRedirectResult(); return (r && r.user) || null; }
+      catch (e) { return null; }
+    },
     async signOut() { if (_auth) return _auth.signOut(); },
     async reset(email) { await ensure(); return _auth.sendPasswordResetEmail(email); },
     onChange(fn) { changeSubs.add(fn); },
