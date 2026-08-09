@@ -657,6 +657,21 @@ select.input {
 }
 .sum-edit:active { transform: scale(.92); }
 
+/* ==== מסך זיהוי (לקוח / אבטחת ספר) ==== */
+.auth-gate { max-width: 380px; margin: 8vh auto 0; text-align: center; padding: 0 6px; }
+.auth-gate .ag-logo {
+  width: 76px; height: 76px; margin: 0 auto 16px; border-radius: 22px;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+  font-size: 34px; font-weight: 800; color: #fff;
+  background: linear-gradient(135deg, var(--sky), #6366f1);
+}
+.auth-gate .ag-logo img { width: 100%; height: 100%; object-fit: cover; }
+.auth-gate .ag-emoji { font-size: 48px; margin-bottom: 10px; }
+.auth-gate h2 { font-size: 22px; font-weight: 800; margin: 0 0 8px; }
+.auth-gate > p { color: var(--muted); font-size: 14px; line-height: 1.6; margin: 0 auto 20px; }
+.auth-gate .field { text-align: start; }
+.auth-gate .btn { width: 100%; }
+
 /* ==== כפתור "המשך עם Google" + מפריד ==== */
 .btn-google {
   display: flex; align-items: center; justify-content: center; gap: 10px;

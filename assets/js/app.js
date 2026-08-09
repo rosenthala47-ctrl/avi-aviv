@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "89";
+  const APP_VERSION = "90";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -61,6 +61,12 @@
   function clientLink() {
     // כולל #main גם למספרה של אורי — כדי שהקישור יעבוד גם בדומיין המוצר (שם הכתובת הריקה = מסך פתיחה)
     return shareBase() + "#" + SHOP;
+  }
+  /* האם המספרה הזו משתמשת במודל החדש מבוסס-חשבון (זיהוי חובה ללקוח + אבטחת ספר)?
+     נשלט מ-config.authShops. "*" = כל המספרות. */
+  function newAuthShop() {
+    const list = (window.UG_CONFIG && UG_CONFIG.authShops) || [];
+    return list.indexOf("*") !== -1 || list.indexOf(SHOP) !== -1;
   }
   // פתיחת כתובת חיצונית בצורה שתעבוד בדפדפן ובכל מעטפת (מפה/יומן/וואטסאפ)
   function openExternal(url) {
@@ -465,8 +471,98 @@
   /* =======================================================================
      צד לקוח
      =======================================================================*/
+  /* ---------- זיהוי לקוח (מודל חדש: Google/טלפון) ---------- */
+  function clientIdentified() { return !!(identity && identity.name && identity.phone); }
+
+  // החלת פרטי הלקוח מחשבון Google + שחזור טלפון מהזמנה קודמת (אם יש)
+  function applyGoogleClientIdentity(user) {
+    if (!user) return;
+    identity.userId = "g_" + user.uid;
+    const dn = (user.displayName || "").trim();
+    if (dn) {
+      identity.name = dn;
+      const parts = dn.split(/\s+/);
+      identity.firstName = parts[0] || "";
+      identity.lastName = parts.slice(1).join(" ") || "";
+    }
+    identity.email = user.email || identity.email || "";
+    identity.googleAuthed = true;
+    // אותו userId בכל מכשיר → נשחזר טלפון מהזמנה קודמת ולא נשאל שוב
+    const prev = (Store.get().bookings || []).filter((b) => b.userId === identity.userId && b.phone).pop();
+    if (prev && prev.phone) identity.phone = prev.phone;
+    saveIdentity();
+  }
+
+  async function clientGoogleSignIn() {
+    if (!(UG.Auth && authAvail)) { toast("התחברות Google אינה זמינה כרגע", "", "⚠️"); return; }
+    try {
+      rememberGoogleIntent("client");
+      const user = await UG.Auth.signInWithGoogle();
+      if (user) { clearGoogleIntent(); applyGoogleClientIdentity(user); render(); }
+    } catch (e) { clearGoogleIntent(); toast(UG.Auth.humanError(e), "", "⚠️"); }
+  }
+
+  function agSavePhone() {
+    const needName = !identity.name;
+    const name = needName ? (($("#ag-name") && $("#ag-name").value.trim()) || "") : identity.name;
+    const phoneRaw = ($("#ag-phone") && $("#ag-phone").value.trim()) || "";
+    if (!name) { toast("נא להזין שם מלא", "", "✋"); return; }
+    if (!u.isValidPhone(phoneRaw)) { toast("מספר טלפון לא תקין", "", "📵"); return; }
+    identity.name = name;
+    const parts = name.split(/\s+/);
+    identity.firstName = parts[0] || ""; identity.lastName = parts.slice(1).join(" ") || "";
+    identity.phone = u.fmtPhone(phoneRaw);
+    if (!identity.userId) identity.userId = u.uid();
+    saveIdentity();
+    try { localStorage.setItem(PRIVACY_KEY, "1"); } catch (e) {}   // הזיהוי דרך המסך = הסכמה
+    view.authPhoneForm = false;
+    toast("ברוכים הבאים! 🙂", "good", "✓");
+    render();
+  }
+
+  // מסך זיהוי הלקוח — לפני שמאפשרים להזמין
+  function clientAuthGate(st) {
+    const shopName = (st.shop && st.shop.name) || "המספרה";
+    const phoneStep = (identity.googleAuthed && !identity.phone) || view.authPhoneForm;
+    if (phoneStep) {
+      const needName = !identity.name;
+      return `
+      <div class="screen active">
+        ${topbar("כניסה", {})}
+        <div class="content"><div class="auth-gate">
+          <div class="ag-emoji">📱</div>
+          <h2>עוד פרט אחרון</h2>
+          <p>${identity.name ? `היי ${esc(identity.firstName || identity.name)}! ` : ""}נשאיר מספר טלפון — כדי שנעדכן אתכם על התור.</p>
+          ${needName ? `<div class="field"><label>שם מלא <span class="req">*</span></label>
+            <input class="input" id="ag-name" placeholder="שם מלא"></div>` : ""}
+          <div class="field"><label>טלפון נייד <span class="req">*</span></label>
+            <input class="input" id="ag-phone" type="tel" inputmode="tel" placeholder="050-0000000"></div>
+          <button class="btn btn-primary" data-act="ag-save-phone">${identity.googleAuthed ? "סיום" : "כניסה"}</button>
+          ${view.authPhoneForm && !identity.googleAuthed ? `<button class="btn btn-ghost" data-act="ag-back" style="margin-top:8px">חזרה</button>` : ""}
+        </div></div>
+      </div>`;
+    }
+    return `
+      <div class="screen active">
+        ${topbar("כניסה", {})}
+        <div class="content"><div class="auth-gate">
+          <div class="ag-logo">${st.shop.logo ? `<img src="${esc(st.shop.logo)}" alt="">` : esc((shopName || "מ")[0])}</div>
+          <h2>${esc(shopName)}</h2>
+          <p>היכנסו כדי לקבוע תור ולעקוב אחרי התורים שלכם.</p>
+          <button class="btn btn-google" data-act="ag-google"><span class="g-ico">${googleIcoSvg()}</span>המשך עם Google</button>
+          <div class="auth-or"><span>או</span></div>
+          <button class="btn" data-act="ag-phone-form">המשך עם טלפון</button>
+          <p class="hint" style="margin-top:18px"><a href="privacy.html" target="_blank" rel="noopener" style="color:var(--muted)">מדיניות פרטיות</a></p>
+        </div></div>
+      </div>`;
+  }
+
   function renderClient() {
     const st = Store.get();
+    // מודל חדש: זיהוי חובה לפני הזמנה (לא חל על "תצוגת לקוח" של הבעלים)
+    if (newAuthShop() && !view.ownerPreview && !clientIdentified()) {
+      return clientAuthGate(st);
+    }
     const activeServices = st.services.filter((s) => s.active !== false);
     if (!view.selService || !activeServices.find((s) => s.id === view.selService)) {
       view.selService = activeServices[0] ? activeServices[0].id : null;
@@ -1886,6 +1982,20 @@
      =======================================================================*/
   function renderOwner() {
     const st = Store.get();
+    // מודל חדש: חובה לאבטח את המספרה בחשבון לפני שאפשר לנהל
+    if (newAuthShop() && authAvail && !(st.shop && st.shop.ownerUid)) {
+      return `
+      <div class="screen active">
+        ${topbar("אבטחת המספרה", {})}
+        <div class="content"><div class="auth-gate">
+          <div class="ag-emoji">🔒</div>
+          <h2>אבטחו את המספרה שלכם</h2>
+          <p>כדי לנהל את המספרה יש להתחבר עם חשבון אישי — כך רק אתם תוכלו להיכנס לניהול. זה חד-פעמי.</p>
+          <button class="btn btn-primary" data-act="secure-shop">🔒 אבטחה עם Google או אימייל</button>
+          <button class="btn btn-ghost" data-act="owner-logout" style="margin-top:8px">יציאה</button>
+        </div></div>
+      </div>`;
+    }
     const todayKey = u.dateKey(new Date());
     const now = Date.now();
     const todayCount = st.bookings.filter((b) => b.status !== "cancelled" && b.date === todayKey).length;
@@ -4087,6 +4197,12 @@
         case "preview-client": previewAsClient(); break;
         case "exit-preview": exitPreview(); break;
 
+        // זיהוי לקוח (מודל חדש)
+        case "ag-google": clientGoogleSignIn(); break;
+        case "ag-phone-form": view.authPhoneForm = true; render(); break;
+        case "ag-back": view.authPhoneForm = false; render(); break;
+        case "ag-save-phone": agSavePhone(); break;
+
         // בדיקת קישור אינסטגרם — פותח את הפרופיל כדי שהספר יוודא שזה שלו
         case "ig-test": {
           const el = $(t.dataset.src || "#set-ig");
@@ -4635,7 +4751,9 @@
       if (!document.hidden) checkForUpdate(true);
     });
     // אישור מדיניות פרטיות — חוסם עד שמאשרים; רק אחריו מציעים התראות
-    if (!privacyAccepted()) setTimeout(() => promptPrivacy(), 600);
+    // במודל החדש מסך הזיהוי הוא הכניסה (עם קישור מדיניות) — לא מקפיצים מודאל נוסף מעליו
+    const gateShowing = newAuthShop() && view.route === "client" && !clientIdentified();
+    if (!privacyAccepted() && !gateShowing) setTimeout(() => promptPrivacy(), 600);
     else setTimeout(() => promptNotif(), 1200);   // הזמנה לאישור התראות — בכל כניסה עד שיאשר
     Store.subscribe(onStoreChange);
     Store.subscribeGallery(() => {
@@ -4663,7 +4781,9 @@
           if (user && mode) {
             clearGoogleIntent();
             const cur = (Store.get() && Store.get().shop) || {};
-            if (mode === "secure") {
+            if (mode === "client") {
+              applyGoogleClientIdentity(user); render();
+            } else if (mode === "secure") {
               if (!cur.ownerUid) { await Store.saveShop({ ownerUid: user.uid }); }
               if (!cur.ownerUid || cur.ownerUid === user.uid) { go("owner"); toast("המספרה מאובטחת בחשבון שלך 🔒", "good", "🔒"); }
             } else if (mode === "login") {
@@ -4683,7 +4803,8 @@
         promote();
         UG.Auth.onChange(promote);
       }
-      if (view.route === "owner" && view.ownerTab === "settings" && !isEditingRoot()) render();
+      // רינדור מחדש אחרי שזמינות ההתחברות נקבעה — כדי שמסכי האבטחה (מודל חדש) יופיעו
+      if (!isEditingRoot()) render();
     });
     // תזמון תזכורות ורישום פוש בעת עלייה
     ensureFcm();
