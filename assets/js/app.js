@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "91";
+  const APP_VERSION = "92";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -506,8 +506,7 @@
   }
 
   function agSavePhone() {
-    const needName = !identity.name;
-    const name = needName ? (($("#ag-name") && $("#ag-name").value.trim()) || "") : identity.name;
+    const name = (($("#ag-name") && $("#ag-name").value.trim()) || "");
     const phoneRaw = ($("#ag-phone") && $("#ag-phone").value.trim()) || "";
     if (!name) { toast("נא להזין שם מלא", "", "✋"); return; }
     if (!u.isValidPhone(phoneRaw)) { toast("מספר טלפון לא תקין", "", "📵"); return; }
@@ -529,19 +528,20 @@
     const shopName = (st.shop && st.shop.name) || "המספרה";
     const phoneStep = (identity.googleAuthed && !identity.phone) || view.authPhoneForm;
     if (phoneStep) {
-      const needName = !identity.name;
+      // תמיד מציגים גם שם וגם טלפון עם ערך ממולא (אם קיים) — כדי שהלקוח יראה
+      // מה שמור עליו ויוכל לתקן. זה גם מונע דריסה בטעות של פרטים קיימים.
       return `
       <div class="screen active">
         ${topbar("כניסה", {})}
         <div class="content"><div class="auth-gate">
           <div class="ag-emoji">📱</div>
-          <h2>עוד פרט אחרון</h2>
-          <p>${identity.name ? `היי ${esc(identity.firstName || identity.name)}! ` : ""}נשאיר מספר טלפון — כדי שנעדכן אתכם על התור.</p>
-          ${needName ? `<div class="field"><label>שם מלא <span class="req">*</span></label>
-            <input class="input" id="ag-name" placeholder="שם מלא"></div>` : ""}
+          <h2>${identity.name ? "אישור הפרטים" : "כמה פרטים קצרים"}</h2>
+          <p>${identity.name ? `היי ${esc(identity.firstName || identity.name)}! ` : ""}אשרו שהפרטים נכונים — הספר יראה אותם כשתקבעו תור.</p>
+          <div class="field"><label>שם מלא <span class="req">*</span></label>
+            <input class="input" id="ag-name" placeholder="שם מלא" value="${esc(identity.name || "")}"></div>
           <div class="field"><label>טלפון נייד <span class="req">*</span></label>
-            <input class="input" id="ag-phone" type="tel" inputmode="tel" placeholder="050-0000000"></div>
-          <button class="btn btn-primary" data-act="ag-save-phone">${identity.googleAuthed ? "סיום" : "כניסה"}</button>
+            <input class="input" id="ag-phone" type="tel" inputmode="tel" placeholder="050-0000000" value="${esc(identity.phone || "")}"></div>
+          <button class="btn btn-primary" data-act="ag-save-phone">${identity.googleAuthed ? "סיום" : "המשך"}</button>
           ${view.authPhoneForm && !identity.googleAuthed ? `<button class="btn btn-ghost" data-act="ag-back" style="margin-top:8px">חזרה</button>` : ""}
         </div></div>
       </div>`;
