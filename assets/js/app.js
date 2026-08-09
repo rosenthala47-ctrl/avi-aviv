@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "93";
+  const APP_VERSION = "94";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1355,21 +1355,17 @@
     return !!(st && st.shop && st.shop.bitEnabled && u.normalizePhone(st.shop.bitPhone || ""));
   }
   function openBitApp() {
-    /* לביט אין קישור ציבורי שממלא מראש סכום ונמען, ואי אפשר לאמת אוטומטית שהכסף
-       הועבר. לכן פותחים את ביט דרך הקישור הרשמי של בנק הפועלים — אם האפליקציה
-       מותקנת היא נפתחת, אחרת נשלחים להתקנה. הלקוח מדביק את המספר והסכום שהעתיק
-       מהמסך, ואז חוזר לכאן ומסמן ״שילמתי״.
-       (ה-scheme הישן "bitpay://" היה שגוי — הוא שייך לחברת קריפטו זרה, לא לביט
-       הישראלית — ולכן הכפתור לא פתח כלום.) */
-    const web = "https://bitpay.poalimlinks.co.il/app/";
-    // באנדרואיד ננסה קודם לפתוח ישירות את חבילת האפליקציה; אם לא מותקנת — הקישור הרשמי
     const ua = navigator.userAgent || "";
     if (/android/i.test(ua)) {
-      const intent = "intent://open#Intent;scheme=https;package=com.bnhp.payments.paymentsapp;" +
-        "S.browser_fallback_url=" + encodeURIComponent(web) + ";end";
+      // intent שמפעיל את המסך הראשי של ביט; אם לא מותקנת — נפילה לחנות Play
+      const intent = "intent://#Intent;action=android.intent.action.MAIN;" +
+        "category=android.intent.category.LAUNCHER;" +
+        "package=com.bnhp.payments.paymentsapp;" +
+        "S.browser_fallback_url=" + encodeURIComponent("https://play.google.com/store/apps/details?id=com.bnhp.payments.paymentsapp") + ";end";
       try { location.href = intent; return; } catch (e) {}
     }
-    openExternal(web);
+    // iOS או דסקטופ — פותחים את הדף הרשמי של ביט
+    openExternal("https://www.bitpay.co.il/app/");
   }
 
   let payCtx = null;   // { bookingId, price, tip }
