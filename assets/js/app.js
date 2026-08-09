@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "90";
+  const APP_VERSION = "91";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -471,8 +471,10 @@
   /* =======================================================================
      צד לקוח
      =======================================================================*/
-  /* ---------- זיהוי לקוח (מודל חדש: Google/טלפון) ---------- */
-  function clientIdentified() { return !!(identity && identity.name && identity.phone); }
+  /* ---------- זיהוי לקוח (מודל חדש: Google/טלפון) ----------
+     דורש שהלקוח עבר במפורש את מסך הזיהוי (gateDone) — לא מספיק שם+טלפון ישנים
+     שנשמרו מהזמנה קודמת, כדי שגם לקוחות קיימים יזדהו פעם אחת. */
+  function clientIdentified() { return !!(identity && identity.gateDone && identity.name && identity.phone); }
 
   // החלת פרטי הלקוח מחשבון Google + שחזור טלפון מהזמנה קודמת (אם יש)
   function applyGoogleClientIdentity(user) {
@@ -490,6 +492,7 @@
     // אותו userId בכל מכשיר → נשחזר טלפון מהזמנה קודמת ולא נשאל שוב
     const prev = (Store.get().bookings || []).filter((b) => b.userId === identity.userId && b.phone).pop();
     if (prev && prev.phone) identity.phone = prev.phone;
+    if (identity.phone) identity.gateDone = true;   // יש טלפון → הזיהוי הושלם
     saveIdentity();
   }
 
@@ -513,6 +516,7 @@
     identity.firstName = parts[0] || ""; identity.lastName = parts.slice(1).join(" ") || "";
     identity.phone = u.fmtPhone(phoneRaw);
     if (!identity.userId) identity.userId = u.uid();
+    identity.gateDone = true;   // הלקוח עבר את מסך הזיהוי במפורש
     saveIdentity();
     try { localStorage.setItem(PRIVACY_KEY, "1"); } catch (e) {}   // הזיהוי דרך המסך = הסכמה
     view.authPhoneForm = false;
