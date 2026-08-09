@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "98";
+  const APP_VERSION = "99";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -653,7 +653,7 @@
       <div class="section-title">המוצרים שלנו</div>
       ${products.map((p) => `
         <div class="card prod-card">
-          ${p.image ? `<div class="prod-card-img"><img src="${esc(p.image)}" alt="${esc(p.name)}"></div>` : ""}
+          ${p.image ? `<div class="prod-card-img" data-act="product-zoom" data-id="${p.id}"><img src="${esc(p.image)}" alt="${esc(p.name)}"><span class="prod-zoom-hint">🔍</span></div>` : ""}
           <div class="prod-card-body">
             <div class="prod-card-top">
               <span class="prod-card-name">${esc(p.name)}</span>
@@ -700,15 +700,14 @@
   }
 
   /* ---------- תצוגת תמונה מוגדלת עם זום (צביטה / הקשה כפולה / כפתורים) ---------- */
-  function openPhoto(id) {
-    const p = Store.getGallery().find((x) => x.id === id);
-    if (!p) return;
+  function openImageZoom(src, caption) {
+    if (!src) return;
     openModal(`
       <div class="lightbox">
         <div class="lb-stage" id="lbStage">
-          <img src="${p.dataUrl}" alt="${esc(p.caption || "")}" id="lbImg" draggable="false">
+          <img src="${src}" alt="${esc(caption || "")}" id="lbImg" draggable="false">
         </div>
-        ${p.caption ? `<div class="lb-cap">${esc(p.caption)}</div>` : ""}
+        ${caption ? `<div class="lb-cap">${esc(caption)}</div>` : ""}
         <div class="lb-zoom">
           <button class="lb-zbtn" data-zoom="out" aria-label="הקטנה">−</button>
           <button class="lb-zbtn" data-zoom="reset">איפוס</button>
@@ -719,6 +718,11 @@
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:10px">סגירה</button>
     `);
     setupLightboxZoom();
+  }
+  function openPhoto(id) {
+    const p = Store.getGallery().find((x) => x.id === id);
+    if (!p) return;
+    openImageZoom(p.dataUrl, p.caption || "");
   }
 
   function setupLightboxZoom() {
@@ -917,6 +921,40 @@
     return `<a class="btn btn-wa" href="${esc(href)}" target="_blank" rel="noopener" style="margin-top:10px;text-decoration:none">💬 ${esc(label || "פנייה בוואטסאפ")}</a>`;
   }
 
+  /* טיימר חי (יורד כל שנייה) — מוכן כבר בעת הרינדור כדי שלא יהבהב "…". */
+  function countdownHtml(until) {
+    const left = Math.max(0, Number(until) - Date.now());
+    const total = Math.floor(left / 1000);
+    const days = Math.floor(total / 86400);
+    const hms = [Math.floor((total % 86400) / 3600), Math.floor((total % 3600) / 60), total % 60]
+      .map((n) => String(n).padStart(2, "0")).join(":");
+    const dTxt = days > 0 ? days + (days === 1 ? " יום ו-" : " ימים ו-") : "";
+    return `<span class="cd" data-countdown="${until}"><span class="cd-d">${dTxt}</span><bdi class="cd-t" dir="ltr">${hms}</bdi></span>`;
+  }
+  let trialTicker = null;
+  function startTrialTicker() {
+    if (trialTicker) return;
+    trialTicker = setInterval(() => {
+      const els = document.querySelectorAll("[data-countdown]");
+      if (!els.length) return;   // אין טיימר על המסך כרגע
+      const now = Date.now();
+      let expired = false;
+      els.forEach((el) => {
+        const until = Number(el.dataset.countdown) || 0;
+        const left = until - now;
+        if (left <= 0) { expired = true; return; }
+        const total = Math.floor(left / 1000);
+        const days = Math.floor(total / 86400);
+        const hms = [Math.floor((total % 86400) / 3600), Math.floor((total % 3600) / 60), total % 60]
+          .map((n) => String(n).padStart(2, "0")).join(":");
+        const dEl = el.querySelector(".cd-d"), tEl = el.querySelector(".cd-t");
+        if (dEl) dEl.textContent = days > 0 ? days + (days === 1 ? " יום ו-" : " ימים ו-") : "";
+        if (tEl) tEl.textContent = hms;
+      });
+      if (expired) render();   // הגיע לאפס — הרינדור מחדש ינעל למסך התשלום
+    }, 1000);
+  }
+
   // באנר עדין במסך הניהול — ספירת ימי ניסיון / התראה על מנוי שמסתיים
   function subBanner() {
     const s = subStatus();
@@ -926,7 +964,7 @@
       <div class="banner ${soon ? "warn" : "sky"}">
         <span class="bn-ico">${soon ? "⏳" : "🎁"}</span>
         <div class="bn-body">
-          <div class="bn-title">תקופת ניסיון — נותרו ${s.daysLeft} ימים</div>
+          <div class="bn-title">תקופת ניסיון חינם — נותרו ${countdownHtml(s.until)}</div>
           <div class="bn-sub">בסיום הניסיון יידרש מנוי (${esc(subPriceText())}) כדי להמשיך לנהל</div>
         </div>
         <button class="btn btn-primary btn-sm" data-act="show-upgrade" style="width:auto">פרטים</button>
@@ -2090,15 +2128,16 @@
     const banners = locked ? "" :
       subBanner() + (view.ownerTab !== "settings" ? ownerNotifBanner() : "");
 
-    const tabLabel = {
+    const tabLabel = locked ? "המנוי הסתיים" : ({
       cal: "יומן", hours: "שעות", services: "שירותים", products: "מוצרים", bookings: "תורים",
       clients: "לקוחות", report: "דוח", publish: "פרסום", settings: "הגדרות",
-    }[view.ownerTab] || "ניהול העסק";
+    }[view.ownerTab] || "ניהול העסק");
 
     return `
     <div class="screen active">
       ${topbar(tabLabel, {})}
       <div class="content" id="oscroll">${banners}${body}</div>
+      ${locked ? "" : `
       <div class="otabbar-wrap">
         <button class="tab-arrow tab-arrow-start" data-tabscroll="start" aria-label="עוד לשונית">›</button>
         <div class="tabbar scroll" id="otabbar">
@@ -2114,7 +2153,7 @@
           <button data-otab="settings" class="${view.ownerTab === "settings" ? "active" : ""}"><span class="tb-ico">⚙️</span>הגדרות</button>
         </div>
         <button class="tab-arrow tab-arrow-end" data-tabscroll="end" aria-label="עוד לשונית">‹</button>
-      </div>
+      </div>`}
     </div>`;
   }
 
@@ -3398,6 +3437,7 @@
       wireTabbarArrows(newTabbar);
       updateTabbarArrows();
     }
+    startTrialTicker();
   }
 
   /* ---------- חצים בסרגל הבעלים — כדי שהספר ידע שיש עוד לשוניות ---------- */
@@ -4503,6 +4543,11 @@
           if ($("#modal")) $("#modal").__prodImg = "";
           const prev = $("#pm-prev"); if (prev) { prev.classList.remove("has-img"); prev.innerHTML = "🛍️"; }
           const clr = $("#pm-clear"); if (clr) clr.style.display = "none";
+          break;
+        }
+        case "product-zoom": {
+          const prod = activeProducts(Store.get()).find((p) => p.id === t.dataset.id);
+          if (prod && prod.image) openImageZoom(prod.image, prod.name);
           break;
         }
         case "product-interest": {
