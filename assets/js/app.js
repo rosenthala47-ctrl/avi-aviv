@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "92";
+  const APP_VERSION = "93";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1354,18 +1354,22 @@
   function bitOn(st) {
     return !!(st && st.shop && st.shop.bitEnabled && u.normalizePhone(st.shop.bitPhone || ""));
   }
-  function openBitApp(phone, amount, note) {
-    // ניסיון לפתוח את אפליקציית ביט; אם אינה מותקנת — האתר של ביט
-    const deep = "bitpay://";
-    const web = "https://www.bitpay.co.il/app/";
-    let moved = false;
-    const onHide = () => { moved = true; };
-    document.addEventListener("visibilitychange", onHide, { once: true });
-    try { location.href = deep; } catch (e) {}
-    setTimeout(() => {
-      document.removeEventListener("visibilitychange", onHide);
-      if (!moved) openExternal(web);
-    }, 1200);
+  function openBitApp() {
+    /* לביט אין קישור ציבורי שממלא מראש סכום ונמען, ואי אפשר לאמת אוטומטית שהכסף
+       הועבר. לכן פותחים את ביט דרך הקישור הרשמי של בנק הפועלים — אם האפליקציה
+       מותקנת היא נפתחת, אחרת נשלחים להתקנה. הלקוח מדביק את המספר והסכום שהעתיק
+       מהמסך, ואז חוזר לכאן ומסמן ״שילמתי״.
+       (ה-scheme הישן "bitpay://" היה שגוי — הוא שייך לחברת קריפטו זרה, לא לביט
+       הישראלית — ולכן הכפתור לא פתח כלום.) */
+    const web = "https://bitpay.poalimlinks.co.il/app/";
+    // באנדרואיד ננסה קודם לפתוח ישירות את חבילת האפליקציה; אם לא מותקנת — הקישור הרשמי
+    const ua = navigator.userAgent || "";
+    if (/android/i.test(ua)) {
+      const intent = "intent://open#Intent;scheme=https;package=com.bnhp.payments.paymentsapp;" +
+        "S.browser_fallback_url=" + encodeURIComponent(web) + ";end";
+      try { location.href = intent; return; } catch (e) {}
+    }
+    openExternal(web);
   }
 
   let payCtx = null;   // { bookingId, price, tip }
@@ -1401,7 +1405,7 @@
         <div class="pay-line"><span>סכום</span><b>${u.fmtPrice(total)}</b>
           <button type="button" class="btn btn-sm" data-act="pay-copy-amount">העתקה</button></div>
       </div>
-      <p class="hint" style="margin:10px 0 12px">פתחו את ביט, שלחו את הסכום למספר שלמעלה, וחזרו לכאן כדי לסמן שהתשלום בוצע.</p>
+      <p class="hint" style="margin:10px 0 12px">העתיקו את המספר ואת הסכום (כפתורי ״העתקה״), פתחו את ביט והדביקו אותם שם, ואז חזרו לכאן וסמנו ״שילמתי״.</p>
 
       <button class="btn btn-primary" data-act="pay-open-bit">פתיחת ביט</button>
       <button class="btn btn-wa" data-act="pay-done" style="margin-top:8px">✓ שילמתי — סיימתי</button>
@@ -4225,8 +4229,7 @@
           if (payCtx) { payCtx.tip = Number(t.dataset.t) || 0; haptic(12); renderPaySheet(); }
           break;
         case "pay-open-bit": {
-          const shopSt = Store.get();
-          openBitApp(shopSt.shop.bitPhone, payCtx ? payCtx.price + payCtx.tip : 0, shopSt.shop.name);
+          openBitApp();
           break;
         }
         case "pay-copy-phone": {
