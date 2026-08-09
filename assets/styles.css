@@ -615,12 +615,32 @@ select.input {
 .wiz-logo-pick { text-align: center; }
 .wiz-logo-pick .logo-preview { margin: 0 auto; }
 
-/* קישור אינסטגרם בעמוד הלקוח */
+/* קישור אינסטגרם בעמוד הלקוח (ישן — נשמר לתאימות) */
 .ig-link {
   display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
   font-weight: 700; font-size: 14px; color: var(--sky-2);
 }
 .ig-link .ig-ico { font-size: 17px; }
+
+/* שורת אייקוני רשתות חברתיות ב״קצת עלינו״ (עמוד הלקוח) */
+.socials { display: flex; gap: 10px; flex-wrap: wrap; }
+.soc {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 42px; height: 42px; border-radius: 50%; text-decoration: none;
+  color: #fff; transition: transform .1s ease;
+}
+.soc:hover, .soc:focus-visible { transform: scale(1.08); outline: none; }
+.soc:active { transform: scale(.96); }
+.soc svg { width: 22px; height: 22px; display: block; }
+.soc-instagram { background: linear-gradient(135deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%); }
+.soc-tiktok    { background: #000; }
+.soc-facebook  { background: #1877f2; }
+.soc-youtube   { background: #ff0000; }
+
+/* שורת רשת חברתית במסך הגדרות הספר */
+.soc-set-row { margin-top: 12px; }
+.soc-set-row:first-child { margin-top: 0; }
+.soc-set-lbl { display: block; font-size: 13px; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
 
 /* בורר "מאיפה הגעת אלינו" */
 .src-picker { display: flex; flex-direction: column; gap: 9px; }

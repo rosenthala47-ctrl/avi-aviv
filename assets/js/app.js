@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "95";
+  const APP_VERSION = "96";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1280,16 +1280,48 @@
     </div>`;
   }
 
-  /* שם משתמש נקי לאינסטגרם — מקבל גם קישור מלא או @ ומחזיר את השם בלבד.
-     חוקי שם משתמש: אותיות/מספרים/נקודה/קו-תחתון, עד 30 תווים, בלי נקודה בקצוות. */
-  function igHandle(v) {
+  /* רשתות חברתיות — טבלת מטא-נתונים אחת לכל הפלטפורמות (אינסטגרם/טיקטוק/פייסבוק/יוטיוב).
+     שומרים רק את "שם המשתמש" (handle) — מקבלים גם קישור מלא, גם @user וגם שם נקי,
+     ומחלצים את המזהה. הצגה ופתיחה בונות מזה URL לפי הפלטפורמה. */
+  const SOCIAL_PLATFORMS = [
+    { key: "instagram", label: "אינסטגרם", emoji: "📷", placeholder: "dani.barber",
+      previewPrefix: "instagram.com/", urlPrefix: "https://instagram.com/",
+      domainPat: /^https?:\/\/(www\.)?instagram\.com\//i, atInUrl: false, maxLen: 30,
+      svg: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17 2H7C4 2 2 4 2 7v10c0 3 2 5 5 5h10c3 0 5-2 5-5V7c0-3-2-5-5-5zM12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm5-3a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/></svg>' },
+    { key: "tiktok", label: "טיקטוק", emoji: "🎵", placeholder: "dani.barber",
+      previewPrefix: "tiktok.com/@", urlPrefix: "https://www.tiktok.com/@",
+      domainPat: /^https?:\/\/(www\.)?tiktok\.com\//i, atInUrl: true, maxLen: 24,
+      svg: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6 2 2 6 2 12s4 10 10 10 10-4 10-10S18 2 12 2zm2.5 5.2c.2 1.1.9 2 2 2.4v1.8c-.8 0-1.5-.2-2.1-.6v3.9a3.2 3.2 0 1 1-3.2-3.2c.2 0 .3 0 .5.1v1.8a1.4 1.4 0 1 0 1 1.3V7.2h1.8z"/></svg>' },
+    { key: "facebook", label: "פייסבוק", emoji: "📘", placeholder: "dani.barber",
+      previewPrefix: "facebook.com/", urlPrefix: "https://www.facebook.com/",
+      domainPat: /^https?:\/\/(www\.)?(facebook\.com|fb\.com|m\.facebook\.com)\//i, atInUrl: false, maxLen: 50,
+      svg: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 2H4a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h8v-9H9v-3h3V7.5c0-2.4 1.5-3.5 3.5-3.5.9 0 1.7.1 2 .1V6h-1.3c-1 0-1.2.5-1.2 1.2V10h3l-.4 3H15v9h5a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/></svg>' },
+    { key: "youtube", label: "יוטיוב", emoji: "▶️", placeholder: "dani.barber",
+      previewPrefix: "youtube.com/@", urlPrefix: "https://www.youtube.com/@",
+      domainPat: /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i, atInUrl: true, maxLen: 30,
+      svg: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22 6.5c-.2-1-1-1.8-2-2C18 4 12 4 12 4s-6 0-8 .5c-1 .2-1.8 1-2 2C1.5 8.5 1.5 12 1.5 12s0 3.5.5 5.5c.2 1 1 1.8 2 2 2 .5 8 .5 8 .5s6 0 8-.5c1-.2 1.8-1 2-2 .5-2 .5-5.5.5-5.5s0-3.5-.5-5.5zM10 15.5V8.5l6 3.5-6 3.5z"/></svg>' },
+  ];
+  function socialMeta(key) { return SOCIAL_PLATFORMS.find((p) => p.key === key) || null; }
+  function socialHandle(v, key) {
+    const meta = socialMeta(key); if (!meta) return "";
     let s = String(v || "").trim();
     if (!s) return "";
-    s = s.replace(/^https?:\/\/(www\.)?instagram\.com\//i, "").replace(/^@/, "");
+    s = s.replace(meta.domainPat, "").replace(/^@/, "");
+    // ביוטיוב: משיכת השם מקישורים ישנים (/c/name, /user/name, /channel/UC...)
+    if (key === "youtube") s = s.replace(/^(c|user|channel)\//i, "");
     s = s.split(/[/?#]/)[0];
-    s = s.replace(/[^A-Za-z0-9._]/g, "").replace(/^\.+|\.+$/g, "");   // הסרת נקודות בקצוות
-    return s.slice(0, 30);
+    // פייסבוק מרשה גם מקף וגם מספרים (profile.php?id=... כבר נחתך למעלה)
+    const allowedPat = key === "facebook" ? /[^A-Za-z0-9._-]/g : /[^A-Za-z0-9._]/g;
+    s = s.replace(allowedPat, "").replace(/^\.+|\.+$/g, "");
+    return s.slice(0, meta.maxLen);
   }
+  function socialUrl(handle, key) {
+    const meta = socialMeta(key);
+    if (!meta || !handle) return "";
+    return meta.urlPrefix + handle;
+  }
+  // תאימות אחורה — קוד קיים משתמש ב-igHandle
+  function igHandle(v) { return socialHandle(v, "instagram"); }
 
   /* ---------- תמיכה — דיווח תקלה בוואטסאפ (המספר עצמו לא מוצג) ---------- */
   function supportCard() {
@@ -1419,14 +1451,17 @@
   /* ---------- כרטיס "קצת עלינו" ---------- */
   function aboutCard(st) {
     const about = (st.shop.about || "").trim();
-    const ig = igHandle(st.shop.instagram || "");
-    if (!about && !ig) return "";
+    const socs = SOCIAL_PLATFORMS
+      .map((p) => ({ p: p, h: socialHandle(st.shop[p.key] || "", p.key) }))
+      .filter((x) => x.h);
+    if (!about && !socs.length) return "";
     return `
       <div class="section-title">✨ קצת עלינו</div>
       <div class="card">
         ${about ? `<p style="margin:0;line-height:1.65;font-size:14.5px;white-space:pre-line">${esc(about)}</p>` : ""}
-        ${ig ? `<a class="ig-link" href="https://instagram.com/${esc(ig)}" target="_blank" rel="noopener"${about ? ` style="margin-top:12px"` : ""}>
-          <span class="ig-ico">📷</span><span>@${esc(ig)}</span></a>` : ""}
+        ${socs.length ? `<div class="socials"${about ? ` style="margin-top:14px"` : ""}>
+          ${socs.map((x) => `<a class="soc soc-${x.p.key}" href="${esc(socialUrl(x.h, x.p.key))}" target="_blank" rel="noopener" aria-label="${esc(x.p.label)}">${x.p.svg}</a>`).join("")}
+        </div>` : ""}
       </div>`;
   }
 
@@ -3121,13 +3156,18 @@
           <input class="input" id="set-tag" value="${esc(st.shop.tagline || "")}"></div>
         <div class="field"><label>קצת עלינו (יוצג ללקוחות בעמוד ההזמנה)</label>
           <textarea class="input" id="set-about" rows="3" placeholder="ספרו על המספרה — ותק, התמחות, אווירה…" style="resize:vertical;line-height:1.6">${esc(st.shop.about || "")}</textarea></div>
-        <div class="field"><label>אינסטגרם <span class="opt">(לא חובה)</span></label>
-          <input class="input" id="set-ig" value="${esc(st.shop.instagram || "")}" placeholder="dani.barber" autocapitalize="off" autocomplete="off" spellcheck="false" inputmode="latin">
-          <div class="ig-help">
-            <span class="ig-prev" id="ig-prev-set">instagram.com/<b>${esc(igHandle(st.shop.instagram || "") || "השם-שלך")}</b></span>
-            <button type="button" class="btn btn-sm" data-act="ig-test" data-src="#set-ig">פתחו לבדיקה ↗</button>
-          </div>
-          <div class="hint" style="margin-top:6px">הדביקו את שם המשתמש שלכם (או את הקישור לפרופיל). לחצו ״פתחו לבדיקה״ כדי לוודא שזה מוביל לעמוד שלכם.</div></div>
+        <div class="field"><label>רשתות חברתיות <span class="opt">(לא חובה)</span></label>
+          <div class="hint" style="margin:0 0 10px">מלאו רק את מה שיש לכם. הלקוחות יראו אייקונים לחיצים בעמוד ההזמנה — לחיצה תפתח את העמוד שלכם ברשת.</div>
+          ${SOCIAL_PLATFORMS.map((p) => `
+            <div class="soc-set-row">
+              <label class="soc-set-lbl">${p.emoji} ${esc(p.label)}</label>
+              <input class="input" id="set-${p.key}" value="${esc(st.shop[p.key] || "")}" placeholder="${esc(p.placeholder)}" autocapitalize="off" autocomplete="off" spellcheck="false" inputmode="latin">
+              <div class="ig-help">
+                <span class="ig-prev" id="prev-set-${p.key}">${esc(p.previewPrefix)}<b>${esc(socialHandle(st.shop[p.key] || "", p.key) || "השם-שלך")}</b></span>
+                <button type="button" class="btn btn-sm" data-act="soc-test" data-p="${p.key}" data-src="#set-${p.key}">פתחו לבדיקה ↗</button>
+              </div>
+            </div>`).join("")}
+        </div>
         <div class="field"><label>כתובת המספרה (לכפתור ״איך מגיעים״)</label>
           <input class="input" id="set-addr" value="${esc(st.shop.address || "")}" placeholder="רבי טרפון 12, ירושלים"></div>
         <div class="field-row">
@@ -3276,7 +3316,7 @@
       owner: "", name: "", handle: "", phone: "", city: "", street: "", houseNo: "", address: "",
       services: [{ name: "תספורת גבר", price: 60, durationMin: 30 }],
       multiStaff: false, staff: [""],
-      about: "", instagram: "", logo: "", heardFrom: "",
+      about: "", instagram: "", tiktok: "", facebook: "", youtube: "", logo: "", heardFrom: "",
       bitEnabled: false, bitPhone: "", tipEnabled: true, privacyOk: false,
       style: "sky", pass: "", pass2: "",
     },
@@ -3371,14 +3411,19 @@
                      style="resize:vertical;line-height:1.6">${esc(d.about)}</textarea>
            <div class="wiz-count"><span id="wz-about-n">${(d.about || "").length}</span>/170</div>`);
       case 8:
-        return wizQ("📷", "אינסטגרם העסק", "הלקוחות יוכלו לעבור לעמוד האינסטגרם שלכם ישירות מדף ההזמנה. אפשר לדלג.",
-          `<input class="input wiz-input" id="wz-ig" placeholder="dani.barber" value="${esc(d.instagram)}"
-                  autocapitalize="off" autocomplete="off" spellcheck="false" inputmode="latin">
-           <div class="ig-help">
-             <span class="ig-prev" id="ig-prev-wz">instagram.com/<b>${esc(igHandle(d.instagram) || "השם-שלך")}</b></span>
-             <button type="button" class="btn btn-sm" data-act="ig-test" data-src="#wz-ig">פתחו לבדיקה ↗</button>
-           </div>
-           <div class="hint" style="margin-top:8px">אפשר להזין שם משתמש או את הקישור המלא לפרופיל. לחצו ״פתחו לבדיקה״ כדי לוודא שזה מוביל לעמוד שלכם.</div>`);
+        return wizQ("🌐", "רשתות חברתיות", "הלקוחות יוכלו לעבור לעמוד שלכם ישירות מדף ההזמנה. מלאו רק את מה שיש לכם — אפשר לדלג על השאר.",
+          SOCIAL_PLATFORMS.map((p) => {
+            const val = p.key === "instagram" ? d.instagram : (d[p.key] || "");
+            return `<div class="field" style="text-align:start">
+              <label>${p.emoji} ${esc(p.label)} <span class="opt">(לא חובה)</span></label>
+              <input class="input wiz-input" id="wz-${p.key}" placeholder="${esc(p.placeholder)}" value="${esc(val)}"
+                     autocapitalize="off" autocomplete="off" spellcheck="false" inputmode="latin">
+              <div class="ig-help">
+                <span class="ig-prev" id="prev-wz-${p.key}">${esc(p.previewPrefix)}<b>${esc(socialHandle(val, p.key) || "השם-שלך")}</b></span>
+                <button type="button" class="btn btn-sm" data-act="soc-test" data-p="${p.key}" data-src="#wz-${p.key}">פתחו לבדיקה ↗</button>
+              </div>
+            </div>`;
+          }).join(""));
       case 9:
         return wizQ("🖼️", "אייקון המספרה", "התמונה שהלקוחות יראו בראש העמוד ובאייקון האפליקציה. אפשר לדלג ולהעלות אחר כך.",
           `<div class="wiz-logo-pick">
@@ -3432,7 +3477,11 @@
              </button>`).join("")}</div>`);
       case 14: {
         const addr = wizComposeAddress(d);
-        const ig = igHandle(d.instagram);
+        const socLabels = SOCIAL_PLATFORMS
+          .map((p) => ({ p: p, h: socialHandle(d[p.key] || "", p.key) }))
+          .filter((x) => x.h)
+          .map((x) => x.p.label)
+          .join(", ");
         const styleName = (WIZ_STYLES.find((s) => s.id === d.style) || {}).name || d.style;
         const row = (ico, label, value, step) => `
           <div class="sum-row">
@@ -3459,7 +3508,7 @@
                 ${row("✂️", "שירותים", svcCount ? svcCount + " שירותים" : "", 5)}
                 ${row("🧑‍🔧", "ספרים", d.multiStaff ? (d.staff || []).filter(Boolean).join(", ") : "ספר יחיד", 6)}
                 ${row("📝", "תיאור", d.about, 7)}
-                ${row("📷", "אינסטגרם", ig ? "@" + ig : "", 8)}
+                ${row("🌐", "רשתות חברתיות", socLabels, 8)}
                 ${row("💳", "תשלום בביט", d.bitEnabled ? u.fmtPhone(d.bitPhone) : "", 10)}
                 ${row("🎨", "עיצוב", styleName, 11)}
               </div>
@@ -3652,7 +3701,10 @@
       wizGo(8); return;
     }
     if (wiz.step === 8) {
-      d.instagram = igHandle(($("#wz-ig") && $("#wz-ig").value) || "");
+      SOCIAL_PLATFORMS.forEach((p) => {
+        const el = $("#wz-" + p.key);
+        d[p.key] = socialHandle(el ? el.value : "", p.key);
+      });
       wizGo(9); return;
     }
     if (wiz.step === 9) { wizGo(10); return; }   // אייקון — נשמר בעת הבחירה
@@ -3717,7 +3769,10 @@
     };
     const m = map[wiz.step];
     if (m && $(m[1])) wiz.data[m[0]] = $(m[1]).value.trim();
-    if (wiz.step === 8 && $("#wz-ig")) wiz.data.instagram = igHandle($("#wz-ig").value);
+    if (wiz.step === 8) SOCIAL_PLATFORMS.forEach((p) => {
+      const el = $("#wz-" + p.key);
+      if (el) wiz.data[p.key] = socialHandle(el.value, p.key);
+    });
     if (wiz.step === 10) wizCaptureBit();
     if (wiz.step === 12 && $("#wz-pass2")) wiz.data.pass2 = $("#wz-pass2").value.trim();
     if (wiz.step === 14 && $("#wz-privacy")) wiz.data.privacyOk = $("#wz-privacy").checked;
@@ -3749,7 +3804,8 @@
     const res = await Store.createShop(d.handle, {
       name: d.name, ownerPass: d.pass, phone: d.phone, address: d.address, ownerName: d.owner,
       style: d.style, services: d.services, staff: d.multiStaff ? d.staff : [],
-      about: d.about, instagram: d.instagram, logo: d.logo, heardFrom: d.heardFrom,
+      about: d.about, instagram: d.instagram, tiktok: d.tiktok, facebook: d.facebook, youtube: d.youtube,
+      logo: d.logo, heardFrom: d.heardFrom,
       bitEnabled: d.bitEnabled, bitPhone: d.bitPhone, tipEnabled: d.tipEnabled,
     }, passHash);
     clearInterval(timer);
@@ -4202,12 +4258,14 @@
         case "ag-back": view.authPhoneForm = false; render(); break;
         case "ag-save-phone": agSavePhone(); break;
 
-        // בדיקת קישור אינסטגרם — פותח את הפרופיל כדי שהספר יוודא שזה שלו
-        case "ig-test": {
-          const el = $(t.dataset.src || "#set-ig");
-          const h = igHandle(el ? el.value : "");
-          if (!h) { toast("הזינו שם משתמש אינסטגרם", "", "📷"); break; }
-          openExternal("https://instagram.com/" + h);
+        // בדיקת קישור רשת חברתית — פותח את הפרופיל כדי שהספר יוודא שזה שלו
+        case "soc-test": {
+          const key = t.dataset.p || "instagram";
+          const meta = socialMeta(key);
+          const el = $(t.dataset.src || "");
+          const h = socialHandle(el ? el.value : "", key);
+          if (!h) { toast("הזינו שם משתמש " + (meta ? meta.label : ""), "", meta ? meta.emoji : "🌐"); break; }
+          openExternal(socialUrl(h, key));
           break;
         }
 
@@ -4366,10 +4424,12 @@
         const prev = $("#ob-linkPrev");
         if (prev) prev.textContent = "הקישור שלך: " + shareBase() + "#" + (h || "הכתובת-שלך");
       }
-      // תצוגה מקדימה חיה של קישור האינסטגרם (בהגדרות ובאשף)
-      if (e.target && (e.target.id === "set-ig" || e.target.id === "wz-ig")) {
-        const prevEl = $(e.target.id === "set-ig" ? "#ig-prev-set" : "#ig-prev-wz");
-        if (prevEl) prevEl.innerHTML = "instagram.com/<b>" + esc(igHandle(e.target.value) || "השם-שלך") + "</b>";
+      // תצוגה מקדימה חיה של קישורי הרשתות החברתיות (בהגדרות ובאשף)
+      if (e.target && /^(set|wz)-(instagram|tiktok|facebook|youtube)$/.test(e.target.id)) {
+        const [scope, key] = e.target.id.split("-");
+        const meta = socialMeta(key);
+        const prevEl = $("#prev-" + scope + "-" + key);
+        if (prevEl && meta) prevEl.innerHTML = esc(meta.previewPrefix) + "<b>" + esc(socialHandle(e.target.value, key) || "השם-שלך") + "</b>";
       }
     });
   }
@@ -4495,11 +4555,15 @@
     if (bitOnNow && !u.isValidPhone(bitPh)) {
       toast("להפעלת תשלום בביט צריך מספר טלפון תקין", "", "📵"); return;
     }
-    await Store.saveShop({
+    const socPatch = {};
+    SOCIAL_PLATFORMS.forEach((p) => {
+      const el = $("#set-" + p.key);
+      socPatch[p.key] = socialHandle(el ? el.value : "", p.key);
+    });
+    await Store.saveShop(Object.assign({
       name: $("#set-name").value.trim() || "המספרה",
       tagline: $("#set-tag").value.trim(),
       about: ($("#set-about") && $("#set-about").value.trim()) || "",
-      instagram: igHandle(($("#set-ig") && $("#set-ig").value) || ""),
       bitEnabled: !!($("#set-bit") && $("#set-bit").checked),
       bitPhone: ($("#set-bitphone") && $("#set-bitphone").value.trim()) || "",
       tipEnabled: !($("#set-tip") && !$("#set-tip").checked),
@@ -4507,7 +4571,7 @@
       phone: $("#set-phone").value.trim(),
       slotStep: Number($("#set-step").value),
       reminderMinutes: Number($("#set-remind").value),
-    });
+    }, socPatch));
     toast("ההגדרות נשמרו ✓", "good", "⚙️"); render();
   }
 
