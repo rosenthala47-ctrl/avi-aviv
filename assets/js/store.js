@@ -47,6 +47,7 @@ UG.Store = (function () {
         { id: u.uid(), name: "זקן ועיצוב", price: 40, durationMin: 20, icon: "🧔", active: true },
       ],
       bookings: [],
+      products: [],          // מוצרים למכירה (קרמים וכו') — שם, מחיר, תמונה, תיאור
       contacts: [],          // ספר הלקוחות שהספר ייבא (שם + טלפון)
       closedDates: [],       // ימי סגירה/חופשה מלאים: "YYYY-MM-DD"
       blockedClients: [],    // לקוחות חסומים (לא יכולים לקבוע תור אונליין)
@@ -70,6 +71,7 @@ UG.Store = (function () {
     for (let i = 0; i < 7; i++) s.schedule[i] = Object.assign({}, base.schedule[i], s.schedule[i]);
     if (!Array.isArray(s.services)) s.services = base.services;
     if (!Array.isArray(s.bookings)) s.bookings = [];
+    if (!Array.isArray(s.products)) s.products = [];
     if (!Array.isArray(s.contacts)) s.contacts = [];
     if (!Array.isArray(s.closedDates)) s.closedDates = [];
     if (!Array.isArray(s.blockedClients)) s.blockedClients = [];
@@ -515,6 +517,23 @@ UG.Store = (function () {
     return persist();
   }
 
+  /* ---------- מוצרים למכירה ---------- */
+  function upsertProduct(prod) {
+    state.products = state.products || [];
+    if (prod.id) {
+      const i = state.products.findIndex((p) => p.id === prod.id);
+      if (i >= 0) state.products[i] = Object.assign({}, state.products[i], prod);
+    } else {
+      prod.id = u.uid(); prod.active = true; prod.createdAt = Date.now();
+      state.products.push(prod);
+    }
+    return persist();
+  }
+  function removeProduct(id) {
+    state.products = (state.products || []).filter((p) => p.id !== id);
+    return persist();
+  }
+
   /* ---------- ספר לקוחות (ייבוא) ---------- */
   // מוסיף רשימת אנשי קשר {name, phone}; מדלג על כפילויות. מחזיר כמה נוספו בפועל.
   function addContacts(list) {
@@ -787,7 +806,7 @@ UG.Store = (function () {
 
   return {
     init, subscribe, get,
-    setDay, saveShop, upsertService, removeService,
+    setDay, saveShop, upsertService, removeService, upsertProduct, removeProduct,
     addContacts, removeContact, addBroadcast, addClosedDates, removeClosedDate,
     setSlotOpen, blockClient, unblockClient,
     createBooking, setBookingStatus, deleteBooking, markPaid, setPaidConfirmed,

@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "96";
+  const APP_VERSION = "97";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -77,7 +77,7 @@
   /* ---------- מצב תצוגה מקומי (לא נשמר בשרת) ---------- */
   const view = {
     route: (function () { const r = localStorage.getItem(ROUTEKEY); return r === "owner" || r === "client" ? r : "client"; })(), // client | owner
-    clientTab: (function () { try { const t = localStorage.getItem("ug_ctab__" + SHOP); return ["book", "gallery", "reviews", "mine"].includes(t) ? t : "book"; } catch (e) { return "book"; } })(),   // נשמר כדי לא לאבד מיקום ברענון
+    clientTab: (function () { try { const t = localStorage.getItem("ug_ctab__" + SHOP); return ["book", "gallery", "products", "reviews", "mine"].includes(t) ? t : "book"; } catch (e) { return "book"; } })(),   // נשמר כדי לא לאבד מיקום ברענון
     ownerTab: (function () { try { return localStorage.getItem("ug_otab__" + SHOP) || "cal"; } catch (e) { return "cal"; } })(),  // cal | hours | services | bookings | clients | report | publish | settings
     selService: null,
     selStaff: "",        // ספר מועדף שהלקוח בחר (בקשה בלבד)
@@ -571,9 +571,13 @@
     if (!view.selService || !activeServices.find((s) => s.id === view.selService)) {
       view.selService = activeServices[0] ? activeServices[0].id : null;
     }
+    const hasProducts = activeProducts(st).length > 0;
+    // אם לשונית ״מוצרים״ נבחרה אבל אין מוצרים (הספר הסיר) — חזרה לקביעת תור
+    if (view.clientTab === "products" && !hasProducts) view.clientTab = "book";
     let body;
     if (view.clientTab === "gallery") body = clientGallery();
     else if (view.clientTab === "reviews") body = clientReviews();
+    else if (view.clientTab === "products") body = clientProducts(st);
     else if (view.clientTab === "mine") body = clientMine(st);
     else body = clientBook(st, activeServices);
     return `
@@ -590,6 +594,8 @@
           <span class="tb-ico">🗓️</span>קביעת תור</button>
         <button data-tab="gallery" class="${view.clientTab === "gallery" ? "active" : ""}">
           <span class="tb-ico">🖼️</span>גלריה</button>
+        ${hasProducts ? `<button data-tab="products" class="${view.clientTab === "products" ? "active" : ""}">
+          <span class="tb-ico">🛍️</span>מוצרים</button>` : ""}
         <button data-tab="reviews" class="${view.clientTab === "reviews" ? "active" : ""}">
           <span class="tb-ico">⭐</span>ביקורות</button>
         <button data-tab="mine" class="${view.clientTab === "mine" ? "active" : ""}">
@@ -622,7 +628,7 @@
     const st = Store.get();
     const reviews = (st.reviews || []).slice().sort((a, z) => (z.createdAt || 0) - (a.createdAt || 0));
     const avg = reviews.length ? reviews.reduce((s, r) => s + Number(r.rating || 0), 0) / reviews.length : 0;
-    let html = `
+    let html = aboutCard(st) + `
       <div class="reviews-hero">
         <div class="rh-avg">${reviews.length ? avg.toFixed(1) : "—"}</div>
         ${starsRow(Math.round(avg))}
@@ -632,6 +638,34 @@
     if (!reviews.length) html += emptyState("⭐", "אין עדיין ביקורות", "היו הראשונים לכתוב ביקורת!");
     else html += reviews.map((r) => reviewCardHtml(r)).join("");
     return html;
+  }
+
+  /* ---------- מוצרים למכירה (צד הלקוח) ---------- */
+  function activeProducts(st) {
+    return (st.products || []).filter((p) => p.active !== false)
+      .slice().sort((a, z) => (z.createdAt || 0) - (a.createdAt || 0));
+  }
+  function clientProducts(st) {
+    const products = activeProducts(st);
+    if (!products.length) return emptyState("🛍️", "אין מוצרים כרגע", "בעל העסק עדיין לא הוסיף מוצרים");
+    const waOk = !!waIntl(st.shop.phone || "");
+    return `
+      <div class="section-title">המוצרים שלנו</div>
+      ${products.map((p) => `
+        <div class="card prod-card">
+          ${p.image ? `<div class="prod-card-img"><img src="${esc(p.image)}" alt="${esc(p.name)}"></div>` : ""}
+          <div class="prod-card-body">
+            <div class="prod-card-top">
+              <span class="prod-card-name">${esc(p.name)}</span>
+              <span class="prod-card-price">${u.fmtPrice(p.price)}</span>
+            </div>
+            ${p.description ? `<p class="prod-card-desc">${esc(p.description)}</p>` : ""}
+            ${waOk
+              ? `<button class="btn btn-wa" data-act="product-interest" data-id="${p.id}">💬 מעניין אותי — פרטים לקנייה</button>`
+              : `<p class="hint">לפרטים ולרכישה — פנו אל המספרה.</p>`}
+          </div>
+        </div>`).join("")}
+    `;
   }
 
   /* מודאל כתיבת ביקורת חופשית (ללא צורך בתור) — גלוי לכל הלקוחות */
@@ -1284,19 +1318,19 @@
      שומרים רק את "שם המשתמש" (handle) — מקבלים גם קישור מלא, גם @user וגם שם נקי,
      ומחלצים את המזהה. הצגה ופתיחה בונות מזה URL לפי הפלטפורמה. */
   const SOCIAL_PLATFORMS = [
-    { key: "instagram", label: "אינסטגרם", emoji: "📷", placeholder: "dani.barber",
+    { key: "instagram", label: "אינסטגרם", en: "Instagram", emoji: "📷", placeholder: "dani.barber",
       previewPrefix: "instagram.com/", urlPrefix: "https://instagram.com/",
       domainPat: /^https?:\/\/(www\.)?instagram\.com\//i, atInUrl: false, maxLen: 30,
       svg: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17 2H7C4 2 2 4 2 7v10c0 3 2 5 5 5h10c3 0 5-2 5-5V7c0-3-2-5-5-5zM12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm5-3a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/></svg>' },
-    { key: "tiktok", label: "טיקטוק", emoji: "🎵", placeholder: "dani.barber",
+    { key: "tiktok", label: "טיקטוק", en: "TikTok", emoji: "🎵", placeholder: "dani.barber",
       previewPrefix: "tiktok.com/@", urlPrefix: "https://www.tiktok.com/@",
       domainPat: /^https?:\/\/(www\.)?tiktok\.com\//i, atInUrl: true, maxLen: 24,
       svg: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6 2 2 6 2 12s4 10 10 10 10-4 10-10S18 2 12 2zm2.5 5.2c.2 1.1.9 2 2 2.4v1.8c-.8 0-1.5-.2-2.1-.6v3.9a3.2 3.2 0 1 1-3.2-3.2c.2 0 .3 0 .5.1v1.8a1.4 1.4 0 1 0 1 1.3V7.2h1.8z"/></svg>' },
-    { key: "facebook", label: "פייסבוק", emoji: "📘", placeholder: "dani.barber",
+    { key: "facebook", label: "פייסבוק", en: "Facebook", emoji: "📘", placeholder: "dani.barber",
       previewPrefix: "facebook.com/", urlPrefix: "https://www.facebook.com/",
       domainPat: /^https?:\/\/(www\.)?(facebook\.com|fb\.com|m\.facebook\.com)\//i, atInUrl: false, maxLen: 50,
       svg: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 2H4a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h8v-9H9v-3h3V7.5c0-2.4 1.5-3.5 3.5-3.5.9 0 1.7.1 2 .1V6h-1.3c-1 0-1.2.5-1.2 1.2V10h3l-.4 3H15v9h5a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/></svg>' },
-    { key: "youtube", label: "יוטיוב", emoji: "▶️", placeholder: "dani.barber",
+    { key: "youtube", label: "יוטיוב", en: "YouTube", emoji: "▶️", placeholder: "dani.barber",
       previewPrefix: "youtube.com/@", urlPrefix: "https://www.youtube.com/@",
       domainPat: /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i, atInUrl: true, maxLen: 30,
       svg: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22 6.5c-.2-1-1-1.8-2-2C18 4 12 4 12 4s-6 0-8 .5c-1 .2-1.8 1-2 2C1.5 8.5 1.5 12 1.5 12s0 3.5.5 5.5c.2 1 1 1.8 2 2 2 .5 8 .5 8 .5s6 0 8-.5c1-.2 1.8-1 2-2 .5-2 .5-5.5.5-5.5s0-3.5-.5-5.5zM10 15.5V8.5l6 3.5-6 3.5z"/></svg>' },
@@ -1460,7 +1494,10 @@
       <div class="card">
         ${about ? `<p style="margin:0;line-height:1.65;font-size:14.5px;white-space:pre-line">${esc(about)}</p>` : ""}
         ${socs.length ? `<div class="socials"${about ? ` style="margin-top:14px"` : ""}>
-          ${socs.map((x) => `<a class="soc soc-${x.p.key}" href="${esc(socialUrl(x.h, x.p.key))}" target="_blank" rel="noopener" aria-label="${esc(x.p.label)}">${x.p.svg}</a>`).join("")}
+          ${socs.map((x) => `<a class="soc-wrap" href="${esc(socialUrl(x.h, x.p.key))}" target="_blank" rel="noopener" aria-label="${esc(x.p.label)}">
+            <span class="soc soc-${x.p.key}">${x.p.svg}</span>
+            <span class="soc-name">${esc(x.p.en)}</span>
+          </a>`).join("")}
         </div>` : ""}
       </div>`;
   }
@@ -2040,6 +2077,7 @@
     else if (view.ownerTab === "cal") body = ownerCal(st);
     else if (view.ownerTab === "hours") body = ownerHours(st);
     else if (view.ownerTab === "services") body = ownerServices(st);
+    else if (view.ownerTab === "products") body = ownerProducts(st);
     else if (view.ownerTab === "bookings") body = ownerBookings(st);
     else if (view.ownerTab === "clients") body = ownerClients(st);
     else if (view.ownerTab === "report") body = ownerReport(st);
@@ -2053,7 +2091,7 @@
       subBanner() + (view.ownerTab !== "settings" ? ownerNotifBanner() : "");
 
     const tabLabel = {
-      cal: "יומן", hours: "שעות", services: "שירותים", bookings: "תורים",
+      cal: "יומן", hours: "שעות", services: "שירותים", products: "מוצרים", bookings: "תורים",
       clients: "לקוחות", report: "דוח", publish: "פרסום", settings: "הגדרות",
     }[view.ownerTab] || "ניהול העסק";
 
@@ -2061,16 +2099,21 @@
     <div class="screen active">
       ${topbar(tabLabel, {})}
       <div class="content" id="oscroll">${banners}${body}</div>
-      <div class="tabbar scroll" id="otabbar">
-        <button data-otab="cal" class="${view.ownerTab === "cal" ? "active" : ""}"><span class="tb-ico">🗓️</span>יומן</button>
-        <button data-otab="hours" class="${view.ownerTab === "hours" ? "active" : ""}"><span class="tb-ico">🕐</span>שעות</button>
-        <button data-otab="services" class="${view.ownerTab === "services" ? "active" : ""}"><span class="tb-ico">✂️</span>שירותים</button>
-        <button data-otab="bookings" class="${view.ownerTab === "bookings" ? "active" : ""}">
-          <span class="tb-ico" style="position:relative">🎟️${upcomingCount ? `<span class="badge-count" style="inset-inline-start:auto;inset-inline-end:-10px;top:-6px">${upcomingCount}</span>` : ""}</span>תורים</button>
-        <button data-otab="clients" class="${view.ownerTab === "clients" ? "active" : ""}"><span class="tb-ico">👥</span>לקוחות</button>
-        <button data-otab="report" class="${view.ownerTab === "report" ? "active" : ""}"><span class="tb-ico">📊</span>דוח</button>
-        <button data-otab="publish" class="${view.ownerTab === "publish" ? "active" : ""}"><span class="tb-ico">📣</span>פרסום</button>
-        <button data-otab="settings" class="${view.ownerTab === "settings" ? "active" : ""}"><span class="tb-ico">⚙️</span>הגדרות</button>
+      <div class="otabbar-wrap">
+        <button class="tab-arrow tab-arrow-start" data-tabscroll="start" aria-label="עוד לשונית">›</button>
+        <div class="tabbar scroll" id="otabbar">
+          <button data-otab="cal" class="${view.ownerTab === "cal" ? "active" : ""}"><span class="tb-ico">🗓️</span>יומן</button>
+          <button data-otab="hours" class="${view.ownerTab === "hours" ? "active" : ""}"><span class="tb-ico">🕐</span>שעות</button>
+          <button data-otab="services" class="${view.ownerTab === "services" ? "active" : ""}"><span class="tb-ico">✂️</span>שירותים</button>
+          <button data-otab="products" class="${view.ownerTab === "products" ? "active" : ""}"><span class="tb-ico">🛍️</span>מוצרים</button>
+          <button data-otab="bookings" class="${view.ownerTab === "bookings" ? "active" : ""}">
+            <span class="tb-ico" style="position:relative">🎟️${upcomingCount ? `<span class="badge-count" style="inset-inline-start:auto;inset-inline-end:-10px;top:-6px">${upcomingCount}</span>` : ""}</span>תורים</button>
+          <button data-otab="clients" class="${view.ownerTab === "clients" ? "active" : ""}"><span class="tb-ico">👥</span>לקוחות</button>
+          <button data-otab="report" class="${view.ownerTab === "report" ? "active" : ""}"><span class="tb-ico">📊</span>דוח</button>
+          <button data-otab="publish" class="${view.ownerTab === "publish" ? "active" : ""}"><span class="tb-ico">📣</span>פרסום</button>
+          <button data-otab="settings" class="${view.ownerTab === "settings" ? "active" : ""}"><span class="tb-ico">⚙️</span>הגדרות</button>
+        </div>
+        <button class="tab-arrow tab-arrow-end" data-tabscroll="end" aria-label="עוד לשונית">‹</button>
       </div>
     </div>`;
   }
@@ -2206,6 +2249,68 @@
       <button class="btn btn-primary" data-act="add-svc">＋ הוספת שירות</button>
       <p class="hint">שם השירות, המחיר והמשך מתעדכנים אצל כל הלקוחות מיד.</p>
     `;
+  }
+
+  /* ---------- מוצרים למכירה (צד הבעלים) ---------- */
+  function ownerProducts(st) {
+    const waOk = !!waIntl(st.shop.phone || "");
+    const products = (st.products || []).slice().sort((a, z) => (z.createdAt || 0) - (a.createdAt || 0));
+    const items = products.map((p) => `
+      <div class="card">
+        <div class="prod-row">
+          <div class="prod-thumb">${p.image ? `<img src="${esc(p.image)}" alt="">` : "🛍️"}</div>
+          <div class="prod-main">
+            <div class="prod-name">${esc(p.name)}</div>
+            <div class="prod-price">${u.fmtPrice(p.price)}</div>
+            ${p.description ? `<div class="prod-desc-mini">${esc(p.description)}</div>` : ""}
+          </div>
+          <button class="icon-btn" data-act="edit-product" data-id="${p.id}">✏️</button>
+        </div>
+      </div>`).join("");
+    return `
+      ${!waOk ? `<div class="card notice-card">📱 כדי שלקוחות יוכלו לפנות אליך בוואטסאפ על מוצר, יש להזין מספר טלפון נייד ב<b>הגדרות ← טלפון</b>.</div>` : ""}
+      <div class="section-title">המוצרים שאתה מוכר</div>
+      ${items || emptyState("🛍️", "אין עדיין מוצרים", "הוסיפו מוצר ראשון — קרם, שעווה, שמפו…")}
+      <div style="height:14px"></div>
+      <button class="btn btn-primary" data-act="add-product">＋ הוספת מוצר</button>
+      <p class="hint">הלקוחות רואים את המוצרים בעמוד ״מוצרים״, ויכולים לפנות אליך ישירות בוואטסאפ להזמנה.</p>
+    `;
+  }
+
+  function productModal(existing) {
+    const p = existing || { name: "", price: "", description: "", image: "" };
+    openModal(`
+      <div class="m-title">${existing ? "עריכת מוצר" : "מוצר חדש"}</div>
+      <div class="m-sub">הפרטים יופיעו אצל הלקוחות בעמוד ״מוצרים״</div>
+      <div class="prod-img-pick">
+        <div class="prod-img-prev${p.image ? " has-img" : ""}" id="pm-prev">${p.image ? `<img src="${esc(p.image)}" alt="">` : "🛍️"}</div>
+        <div class="btn-row" style="margin-top:10px;justify-content:center">
+          <button type="button" class="btn btn-sm" data-act="product-pic">${p.image ? "החלפת תמונה" : "העלאת תמונה"}</button>
+          <button type="button" class="btn btn-danger btn-sm" id="pm-clear" data-act="product-pic-clear" style="${p.image ? "" : "display:none"}">הסרה</button>
+        </div>
+        <input type="file" accept="image/*" data-productfile style="display:none">
+      </div>
+      <div class="field" style="margin-top:12px"><label>שם המוצר</label>
+        <input class="input" id="pm-name" placeholder="לדוגמה: שעוות עיצוב לשיער" value="${esc(p.name)}"></div>
+      <div class="field"><label>מחיר (₪)</label>
+        <input class="input" id="pm-price" type="number" inputmode="numeric" min="0" placeholder="50" value="${esc(p.price)}"></div>
+      <div class="field"><label>תיאור <span class="opt">(לא חובה)</span></label>
+        <textarea class="input" id="pm-desc" rows="3" placeholder="ספרו על המוצר — למה הוא טוב, למי הוא מתאים…" style="resize:vertical;line-height:1.6">${esc(p.description)}</textarea></div>
+      <button class="btn btn-primary" data-act="save-product" data-id="${existing ? existing.id : ""}">שמירה</button>
+      ${existing ? `<button class="btn btn-danger" data-act="del-product" data-id="${existing.id}" style="margin-top:8px">מחיקת מוצר</button>` : `<button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>`}
+    `);
+    $("#modal").__prodImg = p.image || "";
+  }
+
+  async function saveProduct(id) {
+    const name = ($("#pm-name") && $("#pm-name").value.trim()) || "";
+    const price = Number($("#pm-price") && $("#pm-price").value);
+    const description = ($("#pm-desc") && $("#pm-desc").value.trim()) || "";
+    const image = ($("#modal") && $("#modal").__prodImg) || "";
+    if (!name) { toast("נא להזין שם מוצר", "", "✋"); return; }
+    if (!(price >= 0)) { toast("בדקו את המחיר", "", "✋"); return; }
+    await Store.upsertProduct({ id: id || undefined, name, price, description, image });
+    closeModal(); toast("המוצר נשמר ✓", "good", "🛍️"); render();
   }
 
   function svcModal(existing) {
@@ -3290,7 +3395,33 @@
         const activeBtn = newTabbar.querySelector("button.active");
         if (activeBtn) activeBtn.scrollIntoView({ block: "nearest", inline: "nearest" });
       }
+      wireTabbarArrows(newTabbar);
+      updateTabbarArrows();
     }
+  }
+
+  /* ---------- חצים בסרגל הבעלים — כדי שהספר ידע שיש עוד לשוניות ---------- */
+  function wireTabbarArrows(el) {
+    if (!el || el.__arrowsWired) return;
+    el.__arrowsWired = true;
+    el.addEventListener("scroll", updateTabbarArrows, { passive: true });
+  }
+  function updateTabbarArrows() {
+    const el = $("#otabbar"); if (!el) return;
+    const wrap = el.closest(".otabbar-wrap"); if (!wrap) return;
+    const max = el.scrollWidth - el.clientWidth;
+    if (max <= 4) { wrap.classList.add("at-start", "at-end"); return; }
+    const sl = Math.abs(el.scrollLeft);          // בעברית (RTL) scrollLeft עשוי להיות שלילי
+    wrap.classList.toggle("at-start", sl < 4);   // בתחילת הגלילה — אין לאן לחזור
+    wrap.classList.toggle("at-end", sl > max - 4); // בסוף — אין עוד לשוניות
+  }
+  function scrollTabbar(dir) {   // dir: "start" | "end"
+    const el = $("#otabbar"); if (!el) return;
+    const amount = Math.round(el.clientWidth * 0.6);
+    const rtl = getComputedStyle(el).direction === "rtl";
+    let delta = dir === "end" ? amount : -amount;
+    if (rtl) delta = -delta;   // בגלילת RTL הכיוונים הפוכים
+    el.scrollBy({ left: delta, behavior: "smooth" });
   }
 
   /* =======================================================================
@@ -3927,7 +4058,7 @@
       // כניסת מנהל נסתרת: 3 הקשות רצופות על הלוגו (בתצוגת לקוח בלבד)
       if (e.target.closest(".logo-dot") && view.route === "client") { onLogoTap(); return; }
 
-      const t = e.target.closest("[data-act],[data-svc],[data-day],[data-oday],[data-slot],[data-wait],[data-photo],[data-delphoto],[data-tab],[data-otab],[data-active],[data-abday],[data-abslot]");
+      const t = e.target.closest("[data-act],[data-svc],[data-day],[data-oday],[data-slot],[data-wait],[data-photo],[data-delphoto],[data-tab],[data-otab],[data-tabscroll],[data-active],[data-abday],[data-abslot]");
       if (!t) return;
 
       // בורר היום/השעה במודאל «הוספת תור ידני» — לפני הבוררים של הלקוח
@@ -3947,6 +4078,7 @@
       if (t.dataset.wait) { const [dk, tm] = t.dataset.wait.split("|"); openWaitlist(dk, tm); return; }
       if (t.dataset.day && t.classList.contains("day-chip")) { view.selDate = t.dataset.day; view.selSlot = null; render(); return; }
       if (t.dataset.oday) { view.oDate = t.dataset.oday; render(); return; }
+      if (t.dataset.tabscroll) { scrollTabbar(t.dataset.tabscroll); return; }
       if (t.dataset.tab) { view.clientTab = t.dataset.tab; render(); return; }
       if (t.dataset.otab) {
         view.ownerTab = t.dataset.otab;
@@ -4352,6 +4484,33 @@
           await Store.removeService(t.dataset.id); closeModal();
           toast("השירות נמחק", "", "🗑️"); render(); break;
 
+        // מוצרים
+        case "add-product": productModal(null); break;
+        case "edit-product": {
+          const prod = (Store.get().products || []).find((p) => p.id === t.dataset.id);
+          if (prod) productModal(prod); break;
+        }
+        case "save-product": saveProduct(t.dataset.id); break;
+        case "del-product":
+          await Store.removeProduct(t.dataset.id); closeModal();
+          toast("המוצר נמחק", "", "🗑️"); render(); break;
+        case "product-pic": { const inp = document.querySelector("[data-productfile]"); if (inp) inp.click(); break; }
+        case "product-pic-clear": {
+          if ($("#modal")) $("#modal").__prodImg = "";
+          const prev = $("#pm-prev"); if (prev) { prev.classList.remove("has-img"); prev.innerHTML = "🛍️"; }
+          const clr = $("#pm-clear"); if (clr) clr.style.display = "none";
+          break;
+        }
+        case "product-interest": {
+          const stp = Store.get();
+          const prod = (stp.products || []).find((p) => p.id === t.dataset.id);
+          const wa = waIntl(stp.shop.phone || "");
+          if (!prod || !wa) { toast("לא ניתן לפנות כרגע — חסר מספר טלפון של המספרה", "", "📵"); break; }
+          const msg = `שלום! ראיתי באתר את המוצר "${prod.name}" (${u.fmtPrice(prod.price)}) ואשמח לפרטים נוספים לרכישה 🙂`;
+          openExternal("https://wa.me/" + wa + "?text=" + encodeURIComponent(msg));
+          break;
+        }
+
         case "set-style":
           applyShopStyle(t.dataset.style);
           await Store.saveShop({ style: t.dataset.style });
@@ -4399,6 +4558,22 @@
       if (a.dataset.coverfile !== undefined && a.type === "file") {
         if (a.files && a.files[0]) handleCoverUpload(a.files[0]);
         a.value = "";
+        return;
+      }
+      // תמונת מוצר — נשמרת זמנית על המודאל עד לחיצת ״שמירה״
+      if (a.dataset.productfile !== undefined && a.type === "file") {
+        const f = a.files && a.files[0];
+        a.value = "";
+        if (!f) return;
+        if (!f.type || f.type.indexOf("image/") !== 0) { toast("נא לבחור קובץ תמונה", "", "🖼️"); return; }
+        try {
+          const dataUrl = await compressImage(f, 900, 0.72);
+          if ($("#modal")) $("#modal").__prodImg = dataUrl;
+          const prev = $("#pm-prev");
+          if (prev) { prev.classList.add("has-img"); prev.innerHTML = `<img src="${dataUrl}" alt="">`; }
+          const clr = $("#pm-clear"); if (clr) clr.style.display = "";
+          haptic(14);
+        } catch (e) { toast("לא הצלחנו לטעון את התמונה", "", "⚠️"); }
         return;
       }
       if (a.dataset.slotOpen !== undefined && a.type === "checkbox") {
