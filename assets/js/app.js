@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "97";
+  const APP_VERSION = "98";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -2268,11 +2268,11 @@
         </div>
       </div>`).join("");
     return `
-      ${!waOk ? `<div class="card notice-card">📱 כדי שלקוחות יוכלו לפנות אליך בוואטסאפ על מוצר, יש להזין מספר טלפון נייד ב<b>הגדרות ← טלפון</b>.</div>` : ""}
+      ${!waOk ? `<div class="card notice-card">📱 כדי להוסיף מוצרים צריך קודם להזין מספר טלפון נייד ב<b>הגדרות ← טלפון</b> — דרכו הלקוחות פונים בוואטסאפ.</div>` : ""}
       <div class="section-title">המוצרים שאתה מוכר</div>
       ${items || emptyState("🛍️", "אין עדיין מוצרים", "הוסיפו מוצר ראשון — קרם, שעווה, שמפו…")}
       <div style="height:14px"></div>
-      <button class="btn btn-primary" data-act="add-product">＋ הוספת מוצר</button>
+      <button class="btn btn-primary" data-act="add-product" ${waOk ? "" : 'disabled style="opacity:.5"'}>＋ הוספת מוצר</button>
       <p class="hint">הלקוחות רואים את המוצרים בעמוד ״מוצרים״, ויכולים לפנות אליך ישירות בוואטסאפ להזמנה.</p>
     `;
   }
@@ -4484,8 +4484,12 @@
           await Store.removeService(t.dataset.id); closeModal();
           toast("השירות נמחק", "", "🗑️"); render(); break;
 
-        // מוצרים
-        case "add-product": productModal(null); break;
+        // מוצרים — דורש מספר טלפון (בשבילו הלקוח פונה בוואטסאפ)
+        case "add-product":
+          if (!waIntl(Store.get().shop.phone || "")) {
+            toast("קודם צריך להזין מספר טלפון בהגדרות", "", "📵"); break;
+          }
+          productModal(null); break;
         case "edit-product": {
           const prod = (Store.get().products || []).find((p) => p.id === t.dataset.id);
           if (prod) productModal(prod); break;
