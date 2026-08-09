@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "94";
+  const APP_VERSION = "95";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1354,18 +1354,13 @@
   function bitOn(st) {
     return !!(st && st.shop && st.shop.bitEnabled && u.normalizePhone(st.shop.bitPhone || ""));
   }
-  function openBitApp() {
-    const ua = navigator.userAgent || "";
-    if (/android/i.test(ua)) {
-      // intent שמפעיל את המסך הראשי של ביט; אם לא מותקנת — נפילה לחנות Play
-      const intent = "intent://#Intent;action=android.intent.action.MAIN;" +
-        "category=android.intent.category.LAUNCHER;" +
-        "package=com.bnhp.payments.paymentsapp;" +
-        "S.browser_fallback_url=" + encodeURIComponent("https://play.google.com/store/apps/details?id=com.bnhp.payments.paymentsapp") + ";end";
-      try { location.href = intent; return; } catch (e) {}
-    }
-    // iOS או דסקטופ — פותחים את הדף הרשמי של ביט
-    openExternal("https://www.bitpay.co.il/app/");
+  async function openBitApp() {
+    const st = Store.get();
+    const phone = u.normalizePhone(st.shop.bitPhone || "");
+    const total = payCtx ? payCtx.price + payCtx.tip : 0;
+    const text = phone + " — ₪" + total;
+    try { await navigator.clipboard.writeText(phone); } catch (e) {}
+    toast("המספר הועתק! פתחו את ביט והעבירו " + u.fmtPrice(total), "good", "📋", 4000);
   }
 
   let payCtx = null;   // { bookingId, price, tip }
@@ -1401,9 +1396,9 @@
         <div class="pay-line"><span>סכום</span><b>${u.fmtPrice(total)}</b>
           <button type="button" class="btn btn-sm" data-act="pay-copy-amount">העתקה</button></div>
       </div>
-      <p class="hint" style="margin:10px 0 12px">העתיקו את המספר ואת הסכום (כפתורי ״העתקה״), פתחו את ביט והדביקו אותם שם, ואז חזרו לכאן וסמנו ״שילמתי״.</p>
+      <p class="hint" style="margin:10px 0 12px">לחצו ״העתקה ופתיחת ביט״ — המספר יועתק אוטומטית. פתחו את ביט, העבירו את הסכום, וחזרו לכאן לסמן ״שילמתי״.</p>
 
-      <button class="btn btn-primary" data-act="pay-open-bit">פתיחת ביט</button>
+      <button class="btn btn-primary" data-act="pay-open-bit">📋 העתקת המספר ופתיחת ביט</button>
       <button class="btn btn-wa" data-act="pay-done" style="margin-top:8px">✓ שילמתי — סיימתי</button>
       <button class="btn btn-ghost" data-act="pay-later" style="margin-top:8px">אשלם במספרה</button>
     `);
