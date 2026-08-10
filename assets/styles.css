@@ -801,34 +801,6 @@ select.input {
 }
 .preview-bar .btn:active { background: rgba(255,255,255,.34); }
 
-/* ==== תשלום בביט ==== */
-.pay-note {
-  display: flex; align-items: flex-start; gap: 10px; margin: 4px 0 14px;
-  padding: 11px 13px; border-radius: 13px; font-size: 13px; line-height: 1.55;
-  border: 1px solid rgba(56,189,248,.35); background: var(--sky-glow);
-}
-.pay-note span { font-size: 18px; flex: none; }
-.tip-row { display: flex; gap: 8px; }
-.tip-opt {
-  flex: 1; font: inherit; font-weight: 700; font-size: 14px; cursor: pointer;
-  padding: 11px 6px; border-radius: 12px;
-  border: 1.5px solid var(--line); background: var(--surface); color: var(--text);
-}
-.tip-opt.selected { border-color: var(--sky); background: var(--sky-glow); color: var(--sky-2); }
-.tip-opt:active { transform: scale(.96); }
-.pay-box { border: 1px solid var(--line); border-radius: 13px; background: var(--surface-2); padding: 4px 12px; margin-top: 12px; }
-.pay-line { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
-.pay-line:last-child { border-bottom: none; }
-.pay-line span { font-size: 12.5px; color: var(--muted); flex: none; min-width: 70px; }
-.pay-line b { flex: 1; font-size: 15px; letter-spacing: .3px; }
-.pay-line .btn { width: auto; flex: none; }
-.paid-line {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  margin-top: 6px; font-size: 12.5px; font-weight: 700; color: #b45309;
-}
-.paid-line.ok { color: var(--good); }
-.paid-line .btn { width: auto; padding: 5px 10px; font-size: 12px; }
-
 /* אישור מדיניות פרטיות באשף */
 .privacy-agree { margin-top: 16px; align-items: flex-start; }
 .privacy-agree span { font-size: 12.5px; line-height: 1.5; font-weight: 500; }

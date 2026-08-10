@@ -95,7 +95,6 @@ function apptTs(date, start) {
     const doneBc = new Set(st.bcIds || []);
     const doneRem = new Set(st.remIds || []);   // תזכורות שכבר נשלחו
     const doneDayRem = new Set(st.dayRemIds || []); // תזכורות "התור מחר" שכבר נשלחו
-    const donePaid = new Set(st.paidIds || []); // הודעות "הלקוח שילם" שכבר נשלחו
 
     const newAlerts = alerts.filter((a) => a && a.id && !doneAlerts.has(a.id) && apptTs(a.date, a.start) > now);
     const newBookings = bookings.filter((b) =>
@@ -110,9 +109,6 @@ function apptTs(date, start) {
       !doneCcancels.has(b.id) && apptTs(b.date, b.start) > now);
     // הודעות קבוצתיות חדשות שהמנהל שלח ללקוחות
     const newBc = broadcasts.filter((b) => b && b.id && b.text && !doneBc.has(b.id));
-    // לקוחות שסימנו שהעבירו תשלום בביט — התראה לספר כדי שיאמת
-    const newPaid = bookings.filter((b) =>
-      b && b.id && b.paidClaimed && !donePaid.has(b.id) && b.status !== "cancelled");
     // תזכורות לפני התור — נשלחות כשנותר פחות מ-reminderMinutes עד המועד
     const reminderMin = Number((shop.shop && shop.shop.reminderMinutes) || 60);
     const dueReminders = bookings.filter((b) => {
@@ -154,14 +150,6 @@ function apptTs(date, start) {
           `${b.userName || "לקוח"} — ${b.serviceName}, ${relDay(b.date)} בשעה ${b.start}`, "ccancel-" + b.id);
         doneCcancels.add(b.id);
       }
-      // הלקוח שילם בביט — לספר, כדי שיאמת מול אפליקציית ביט
-      for (const b of newPaid) {
-        const tip = b.tipAmount ? ` (כולל ₪${b.tipAmount} טיפ)` : "";
-        sent += await sendToUid("owner_" + sid, "💳 לקוח שילם בביט",
-          `${b.userName || "לקוח"} — ₪${b.paidAmount || b.price}${tip}\n${b.serviceName} · ${relDay(b.date)} בשעה ${b.start}`,
-          "paid-" + b.id);
-        donePaid.add(b.id);
-      }
       // תזכורת יום לפני — מגיעה כיממה מראש, כדי שיהיה זמן לבטל אם צריך
       for (const b of dueDayReminders) {
         sent += await sendToUid(b.userId, "📅 התור שלך מחר",
@@ -193,7 +181,6 @@ function apptTs(date, start) {
     if (firstRun) {
       dueReminders.forEach((b) => doneRem.add(b.id));
       dueDayReminders.forEach((b) => doneDayRem.add(b.id));
-      newPaid.forEach((b) => donePaid.add(b.id));
     }
     alerts.forEach((a) => a && a.id && doneAlerts.add(a.id));
     bookings.forEach((b) => b && b.id && doneBookings.add(b.id));
@@ -212,7 +199,6 @@ function apptTs(date, start) {
       bcIds: [...doneBc].slice(-200),
       remIds: [...doneRem].slice(-500),
       dayRemIds: [...doneDayRem].slice(-500),
-      paidIds: [...donePaid].slice(-500),
     };
     totalNewA += newAlerts.length; totalNewB += newBookings.length;
   }

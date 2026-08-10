@@ -37,9 +37,6 @@ UG.Store = (function () {
         name: d.shopName, tagline: d.tagline, phone: d.phone, address: d.address,
         slotStep: d.slotStep, reminderMinutes: d.reminderMinutes,
         staff: [],           // שמות הספרים (אם יש כמה) — לבחירת ספר מועדף ע״י הלקוח
-        bitEnabled: false,   // תשלום מראש בביט
-        bitPhone: "",        // מספר הביט של הספר (אליו הלקוח מעביר)
-        tipEnabled: true,    // אפשרות להוסיף טיפ בתשלום
       },
       schedule,
       services: [
@@ -82,6 +79,13 @@ UG.Store = (function () {
     if (!Array.isArray(s.reviews)) s.reviews = [];
     if (!Array.isArray(s.shop.staff)) s.shop.staff = [];
     if (!s.shop.address) s.shop.address = base.shop.address;
+    // ניקוי שרידים של תשלום בביט (הוסר) — מהגדרות המספרה ומהזמנות ישנות
+    delete s.shop.bitEnabled; delete s.shop.bitPhone; delete s.shop.tipEnabled;
+    s.bookings.forEach((b) => {
+      if (!b) return;
+      delete b.paidClaimed; delete b.paidConfirmed; delete b.paidAmount;
+      delete b.tipAmount; delete b.paidAt;
+    });
     // ניקוי רשומות שפג תוקפן (שעת התור כבר עברה)
     const nowTs = Date.now();
     s.waitlist = s.waitlist.filter((w) => u.dateTime(w.date, w.start).getTime() > nowTs);
@@ -520,9 +524,6 @@ UG.Store = (function () {
     s.shop.youtube = (data && data.youtube) || "";
     s.shop.logo = (data && data.logo) || "";
     s.shop.heardFrom = (data && data.heardFrom) || "";   // מאיפה הספר הגיע אלינו
-    s.shop.bitEnabled = !!(data && data.bitEnabled);
-    s.shop.bitPhone = (data && data.bitPhone) || "";
-    s.shop.tipEnabled = data && data.tipEnabled != null ? !!data.tipEnabled : true;
     s.shop.style = (data && data.style) || "sky";
     // שמות הספרים (אם המספרה בחרה כמה ספרים בשאלון)
     if (data && Array.isArray(data.staff)) {
@@ -849,28 +850,6 @@ UG.Store = (function () {
     return b;
   }
 
-  /* סימון שהלקוח שילם בביט. הצהרת הלקוח בלבד — הספר מאמת מול אפליקציית ביט
-     ומאשר סופית (paidConfirmed) מצד הניהול. */
-  async function markPaid(bookingId, amount, tip) {
-    refreshLocal();
-    const b = (state.bookings || []).find((x) => x.id === bookingId);
-    if (!b) return null;
-    b.paidClaimed = true;
-    b.paidAmount = Number(amount) || 0;
-    b.tipAmount = Number(tip) || 0;
-    b.paidAt = Date.now();
-    await persist();
-    return b;
-  }
-  async function setPaidConfirmed(bookingId, confirmed) {
-    refreshLocal();
-    const b = (state.bookings || []).find((x) => x.id === bookingId);
-    if (!b) return null;
-    b.paidConfirmed = !!confirmed;
-    await persist();
-    return b;
-  }
-
   /* ---------- רשימת המתנה ---------- */
   async function joinWaitlist(data) {
     refreshLocal();
@@ -945,7 +924,7 @@ UG.Store = (function () {
     setDay, saveShop, upsertService, removeService, upsertProduct, removeProduct,
     addContacts, removeContact, addBroadcast, addClosedDates, removeClosedDate,
     setSlotOpen, blockClient, unblockClient,
-    createBooking, setBookingStatus, deleteBooking, markPaid, setPaidConfirmed,
+    createBooking, setBookingStatus, deleteBooking,
     joinWaitlist, leaveWaitlist, consumeAlert, addReview, savePushToken,
     subscribeGallery, getGallery, addPhoto, removePhoto,
     createShop, shopExists, peekShop, passcodeTaken, registerPasscodeIfFree,
