@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "99";
+  const APP_VERSION = "100";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -932,27 +932,34 @@
     return `<span class="cd" data-countdown="${until}"><span class="cd-d">${dTxt}</span><bdi class="cd-t" dir="ltr">${hms}</bdi></span>`;
   }
   let trialTicker = null;
+  function tickTrial() {
+    const els = document.querySelectorAll("[data-countdown]");
+    if (!els.length) { stopTrialTicker(); return; }   // אין טיימר על המסך — לחסוך CPU
+    const now = Date.now();
+    let expired = false;
+    els.forEach((el) => {
+      const until = Number(el.dataset.countdown) || 0;
+      const left = until - now;
+      if (left <= 0) { expired = true; return; }
+      const total = Math.floor(left / 1000);
+      const days = Math.floor(total / 86400);
+      const hms = [Math.floor((total % 86400) / 3600), Math.floor((total % 3600) / 60), total % 60]
+        .map((n) => String(n).padStart(2, "0")).join(":");
+      const dEl = el.querySelector(".cd-d"), tEl = el.querySelector(".cd-t");
+      if (dEl) dEl.textContent = days > 0 ? days + (days === 1 ? " יום ו-" : " ימים ו-") : "";
+      if (tEl) tEl.textContent = hms;
+    });
+    if (expired) render();   // הגיע לאפס — הרינדור מחדש ינעל למסך התשלום
+  }
   function startTrialTicker() {
     if (trialTicker) return;
-    trialTicker = setInterval(() => {
-      const els = document.querySelectorAll("[data-countdown]");
-      if (!els.length) return;   // אין טיימר על המסך כרגע
-      const now = Date.now();
-      let expired = false;
-      els.forEach((el) => {
-        const until = Number(el.dataset.countdown) || 0;
-        const left = until - now;
-        if (left <= 0) { expired = true; return; }
-        const total = Math.floor(left / 1000);
-        const days = Math.floor(total / 86400);
-        const hms = [Math.floor((total % 86400) / 3600), Math.floor((total % 3600) / 60), total % 60]
-          .map((n) => String(n).padStart(2, "0")).join(":");
-        const dEl = el.querySelector(".cd-d"), tEl = el.querySelector(".cd-t");
-        if (dEl) dEl.textContent = days > 0 ? days + (days === 1 ? " יום ו-" : " ימים ו-") : "";
-        if (tEl) tEl.textContent = hms;
-      });
-      if (expired) render();   // הגיע לאפס — הרינדור מחדש ינעל למסך התשלום
-    }, 1000);
+    if (view.route !== "owner") return;                                 // ללקוחות אין טיימר
+    if (!document.querySelector("[data-countdown]")) return;             // אין טיימר במסך → לא צריך
+    trialTicker = setInterval(tickTrial, 1000);
+  }
+  function stopTrialTicker() {
+    if (!trialTicker) return;
+    clearInterval(trialTicker); trialTicker = null;
   }
 
   // באנר עדין במסך הניהול — ספירת ימי ניסיון / התראה על מנוי שמסתיים
@@ -1940,6 +1947,13 @@
   }
 
   /* ---------- קוד QR לקישור הלקוחות (מקומי, ללא רשת) ---------- */
+  // qrcode.js נטען עצל (רק כשצריך) כדי לחסוך ~57KB בטעינה הראשונה של כל לקוח.
+  let qrLoaded = typeof qrcode !== "undefined";
+  function ensureQrCode() {
+    if (qrLoaded) return Promise.resolve();
+    if (!UG.loadQrCode) return Promise.reject();
+    return UG.loadQrCode().then(() => { qrLoaded = true; });
+  }
   function qrDataUrl(text, cell, margin) {
     try {
       if (typeof qrcode === "undefined") return "";
@@ -1949,7 +1963,8 @@
       return qr.createDataURL(cell || 6, margin == null ? 4 : margin);
     } catch (e) { return ""; }
   }
-  function downloadQr() {
+  async function downloadQr() {
+    await ensureQrCode();
     const url = qrDataUrl(clientLink(), 16, 4);
     if (!url) { toast("לא ניתן ליצור קוד QR", "", "⚠️"); return; }
     try {
@@ -1959,10 +1974,21 @@
       toast("קוד ה-QR הורד — אפשר להדפיס ולתלות 📷", "good", "⬇️");
     } catch (e) { toast("ההורדה נכשלה", "", "⚠️"); }
   }
-  // כרטיס QR משותף (מוצג בדף הפרסום ובהגדרות)
+  // כרטיס QR משותף (מוצג בדף הפרסום ובהגדרות).
+  // qrcode.js נטען עצל — בפעם הראשונה שהעמוד מוצג יוצג פלייסהולדר, ולאחר שהספרייה נטענה נרנדר מחדש.
   function qrShareCard() {
     const url = qrDataUrl(clientLink(), 6, 4);
-    if (!url) return "";
+    if (!url) {
+      ensureQrCode().then(() => { if (!isEditingRoot()) render(); }).catch(() => {});
+      return `
+      <div class="section-title">📷 קוד QR למספרה</div>
+      <div class="card qr-card">
+        <div class="qr-img" style="display:grid;place-items:center;background:var(--surface-3);color:var(--muted);font-size:26px">⏳</div>
+        <div class="qr-body">
+          <div class="hint" style="margin:0">טוען את קוד ה-QR…</div>
+        </div>
+      </div>`;
+    }
     return `
       <div class="section-title">📷 קוד QR למספרה</div>
       <div class="card qr-card">
@@ -3403,7 +3429,16 @@
   /* =======================================================================
      רינדור ראשי
      =======================================================================*/
+  /* קונסולידציה — קריאות render() קרובות בזמן מתאחדות לרינדור אחד ב-frame הבא.
+     חשוב כי כל mutation מקומית מפעילה גם emit מקומי וגם echo מהשרת → ללא כינוס נקבל
+     שני רינדורים מלאים על כל פעולה. rAF גם מסתנכרן עם ציור המסך כך שהמעברים חלקים יותר. */
+  let _renderScheduled = false;
   function render() {
+    if (_renderScheduled) return;
+    _renderScheduled = true;
+    requestAnimationFrame(() => { _renderScheduled = false; renderNow(); });
+  }
+  function renderNow() {
     syncNav();   // הקלטת ניווט ל"אחורה" חכם (לפני הצגת המסך)
     if (view.onboarding) { document.title = "BarberTor — תורים לספרים"; $("#root").innerHTML = renderOnboarding(); return; }
     if (view.notFound) { document.title = "BarberTor"; $("#root").innerHTML = renderNotFound(); return; }

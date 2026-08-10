@@ -24,9 +24,13 @@
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <!-- טעינה לא-חוסמת של גופן Heebo: הדפדפן שם media="print" בזמן ההורדה כדי שלא לחסום צביעה,
+       ומחליף ל-"all" ברגע שהקובץ מוכן. פונטים של המערכת מוצגים ב-פרק הזמן הקצר של ההורדה. -->
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&display=swap"
+        rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"></noscript>
   <script>try { document.documentElement.setAttribute("data-theme", localStorage.getItem("ug_theme") || "dark"); } catch (e) {}</script>
-  <link rel="stylesheet" href="assets/styles.css?v=99" />
+  <link rel="stylesheet" href="assets/styles.css?v=100" />
 </head>
 <body>
   <div class="app">
@@ -39,17 +43,33 @@
     <div class="modal" id="modal"></div>
   </div>
 
-  <!-- הגדרות -->
-  <script src="config.js?v=99"></script>
-  <!-- ספריות צד-שלישי (מקומי, ללא רשת) -->
-  <script src="assets/js/qrcode.js?v=99"></script>
+  <!-- הגדרות. defer שומר על סדר הריצה אבל לא חוסם parsing של ה-HTML. -->
+  <script src="config.js?v=100" defer></script>
   <!-- לוגיקה -->
-  <script src="assets/js/util.js?v=99"></script>
-  <script src="assets/js/store.js?v=99"></script>
-  <script src="assets/js/auth.js?v=99"></script>
-  <script src="assets/js/notify.js?v=99"></script>
-  <script src="assets/js/fcm.js?v=99"></script>
-  <script src="assets/js/email.js?v=99"></script>
-  <script src="assets/js/app.js?v=99"></script>
+  <script src="assets/js/util.js?v=100" defer></script>
+  <script src="assets/js/store.js?v=100" defer></script>
+  <script src="assets/js/auth.js?v=100" defer></script>
+  <script src="assets/js/notify.js?v=100" defer></script>
+  <script src="assets/js/fcm.js?v=100" defer></script>
+  <script src="assets/js/email.js?v=100" defer></script>
+  <script src="assets/js/app.js?v=100" defer></script>
+  <!-- qrcode.js (~57KB) נטען רק כשצריך אותו — בעמוד "פרסום" של הבעלים. -->
+  <script>
+    (function(){
+      window.UG = window.UG || {};
+      var loading = null;
+      UG.loadQrCode = function(){
+        if (typeof qrcode !== "undefined") return Promise.resolve();
+        if (loading) return loading;
+        loading = new Promise(function(res, rej){
+          var s = document.createElement("script");
+          s.src = "assets/js/qrcode.js?v=99";
+          s.onload = res; s.onerror = rej;
+          document.head.appendChild(s);
+        });
+        return loading;
+      };
+    })();
+  </script>
 </body>
 </html>
