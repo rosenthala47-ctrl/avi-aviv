@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "101";
+  const APP_VERSION = "102";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -93,6 +93,7 @@
   let clientCancelSeen = null;   // Set של תורים מבוטלים שהלקוח כבר טופלו (זיהוי ביטול חדש)
   let ownerCancelSeen = null;    // Set של ביטולים ע״י לקוחות שהבעלים כבר קיבל עליהם התראה
   let authAvail = false;    // האם התחברות מאובטחת (Firebase Auth) זמינה
+  let spamDismissed = 0;     // timestamp שבו הבעלים סגר את באנר הספאם
   let identity = loadIdentity();
 
   // כניסת מנהל נסתרת — 3 הקשות רצופות על הלוגו
@@ -862,6 +863,36 @@
         <div class="bn-sub">קבלו הודעה לטלפון בכל פעם שלקוח קובע תור — גם כשהאפליקציה סגורה</div>
       </div>
       <button class="btn btn-primary btn-sm" data-act="enable-notif" style="width:auto">הפעל</button>
+    </div>`;
+  }
+
+  function spamBanner() {
+    const st = Store.get();
+    const now = Date.now();
+    if (spamDismissed && now - spamDismissed < 3600000) return "";
+    const spamBookings = st.bookings.filter(function (b) {
+      return b.spam && b.status !== "cancelled" && u.dateTime(b.date, b.start).getTime() > now &&
+        b.createdAt > spamDismissed;
+    });
+    if (!spamBookings.length) return "";
+    var users = {};
+    spamBookings.forEach(function (b) {
+      var key = b.phone || b.userId || b.userName;
+      if (!users[key]) users[key] = { name: b.userName, count: 0 };
+      users[key].count++;
+    });
+    var names = Object.keys(users).map(function (k) { return users[k]; });
+    var lines = names.map(function (n) {
+      return esc(n.name || "לקוח") + " — " + n.count + " תורים חשודים";
+    }).join("<br>");
+    return `
+    <div class="banner warn spam-banner">
+      <span class="bn-ico">🛡️</span>
+      <div class="bn-body">
+        <div class="bn-title">זוהתה פעילות חריגה</div>
+        <div class="bn-sub">${lines}<br>כדאי לבדוק שזה לא ספאם. אפשר לחסום לקוח מלשונית ״תורים״.</div>
+      </div>
+      <button class="btn btn-sm" data-act="dismiss-spam" style="width:auto">הבנתי</button>
     </div>`;
   }
 
@@ -2152,7 +2183,7 @@
       b.status !== "cancelled" && u.dateTime(b.date, b.start).getTime() > now).length;
 
     const banners = locked ? "" :
-      subBanner() + (view.ownerTab !== "settings" ? ownerNotifBanner() : "");
+      subBanner() + spamBanner() + (view.ownerTab !== "settings" ? ownerNotifBanner() : "");
 
     const tabLabel = locked ? "המנוי הסתיים" : ({
       cal: "יומן", hours: "שעות", services: "שירותים", products: "מוצרים", bookings: "תורים",
@@ -2218,10 +2249,10 @@
     const body = `<div class="card" style="padding:6px 14px">` + slots.map((s) => {
       if (s.booking) {
         return `
-        <div class="slot-line booked">
+        <div class="slot-line booked${s.booking.spam ? " spam-slot" : ""}">
           <span class="sl-time">${s.start}</span>
           <div class="sl-mid">
-            <span class="sl-name">${esc(s.booking.userName || "לקוח")}</span>
+            <span class="sl-name">${esc(s.booking.userName || "לקוח")}${s.booking.spam ? " 🛡️" : ""}</span>
             <span class="sl-sub">${esc(s.booking.serviceName)}</span>
           </div>
           <span class="status-tag status-booked">תפוס</span>
@@ -2453,6 +2484,7 @@
           <div class="bk-sub">${esc(b.serviceName)} · ${b.phone ? `<a href="tel:${esc(b.phone)}">${esc(b.phone)}</a>` : "ללא טלפון"}</div>
           <div class="bk-sub">${esc(u.longDate(b.date))}${b.staff ? ` · <span class="staff-req">🧑‍🔧 ביקש: ${esc(b.staff)}</span>` : ""}</div>
           ${b.priorNoShow ? `<div class="noshow-warn">⚠️ הלקוח לא הגיע בעבר${b.priorNoShow > 1 ? ` (${b.priorNoShow} פעמים)` : ""}</div>` : ""}
+          ${b.spam ? `<div class="spam-warn">🛡️ ${b.spam.reason === "multi" ? "ללקוח " + b.spam.count + " תורים פעילים — כדאי לוודא שזה לגיטימי" : b.spam.reason === "burst" ? b.spam.count + " הזמנות ברצף קצר מאותו לקוח" : "הוזמנו " + b.spam.count + " תורים בזמן קצר"}</div>` : ""}
           ${b.paidClaimed ? `<div class="paid-line ${b.paidConfirmed ? "ok" : ""}">
             💳 ${b.paidConfirmed ? "שולם ואומת" : "הלקוח סימן ששילם"} · ${u.fmtPrice(b.paidAmount || b.price)}${b.tipAmount ? ` (כולל ₪${b.tipAmount} טיפ)` : ""}
             ${b.paidConfirmed ? "" : `<button class="btn btn-sm" data-act="confirm-paid" data-id="${b.id}">אימות</button>`}
@@ -4218,6 +4250,7 @@
         }
 
         case "enable-notif": handleEnableNotif(); break;
+        case "dismiss-spam": spamDismissed = Date.now(); render(); break;
         case "notif-help": notifHelp(); break;
         // כפיית עדכון — מנקה מטמון ומרענן, למקרה שהדפדפן מחזיק גרסה ישנה
         case "force-update": forceUpdate(); break;

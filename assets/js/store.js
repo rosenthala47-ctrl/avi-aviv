@@ -617,6 +617,30 @@ UG.Store = (function () {
     return persist();
   }
 
+  /* ---------- זיהוי הזמנות חשודות (ספאם) ---------- */
+  function detectSpam(cur, data, dphone) {
+    if (String(data.userId || "").indexOf("owner:") === 0) return null;
+    var now = Date.now();
+    var future = cur.bookings.filter(function (b) {
+      return b.status !== "cancelled" && u.dateTime(b.date, b.start).getTime() > now;
+    });
+    var mine = future.filter(function (b) {
+      return b.userId === data.userId ||
+        (dphone && b.phone && u.normalizePhone(b.phone) === dphone);
+    });
+    // 3+ תורים עתידיים פעילים מאותו לקוח
+    if (mine.length >= 3) return { reason: "multi", count: mine.length + 1 };
+    // 3+ הזמנות מאותו לקוח ב-15 הדקות האחרונות
+    var window15 = 15 * 60000;
+    var recentMine = mine.filter(function (b) { return b.createdAt && now - b.createdAt < window15; });
+    if (recentMine.length >= 2) return { reason: "burst", count: recentMine.length + 1 };
+    // 5+ הזמנות מלקוחות שונים ב-10 דקות
+    var window10 = 10 * 60000;
+    var recentAll = future.filter(function (b) { return b.createdAt && now - b.createdAt < window10; });
+    if (recentAll.length >= 5) return { reason: "flood", count: recentAll.length + 1 };
+    return null;
+  }
+
   /* ---------- הזמנת תור (עם הגנה מפני כפילויות) ---------- */
   function buildBooking(cur, data) {
     const svc = cur.services.find((s) => s.id === data.serviceId);
@@ -649,13 +673,17 @@ UG.Store = (function () {
       (b.userId === data.userId || (dphone && b.phone && u.normalizePhone(b.phone) === dphone))
     ).length;
 
+    // זיהוי פעילות חשודה (ספאם) — לא חוסם, רק מסמן לספר
+    const spam = detectSpam(cur, data, dphone);
+
     const booking = {
       id: u.uid(),
       serviceId: svc.id, serviceName: svc.name, price: svc.price, durationMin: svc.durationMin,
       date: data.date, start: data.start, end: u.toHHMM(endMin),
       userId: data.userId, userName: data.userName, phone: data.phone || "", email: data.email || "",
-      staff: data.staff || "",   // ספר מועדף שהלקוח ביקש (בקשה בלבד — לא מובטח)
-      priorNoShow: priorNoShow,  // מספר פעמים שהלקוח לא הגיע בעבר
+      staff: data.staff || "",
+      priorNoShow: priorNoShow,
+      spam: spam || undefined,
       status: "booked", createdAt: Date.now(),
     };
     cur.bookings.push(booking);

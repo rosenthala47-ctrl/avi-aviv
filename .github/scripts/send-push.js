@@ -127,8 +127,13 @@ function apptTs(date, start) {
       }
       for (const b of newBookings) {
         const warn = b.priorNoShow ? "\n⚠️ הלקוח לא הגיע בפעם הקודמת" : "";
-        sent += await sendToUid("owner_" + sid, "📅 תור חדש נקבע",
-          `${b.userName} — ${b.serviceName}, ${relDay(b.date)} בשעה ${b.start}${warn}`, "newbook-" + b.id);
+        const spamWarn = b.spam ? "\n🛡️ פעילות חריגה — " +
+          (b.spam.reason === "multi" ? b.spam.count + " תורים פעילים מאותו לקוח" :
+           b.spam.reason === "burst" ? b.spam.count + " הזמנות ברצף קצר" :
+           b.spam.count + " תורים הוזמנו בזמן קצר") : "";
+        sent += await sendToUid("owner_" + sid,
+          b.spam ? "🛡️ תור חדש — פעילות חריגה" : "📅 תור חדש נקבע",
+          `${b.userName} — ${b.serviceName}, ${relDay(b.date)} בשעה ${b.start}${warn}${spamWarn}`, "newbook-" + b.id);
       }
       for (const b of newCancels) {
         sent += await sendToUid(b.userId, "❌ התור שלך בוטל",

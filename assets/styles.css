@@ -197,6 +197,13 @@
   border: 1px solid rgba(248,113,113,.35); border-radius: 8px; padding: 3px 9px;
   font-size: 12px; font-weight: 700;
 }
+.spam-warn {
+  margin-top: 6px; display: inline-block; background: rgba(251,191,36,.12); color: #fbbf24;
+  border: 1px solid rgba(251,191,36,.3); border-radius: 8px; padding: 3px 9px;
+  font-size: 12px; font-weight: 600;
+}
+.spam-slot { border-inline-start: 3px solid #fbbf24; }
+.spam-banner .bn-title { color: #fbbf24; }
 /* חופשות — צ'יפים */
 .vac-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .vac-chip {
