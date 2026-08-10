@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "103";
+  const APP_VERSION = "104";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -928,20 +928,39 @@
     const p = plans[0];
     return p.price + " ₪ " + (p.per || "");
   }
-  // כרטיסי בחירת מסלול — אם הוגדר payUrl הכפתור מוביל לתשלום, אחרת להוראות
+  /* קישור וואטסאפ להזמנת מסלול מסוים — ההודעה כבר מוכנה, כולל שם המסלול,
+     המחיר וזיהוי המספרה, כדי שנדע בדיוק מי פונה ומה הוא רוצה. */
+  function planWaHref(p) {
+    const cfg = UG_CONFIG.subscription || {};
+    if (!cfg.waPhone) return "";
+    const st = Store.get();
+    const name = (st && st.shop && st.shop.name) || "";
+    const msg = "שלום! אני רוצה להפעיל מנוי ל-BarberTor.\n" +
+      "המסלול: " + (p.name || "") + " — " + p.price + " ₪ " + (p.per || "") + "\n" +
+      "המספרה: " + name + " (" + SHOP + ")";
+    return "https://wa.me/" + cfg.waPhone + "?text=" + encodeURIComponent(msg);
+  }
+
+  // כרטיסי בחירת מסלול — payUrl מוביל לסליקה; אחרת וואטסאפ עם הודעה מוכנה למסלול
   function planCards() {
     const plans = subPlans();
     if (!plans.length) return "";
-    return `<div class="pw-plans">` + plans.map((p) => `
+    return `<div class="pw-plans">` + plans.map((p) => {
+      const wa = planWaHref(p);
+      const cta = p.payUrl
+        ? `<a class="btn btn-primary btn-sm" href="${esc(p.payUrl)}" target="_blank" rel="noopener">בחירה ותשלום</a>`
+        : wa
+        ? `<a class="btn btn-primary btn-sm" href="${esc(wa)}" target="_blank" rel="noopener" data-act="plan-pick" data-plan="${esc(p.id || "")}">בחירה</a>`
+        : `<button class="btn btn-primary btn-sm" data-act="show-upgrade">בחירה</button>`;
+      return `
       <div class="pw-plan${p.badge ? " best" : ""}">
         ${p.badge ? `<span class="pw-plan-badge">${esc(p.badge)}</span>` : ""}
         <div class="pw-plan-name">${esc(p.name || "")}</div>
         <div class="pw-plan-price">${esc(String(p.price))} <span>₪</span></div>
         <div class="pw-plan-per">${esc(p.per || "")}${p.note ? ` · ${esc(p.note)}` : ""}</div>
-        ${p.payUrl
-          ? `<a class="btn btn-primary btn-sm" href="${esc(p.payUrl)}" target="_blank" rel="noopener">בחירה ותשלום</a>`
-          : `<button class="btn btn-primary btn-sm" data-act="show-upgrade">בחירה</button>`}
-      </div>`).join("") + `</div>`;
+        ${cta}
+      </div>`;
+    }).join("") + `</div>`;
   }
 
   // כפתור פנייה בוואטסאפ להפעלת מנוי — כולל שם/כתובת המספרה כדי שנדע מי פונה
@@ -3079,6 +3098,7 @@
         <div class="stat-chip"><div class="sc-num">${rows.length}</div><div class="sc-lbl">תספורות שאושרו</div></div>
         <div class="stat-chip"><div class="sc-num">${u.fmtPrice(total)}</div><div class="sc-lbl">הכנסות החודש</div></div>
       </div>
+      ${rows.length ? `<button class="btn btn-sm" data-act="export-report" style="margin-bottom:12px">📊 ייצוא לאקסל</button>` : ""}
       ${table}
       <p class="hint">הדוח מציג תורים שהלקוח אישר בהם הגעה. בתחילת כל חודש הטבלה מתחילה מאפס — אפשר לדפדף לחודשים קודמים עם החצים.</p>
       <div class="section-title">ביקורות לקוחות${avg ? ` · ממוצע ${avg} ★` : ""}</div>
@@ -3427,6 +3447,11 @@
             ${[30, 60, 90, 120].map((n) => `<option value="${n}" ${st.shop.reminderMinutes === n ? "selected" : ""}>${n} דקות לפני</option>`).join("")}
           </select>
         </div>
+        <label class="ab-custom">
+          <input type="checkbox" id="set-remind-day" ${st.shop.remindDayBefore !== false ? "checked" : ""}>
+          <span>לשלוח גם תזכורת יום לפני התור</span>
+        </label>
+        <p class="hint" style="margin:4px 0 14px">תזכורת נוספת שנשלחת כיממה מראש — מקטינה ביטולים ואי-הגעות.</p>
         <button class="btn btn-primary" data-act="save-settings">שמירת הגדרות</button>
       </div>
 
@@ -3564,25 +3589,62 @@
     location.reload();
   }
 
+  /* ---------- ייצוא הדוח לאקסל ----------
+     קובץ CSV עם BOM של UTF-8 — כך אקסל מזהה עברית נכון ופותח אותו בלחיצה. */
+  function csvCell(v) {
+    const s = v === null || v === undefined ? "" : String(v);
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  function downloadFile(name, text, mime) {
+    try {
+      const blob = new Blob([text], { type: (mime || "text/plain") + ";charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      return true;
+    } catch (e) { return false; }
+  }
+  function exportReportCsv() {
+    const st = Store.get();
+    const ym = view.statMonth || ymNow();
+    const rows = st.bookings
+      .filter((b) => b.status === "confirmed" && b.date.startsWith(ym))
+      .map((b) => ({ b, ts: u.dateTime(b.date, b.start).getTime() }))
+      .sort((a, z) => a.ts - z.ts)
+      .map((x) => x.b);
+    if (!rows.length) { toast("אין נתונים לייצוא בחודש זה", "", "📊"); return; }
+    const head = ["תאריך", "שעה", "לקוח", "טלפון", "שירות", "ספר", "מחיר", "שולם בביט", "טיפ"];
+    const lines = [head.map(csvCell).join(",")];
+    let total = 0, tips = 0;
+    rows.forEach((b) => {
+      total += Number(b.price || 0);
+      tips += Number(b.tipAmount || 0);
+      lines.push([
+        b.date, b.start, b.userName || "לקוח", b.phone || "", b.serviceName || "",
+        b.staff || "", Number(b.price || 0),
+        b.paidConfirmed ? "כן" : (b.paidClaimed ? "ממתין לאימות" : "לא"),
+        Number(b.tipAmount || 0) || "",
+      ].map(csvCell).join(","));
+    });
+    lines.push("");
+    lines.push([csvCell("סה״כ " + rows.length + " תספורות"), "", "", "", "", "", total, "", tips || ""].join(","));
+    const name = "barbertor-" + SHOP + "-" + ym + ".csv";
+    const ok = downloadFile(name, "﻿" + lines.join("\r\n"), "text/csv");
+    toast(ok ? "הדוח הורד — נפתח באקסל ✓" : "הייצוא נכשל", ok ? "good" : "", ok ? "📊" : "⚠️");
+  }
+
   /* ---------- גיבוי ושחזור ---------- */
   let pendingBackup = null;   // הגיבוי שנבחר, ממתין לאישור הדריסה
 
   function downloadBackup(withGallery) {
-    try {
-      const dump = Store.exportData(!!withGallery);
-      const blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "barbertor-" + SHOP + "-" + u.dateKey(new Date()) + ".json";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-      toast("הגיבוי הורד ✓", "good", "💾");
-    } catch (e) {
-      toast("ההורדה נכשלה", "", "⚠️");
-    }
+    let dump;
+    try { dump = Store.exportData(!!withGallery); }
+    catch (e) { toast("ההורדה נכשלה", "", "⚠️"); return; }
+    const name = "barbertor-" + SHOP + "-" + u.dateKey(new Date()) + ".json";
+    const ok = downloadFile(name, JSON.stringify(dump, null, 2), "application/json");
+    toast(ok ? "הגיבוי הורד ✓" : "ההורדה נכשלה", ok ? "good" : "", ok ? "💾" : "⚠️");
   }
 
   async function handleBackupFile(file) {
@@ -4479,6 +4541,7 @@
         case "enable-notif": handleEnableNotif(); break;
         case "dismiss-spam": spamDismissed = Date.now(); render(); break;
         case "notif-help": notifHelp(); break;
+        case "export-report": exportReportCsv(); break;
         case "backup-download": downloadBackup(false); break;
         case "backup-download-full": downloadBackup(true); break;
         case "backup-restore": { const f = $("[data-backupfile]"); if (f) f.click(); break; }
@@ -5105,6 +5168,7 @@
       phone: $("#set-phone").value.trim(),
       slotStep: Number($("#set-step").value),
       reminderMinutes: Number($("#set-remind").value),
+      remindDayBefore: !($("#set-remind-day") && !$("#set-remind-day").checked),
     }, socPatch));
     toast("ההגדרות נשמרו ✓", "good", "⚙️"); render();
   }

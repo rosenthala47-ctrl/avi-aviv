@@ -94,6 +94,7 @@ function apptTs(date, start) {
     const doneCcancels = new Set(st.ccancelIds || st.cancelIds || []);
     const doneBc = new Set(st.bcIds || []);
     const doneRem = new Set(st.remIds || []);   // תזכורות שכבר נשלחו
+    const doneDayRem = new Set(st.dayRemIds || []); // תזכורות "התור מחר" שכבר נשלחו
     const donePaid = new Set(st.paidIds || []); // הודעות "הלקוח שילם" שכבר נשלחו
 
     const newAlerts = alerts.filter((a) => a && a.id && !doneAlerts.has(a.id) && apptTs(a.date, a.start) > now);
@@ -119,6 +120,15 @@ function apptTs(date, start) {
       const lead = apptTs(b.date, b.start) - now;
       return lead > 0 && lead <= reminderMin * 60000;
     });
+    /* תזכורת "התור מחר" — נשלחת כשנותרו בין 18 ל-26 שעות עד התור.
+       חלון בשעות (ולא "תאריך מחר") כדי שלא יהיה תלוי באזור הזמן של הראנר,
+       שרץ ב-UTC בעוד המספרות בישראל. ה-dedup מבטיח שליחה אחת בלבד. */
+    const dayBeforeOn = (shop.shop && shop.shop.remindDayBefore) !== false;
+    const dueDayReminders = dayBeforeOn ? bookings.filter((b) => {
+      if (!b || !b.id || !b.userId || b.status === "cancelled" || doneDayRem.has(b.id)) return false;
+      const lead = apptTs(b.date, b.start) - now;
+      return lead > 18 * 3600000 && lead <= 26 * 3600000;
+    }) : [];
 
     if (!firstRun) {
       for (const a of newAlerts) {
@@ -152,6 +162,12 @@ function apptTs(date, start) {
           "paid-" + b.id);
         donePaid.add(b.id);
       }
+      // תזכורת יום לפני — מגיעה כיממה מראש, כדי שיהיה זמן לבטל אם צריך
+      for (const b of dueDayReminders) {
+        sent += await sendToUid(b.userId, "📅 התור שלך מחר",
+          `${b.serviceName} · ${relDay(b.date)} בשעה ${b.start}\n${shopName}`, "dayrem-" + b.id);
+        doneDayRem.add(b.id);
+      }
       // תזכורת לפני התור — מסמנים כנשלח רק אחרי השליחה בפועל
       for (const b of dueReminders) {
         const mins = Math.max(1, Math.round((apptTs(b.date, b.start) - now) / 60000));
@@ -174,7 +190,11 @@ function apptTs(date, start) {
 
     // סמן הכל כטופל. שים לב: doneRem מתמלא רק מתזכורות שנשלחו בפועל —
     // אסור לסמן כאן את כל התורים, אחרת אף תזכורת עתידית לא תישלח.
-    if (firstRun) { dueReminders.forEach((b) => doneRem.add(b.id)); newPaid.forEach((b) => donePaid.add(b.id)); }
+    if (firstRun) {
+      dueReminders.forEach((b) => doneRem.add(b.id));
+      dueDayReminders.forEach((b) => doneDayRem.add(b.id));
+      newPaid.forEach((b) => donePaid.add(b.id));
+    }
     alerts.forEach((a) => a && a.id && doneAlerts.add(a.id));
     bookings.forEach((b) => b && b.id && doneBookings.add(b.id));
     // ביטול מסומן כטופל בסט המתאים לפי מי שביטל — כך שני הכיוונים אינם משתיקים זה את זה
@@ -191,6 +211,7 @@ function apptTs(date, start) {
       ccancelIds: [...doneCcancels].slice(-500),
       bcIds: [...doneBc].slice(-200),
       remIds: [...doneRem].slice(-500),
+      dayRemIds: [...doneDayRem].slice(-500),
       paidIds: [...donePaid].slice(-500),
     };
     totalNewA += newAlerts.length; totalNewB += newBookings.length;
