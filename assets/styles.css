@@ -932,6 +932,22 @@ select.input {
 .adm-shop.pend { border-color: rgba(251,191,36,.6); box-shadow: 0 6px 16px rgba(251,191,36,.14); }
 .adm-btns { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
 .adm-btns .btn { width: auto; flex: 1; min-width: 74px; }
+/* סטטיסטיקה בפאנל המנויים */
+.adm-stats {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px;
+}
+.adm-stat {
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px;
+  padding: 10px 8px; text-align: center;
+}
+.adm-stat .as-num { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.adm-stat .as-lbl { font-size: 11px; color: var(--muted); margin-top: 3px; font-weight: 600; }
+.adm-stat.ok .as-num { color: #34d399; }
+.adm-stat.trial .as-num { color: var(--sky-2); }
+.adm-stat.exp .as-num { color: var(--bad); }
+.adm-stat.pend .as-num { color: #fbbf24; }
+/* אזור מסוכן — מחיקת מספרה */
+.danger-zone { border-color: rgba(248,113,113,.4); background: linear-gradient(120deg, rgba(248,113,113,.07), var(--surface)); }
 .banner .bn-ico { font-size: 24px; flex: none; }
 .banner .bn-body { flex: 1; min-width: 0; }
 .banner .bn-title { font-weight: 700; font-size: 14.5px; }

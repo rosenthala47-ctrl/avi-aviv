@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "102";
+  const APP_VERSION = "103";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -557,7 +557,10 @@
           <button class="btn btn-google" data-act="ag-google"><span class="g-ico">${googleIcoSvg()}</span>המשך עם Google</button>
           <div class="auth-or"><span>או</span></div>
           <button class="btn" data-act="ag-phone-form">המשך עם טלפון</button>
-          <p class="hint" style="margin-top:18px"><a href="privacy.html" target="_blank" rel="noopener" style="color:var(--muted)">מדיניות פרטיות</a></p>
+          <p class="hint" style="margin-top:18px">
+            <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--muted)">מדיניות פרטיות</a>
+            · <a href="terms.html" target="_blank" rel="noopener" style="color:var(--muted)">תנאי שימוש</a>
+          </p>
         </div></div>
       </div>`;
   }
@@ -1129,10 +1132,44 @@
     return { label: "הסתיים — ממתין לתשלום", cls: "exp" };
   }
 
+  /* סטטיסטיקה כוללת — מחושבת מהאינדקס שכבר נטען, בלי קריאות נוספות */
+  function adminStatsHtml() {
+    const cfg = UG_CONFIG.subscription || {};
+    const now = Date.now();
+    const trialMs = (Number(cfg.trialDays) || 30) * 86400000;
+    let active = 0, trial = 0, expired = 0, pending = 0, newMonth = 0, newWeek = 0, revenue = 0;
+    adminShops.forEach((s) => {
+      if (s.pending) pending++;
+      if (s.paidUntil && s.paidUntil > now) { active++; revenue += 35; }
+      else if (!s.createdAt) active++;                      // מספרה ותיקה ללא הגבלה
+      else if (now < s.createdAt + trialMs) trial++;
+      else expired++;
+      if (s.createdAt && now - s.createdAt < 30 * 86400000) newMonth++;
+      if (s.createdAt && now - s.createdAt < 7 * 86400000) newWeek++;
+    });
+    const total = adminShops.length;
+    const conv = (active + expired) ? Math.round(active / (active + expired) * 100) : 0;
+    const cell = (num, lbl, cls) =>
+      `<div class="adm-stat ${cls || ""}"><div class="as-num">${num}</div><div class="as-lbl">${lbl}</div></div>`;
+    return `
+      <div class="adm-stats">
+        ${cell(total, "סה״כ מספרות")}
+        ${cell(active, "מנוי פעיל", "ok")}
+        ${cell(trial, "בניסיון", "trial")}
+        ${cell(expired, "פג תוקף", "exp")}
+        ${cell(pending, "ממתין לאישור", "pend")}
+        ${cell(newWeek, "נרשמו השבוע")}
+        ${cell(newMonth, "נרשמו החודש")}
+        ${cell(conv + "%", "המרה לתשלום")}
+        ${cell("₪" + revenue, "הכנסה חודשית*", "ok")}
+      </div>
+      <p class="hint" style="margin:-6px 0 12px;font-size:11px">* הערכה גסה לפי ₪35 למנוי פעיל — לא מבחין בין חודשי לשנתי.</p>`;
+  }
+
   function renderAdminList() {
     const el = $("#adm-list"); if (!el) return;
     if (!adminShops.length) { el.innerHTML = `<p class="hint">אין עדיין מספרות</p>`; return; }
-    el.innerHTML = adminShops.map((s) => {
+    el.innerHTML = adminStatsHtml() + adminShops.map((s) => {
       const st = admShopStatus(s);
       return `
       <div class="adm-shop${s.pending ? " pend" : ""}">
@@ -1284,6 +1321,8 @@
       </p>
       <p class="hint" style="text-align:center;margin-top:8px">
         <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--muted)">מדיניות פרטיות</a>
+        · <a href="terms.html" target="_blank" rel="noopener" style="color:var(--muted)">תנאי שימוש</a>
+        · <span data-act="delete-my-data" style="color:var(--muted);text-decoration:underline;cursor:pointer">מחיקת הנתונים שלי</span>
       </p>
     `;
   }
@@ -1482,7 +1521,9 @@
         לניהול התורים ולשליחת תזכורות. לא מוכרים ולא מעבירים את הפרטים לאף אחד.
       </p>
       <p class="hint" style="margin:0 0 14px">
-        <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--sky)">קראו את מדיניות הפרטיות המלאה ›</a>
+        <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--sky)">מדיניות הפרטיות ›</a>
+        &nbsp;·&nbsp;
+        <a href="terms.html" target="_blank" rel="noopener" style="color:var(--sky)">תנאי השימוש ›</a>
       </p>
       <button class="btn btn-primary" data-act="accept-privacy">אני מאשר/ת ומסכים/ה</button>
     `);
@@ -3428,14 +3469,33 @@
         <button class="btn btn-sm" data-act="force-update" style="margin-top:12px">🔄 בדיקת עדכון</button>
       </div>
 
+      <div class="section-title">💾 גיבוי הנתונים</div>
+      <div class="card">
+        <p class="hint" style="margin-top:0">הורידו עותק של כל נתוני המספרה — תורים, לקוחות, שירותים, מוצרים ושעות פעילות. שמרו אותו במקום בטוח. מומלץ לגבות אחת לחודש.</p>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn btn-primary btn-sm" data-act="backup-download">⬇️ הורדת גיבוי</button>
+          <button class="btn btn-sm" data-act="backup-download-full">⬇️ כולל תמונות</button>
+        </div>
+        <p class="hint" style="margin:12px 0 0">שחזור מגיבוי <b>דורס</b> את כל הנתונים הנוכחיים במספרה.</p>
+        <button class="btn btn-sm" data-act="backup-restore" style="margin-top:10px">⬆️ שחזור מקובץ גיבוי</button>
+        <input type="file" accept="application/json,.json" data-backupfile style="display:none">
+      </div>
+
       <div class="section-title">יציאה</div>
       <div class="card">
         <p class="hint" style="margin-top:0">יציאה מהניהול במכשיר הזה — שימושי במכשיר משותף או להחלפת מספרה. הנתונים נשמרים; כדי להיכנס שוב צריך את הכתובת והסיסמה.</p>
         <button class="btn btn-danger" data-act="owner-logout" style="margin-top:12px">🚪 יציאה / החלפת מספרה</button>
       </div>
 
+      <div class="section-title" style="color:var(--bad)">⚠️ אזור מסוכן</div>
+      <div class="card danger-zone">
+        <p class="hint" style="margin-top:0">מחיקת המספרה תמחק <b>לצמיתות</b> את כל התורים, הלקוחות, התמונות, המוצרים וההגדרות. הקישור שלכם יתפנה ואחרים יוכלו לקחת אותו. <b>אי אפשר לשחזר.</b></p>
+        <button class="btn btn-danger" data-act="delete-shop" style="margin-top:12px">🗑️ מחיקת המספרה לצמיתות</button>
+      </div>
+
       <p class="hint" style="text-align:center;margin-top:20px">
         <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--muted)">מדיניות פרטיות</a>
+        · <a href="terms.html" target="_blank" rel="noopener" style="color:var(--muted)">תנאי שימוש</a>
         · BarberTor
       </p>
     `;
@@ -3449,6 +3509,173 @@
       <button class="btn btn-danger" data-act="do-owner-logout">כן, יציאה</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
     `);
+  }
+
+  /* ---------- מחיקת נתוני לקוח ----------
+     מבטל תורים עתידיים, מוחק ביקורות/רשימת המתנה ומנקה את הזיהוי במכשיר.
+     תורים שכבר התקיימו נשארים אצל הספר כרישום עסקי — כך גם מוסבר ללקוח. */
+  function confirmDeleteMyData() {
+    const st = Store.get();
+    const now = Date.now();
+    const future = (st.bookings || []).filter((b) =>
+      b.userId === identity.userId && b.status !== "cancelled" &&
+      u.dateTime(b.date, b.start).getTime() > now);
+    openModal(`
+      <div class="m-title">מחיקת הנתונים שלי</div>
+      <div class="m-sub">${esc(st.shop.name || "")}</div>
+      <p style="font-size:14px;margin:14px 0 0">יימחקו:</p>
+      <ul style="font-size:14px;color:var(--muted);margin:8px 20px 0;line-height:1.9">
+        <li>הפרטים שלכם במכשיר הזה (שם, טלפון, אימייל)</li>
+        <li>${future.length} תורים עתידיים — יבוטלו</li>
+        <li>הביקורות שכתבתם והמתנות לתור שהתפנה</li>
+      </ul>
+      <p class="hint" style="margin:14px 0 0;line-height:1.7">תורים שכבר התקיימו נשארים ביומן של הספר כרישום עסקי. להסרתם פנו ישירות למספרה או במייל שבמדיניות הפרטיות.</p>
+      <button class="btn btn-danger" data-act="do-delete-my-data" style="margin-top:18px">כן, מחקו את הנתונים שלי</button>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
+    `);
+  }
+
+  async function doDeleteMyData() {
+    const btn = $("[data-act='do-delete-my-data']"); if (btn) { btn.disabled = true; btn.textContent = "מוחק…"; }
+    const st = Store.get();
+    const now = Date.now();
+    const uid = identity.userId;
+    try {
+      // ביטול כל התורים העתידיים
+      const future = (st.bookings || []).filter((b) =>
+        b.userId === uid && b.status !== "cancelled" &&
+        u.dateTime(b.date, b.start).getTime() > now);
+      for (const b of future) {
+        if (clientCancelSeen) clientCancelSeen.add(b.id);
+        await Store.setBookingStatus(b.id, "cancelled", "client");
+      }
+      // ביקורות + רשימת המתנה + התראות שממתינות
+      await Store.purgeClient(uid);
+    } catch (e) {}
+    // ניקוי מקומי
+    try {
+      localStorage.removeItem("ug_identity");
+      localStorage.removeItem(PRIVACY_KEY);
+      localStorage.removeItem("ug_ctab__" + SHOP);
+      sessionStorage.removeItem("ug_gauth");
+    } catch (e) {}
+    try { if (UG.Auth) await UG.Auth.signOut(); } catch (e) {}
+    closeModal();
+    location.reload();
+  }
+
+  /* ---------- גיבוי ושחזור ---------- */
+  let pendingBackup = null;   // הגיבוי שנבחר, ממתין לאישור הדריסה
+
+  function downloadBackup(withGallery) {
+    try {
+      const dump = Store.exportData(!!withGallery);
+      const blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "barbertor-" + SHOP + "-" + u.dateKey(new Date()) + ".json";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      toast("הגיבוי הורד ✓", "good", "💾");
+    } catch (e) {
+      toast("ההורדה נכשלה", "", "⚠️");
+    }
+  }
+
+  async function handleBackupFile(file) {
+    if (!file) return;
+    let dump;
+    try { dump = JSON.parse(await file.text()); }
+    catch (e) { toast("הקובץ אינו JSON תקין", "", "⚠️"); return; }
+    if (!dump || dump.format !== "barbertor-backup") {
+      toast("הקובץ אינו גיבוי של BarberTor", "", "⚠️"); return;
+    }
+    const when = dump.exportedAt ? u.longDate(u.dateKey(new Date(dump.exportedAt))) : "לא ידוע";
+    const bk = (dump.state && dump.state.bookings || []).length;
+    const from = dump.shopId && dump.shopId !== SHOP
+      ? `<p class="hint" style="color:var(--bad);margin:8px 0 0">⚠️ הגיבוי הזה שייך למספרה אחרת (${esc(dump.shopId)}).</p>` : "";
+    pendingBackup = dump;
+    openModal(`
+      <div class="m-title">שחזור מגיבוי</div>
+      <div class="m-sub">מתאריך ${esc(when)} · ${bk} תורים</div>
+      <p style="font-size:14px;color:var(--muted);margin:10px 0 0">כל הנתונים הנוכחיים במספרה יימחקו ויוחלפו בנתונים מהגיבוי. פעולה זו אינה הפיכה.</p>
+      ${from}
+      <button class="btn btn-danger" data-act="do-restore" style="margin-top:18px">שחזור — דרוס את הנתונים</button>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
+    `);
+  }
+
+  async function doRestore() {
+    if (!pendingBackup) { closeModal(); return; }
+    const btn = $("[data-act='do-restore']"); if (btn) { btn.disabled = true; btn.textContent = "משחזר…"; }
+    const res = await Store.importData(pendingBackup);
+    pendingBackup = null;
+    closeModal();
+    if (!res.ok) { toast(res.reason || "השחזור נכשל", "", "⚠️"); return; }
+    toast("הנתונים שוחזרו ✓", "good", "💾");
+    render();
+  }
+
+  /* ---------- מחיקת המספרה לצמיתות ----------
+     שלב אימות בהקלדה (ולא רק "כן") — הפעולה בלתי הפיכה ומוחקת עסק שלם. */
+  function confirmDeleteShop() {
+    const st = Store.get();
+    const bk = (st.bookings || []).filter((b) => b.status !== "cancelled").length;
+    const cl = (st.contacts || []).length;
+    openModal(`
+      <div class="m-title" style="color:var(--bad)">🗑️ מחיקת המספרה</div>
+      <div class="m-sub">${esc(st.shop.name || SHOP)} · ${esc(SHOP)}</div>
+      <p style="font-size:14px;margin:14px 0 0">יימחקו לצמיתות:</p>
+      <ul style="font-size:14px;color:var(--muted);margin:8px 20px 0;line-height:1.9">
+        <li>${bk} תורים${cl ? " ו-" + cl + " אנשי קשר" : ""}</li>
+        <li>כל השירותים, המוצרים והתמונות</li>
+        <li>שעות הפעילות וההגדרות</li>
+        <li>הקישור האישי — יתפנה לאחרים</li>
+      </ul>
+      <p style="font-size:14px;color:var(--bad);font-weight:700;margin:14px 0 0">אי אפשר לשחזר. מומלץ להוריד גיבוי קודם.</p>
+      <button class="btn btn-sm" data-act="backup-download-full" style="margin-top:10px;width:100%">⬇️ הורדת גיבוי עכשיו</button>
+      <div class="field" style="margin-top:18px">
+        <label>להמשך, הקלידו <b>מחק</b> בתיבה:</label>
+        <input class="input" id="del-confirm" placeholder="מחק" autocomplete="off">
+      </div>
+      <button class="btn btn-danger" data-act="do-delete-shop">מחיקה סופית</button>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
+    `);
+    setTimeout(() => { const el = $("#del-confirm"); if (el) el.focus(); }, 100);
+  }
+
+  async function doDeleteShop() {
+    const el = $("#del-confirm");
+    if (!el || el.value.trim() !== "מחק") {
+      toast("הקלידו ״מחק״ כדי לאשר", "", "⌨️");
+      if (el) el.focus();
+      return;
+    }
+    const btn = $("[data-act='do-delete-shop']"); if (btn) { btn.disabled = true; btn.textContent = "מוחק…"; }
+    const st = Store.get();
+    let passHash = "";
+    try { if (st.shop.ownerPass) passHash = await sha256Hex(String(st.shop.ownerPass)); } catch (e) {}
+    const res = await Store.deleteShop(passHash);
+    if (!res.ok) {
+      if (btn) { btn.disabled = false; btn.textContent = "מחיקה סופית"; }
+      toast(res.reason || "המחיקה נכשלה", "", "⚠️");
+      return;
+    }
+    // ניקוי כל העקבות המקומיים של המספרה הזו
+    try {
+      localStorage.removeItem(AUTHKEY);
+      localStorage.removeItem(ROUTEKEY);
+      localStorage.removeItem("ug_ctab__" + SHOP);
+      if ((localStorage.getItem("ug_my_shop") || "") === SHOP) localStorage.removeItem("ug_my_shop");
+      if ((localStorage.getItem("ug_last_shop") || "") === SHOP) localStorage.removeItem("ug_last_shop");
+    } catch (e) {}
+    try { if (UG.Auth) await UG.Auth.signOut(); } catch (e) {}
+    closeModal();
+    location.hash = "";
+    location.reload();
   }
 
   /* =======================================================================
@@ -3752,7 +3979,7 @@
               </div>
               <label class="ab-custom privacy-agree">
                 <input type="checkbox" id="wz-privacy" ${d.privacyOk ? "checked" : ""}>
-                <span>קראתי ואני מסכים/ה ל<a href="privacy.html" target="_blank" rel="noopener">מדיניות הפרטיות</a> ולתנאי השימוש</span>
+                <span>קראתי ואני מסכים/ה ל<a href="privacy.html" target="_blank" rel="noopener">מדיניות הפרטיות</a> ול<a href="terms.html" target="_blank" rel="noopener">תנאי השימוש</a></span>
               </label>
             </div>
           </div>`;
@@ -4252,6 +4479,14 @@
         case "enable-notif": handleEnableNotif(); break;
         case "dismiss-spam": spamDismissed = Date.now(); render(); break;
         case "notif-help": notifHelp(); break;
+        case "backup-download": downloadBackup(false); break;
+        case "backup-download-full": downloadBackup(true); break;
+        case "backup-restore": { const f = $("[data-backupfile]"); if (f) f.click(); break; }
+        case "do-restore": doRestore(); break;
+        case "delete-shop": confirmDeleteShop(); break;
+        case "do-delete-shop": doDeleteShop(); break;
+        case "delete-my-data": confirmDeleteMyData(); break;
+        case "do-delete-my-data": doDeleteMyData(); break;
         // כפיית עדכון — מנקה מטמון ומרענן, למקרה שהדפדפן מחזיק גרסה ישנה
         case "force-update": forceUpdate(); break;
         case "owner-login": promptOwner(); break;   // כניסת מנהל ייעודית (במקום 3 לחיצות על הלוגו)
@@ -4675,6 +4910,13 @@
       if (a.dataset.coverfile !== undefined && a.type === "file") {
         if (a.files && a.files[0]) handleCoverUpload(a.files[0]);
         a.value = "";
+        return;
+      }
+      // קובץ גיבוי לשחזור — נפתח במודאל אישור לפני הדריסה
+      if (a.dataset.backupfile !== undefined && a.type === "file") {
+        const f = a.files && a.files[0];
+        a.value = "";
+        if (f) handleBackupFile(f);
         return;
       }
       // תמונת מוצר — נשמרת זמנית על המודאל עד לחיצת ״שמירה״

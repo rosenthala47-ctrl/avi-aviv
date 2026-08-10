@@ -196,7 +196,14 @@ function apptTs(date, start) {
     totalNewA += newAlerts.length; totalNewB += newBookings.length;
   }
 
+  // ניקוי מצב יתום — מספרות שנמחקו. הלקוח אינו יכול לכתוב ל-system/ (כללי אבטחה),
+  // לכן המחיקה של הרשומה כאן מתבצעת בריצה הבאה של הקרון.
+  const live = new Set(shopIds);
+  let pruned = 0;
+  Object.keys(perShop).forEach((k) => { if (!live.has(k)) { delete perShop[k]; pruned++; } });
+
   await stateRef.set({ shops: perShop, updatedAt: now });
+  if (pruned) console.log(`נוקו ${pruned} רשומות של מספרות שנמחקו.`);
   if (firstRun) console.log("ריצה ראשונה — סימון מצב קיים בלבד, ללא שליחה.");
   else console.log(`הושלם. מספרות=${shopIds.length}, alerts חדשים=${totalNewA}, bookings חדשים=${totalNewB}, פושים שנשלחו=${sent}`);
 })().catch((e) => { console.error(e); process.exitCode = 1; })

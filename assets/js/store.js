@@ -395,6 +395,80 @@ UG.Store = (function () {
     return true;
   }
 
+  /* ---------- גיבוי ושחזור ----------
+     מייצא את כל נתוני המספרה לקובץ JSON יחיד (כולל גלריה), כדי שהספר
+     יוכל לשמור עותק אצלו. השחזור דורס את המצב הנוכחי לחלוטין. */
+  function exportData(withGallery) {
+    return {
+      format: "barbertor-backup",
+      version: 1,
+      shopId: shopId,
+      exportedAt: Date.now(),
+      state: JSON.parse(JSON.stringify(state || {})),
+      // הגלריה כוללת תמונות מלאות (data URLs) ומנפחת מאוד את הקובץ — לפי בחירה
+      gallery: withGallery ? JSON.parse(JSON.stringify(galleryCache || [])) : [],
+    };
+  }
+
+  async function importData(dump) {
+    if (!dump || dump.format !== "barbertor-backup" || !dump.state) {
+      return { ok: false, reason: "הקובץ אינו גיבוי תקין של BarberTor" };
+    }
+    const incoming = normalize(JSON.parse(JSON.stringify(dump.state)));
+    // הכתובת והבעלות נשארות של המספרה הנוכחית — גיבוי לא מעביר בעלות
+    const keep = (state && state.shop) || {};
+    incoming.shop = Object.assign({}, incoming.shop, {
+      ownerUid: keep.ownerUid || incoming.shop.ownerUid || "",
+      createdAt: keep.createdAt || incoming.shop.createdAt || Date.now(),
+    });
+    state = incoming;
+    await persist();
+    // תמונות גלריה — מתווספות לקיימות (לא דורסות), כי אין מחיקה קבוצתית
+    if (Array.isArray(dump.gallery) && dump.gallery.length && backend.addPhoto) {
+      const have = new Set((galleryCache || []).map((p) => p.dataUrl));
+      for (const p of dump.gallery) {
+        if (!p || !p.dataUrl || have.has(p.dataUrl)) continue;
+        try { await backend.addPhoto({ dataUrl: p.dataUrl, caption: p.caption || "", createdAt: p.createdAt || Date.now() }); } catch (e) {}
+      }
+      reloadGallery();
+    }
+    emit();
+    return { ok: true };
+  }
+
+  /* ---------- מחיקת מספרה לצמיתות ----------
+     מוחק את כל הצמתים ששייכים למספרה. פעולה בלתי הפיכה. */
+  async function deleteShop(passHash) {
+    await connect();
+    if (!_conn || _conn.kind !== "rtdb") {
+      // מצב מקומי — מנקים את האחסון של המספרה הזו
+      try {
+        Object.keys(localStorage).forEach((k) => {
+          if (k.indexOf(shopId) !== -1 && k.indexOf("ug_") === 0) localStorage.removeItem(k);
+        });
+      } catch (e) {}
+      return { ok: true };
+    }
+    const db = _conn.db;
+    // הנתונים עצמם — אם זה נכשל, המחיקה נכשלה
+    try {
+      await db.ref("shops/" + shopId).remove();
+    } catch (e) {
+      return { ok: false, reason: (e && e.message) || "המחיקה נכשלה" };
+    }
+    // שאר הצמתים — מיטב המאמץ; כשלון בודד לא הופך את המחיקה לכושלת.
+    // system/pushState אינו נכתב מהלקוח (כללי האבטחה) — הקרון מנקה אותו לבד.
+    const rest = [
+      "shopIndex/" + shopId,
+      "subs/" + shopId,
+      "gallery/" + shopId,
+      "pushTokens/owner_" + shopId,
+    ];
+    if (passHash) rest.push("passHashes/" + passHash);
+    await Promise.allSettled(rest.map((p) => db.ref(p).remove()));
+    return { ok: true };
+  }
+
   /* ---------- ייחודיות קוד הכניסה בין מספרות ----------
      שומרים רק hash של הקוד (passHashes/<hash> = true), כך שאפשר לזהות התנגשות
      בלי לחשוף את הקודים עצמם. עובד רק במצב ענן. */
@@ -832,6 +906,22 @@ UG.Store = (function () {
     await persist();
   }
 
+  /* מחיקת עקבות של לקוח לפי בקשתו — ביקורות, המתנות והתראות ממתינות.
+     תורים אינם נמחקים כאן: עתידיים מבוטלים ע״י הקורא, ועבר נשאר כרישום עסקי. */
+  async function purgeClient(userId) {
+    if (!userId) return;
+    refreshLocal();
+    state.reviews = (state.reviews || []).filter((r) => r.userId !== userId);
+    state.waitlist = (state.waitlist || []).filter((w) => w.userId !== userId);
+    state.alerts = (state.alerts || []).filter((a) => a.userId !== userId);
+    await persist();
+    // אסימוני הפוש של המכשיר — כדי שלא יקבל יותר התראות
+    try {
+      await connect();
+      if (_conn && _conn.kind === "rtdb") await _conn.db.ref("pushTokens/" + userId).remove();
+    } catch (e) {}
+  }
+
   return {
     init, subscribe, get,
     setDay, saveShop, upsertService, removeService, upsertProduct, removeProduct,
@@ -842,6 +932,7 @@ UG.Store = (function () {
     subscribeGallery, getGallery, addPhoto, removePhoto,
     createShop, shopExists, peekShop, passcodeTaken, registerPasscodeIfFree,
     getSub, markPaymentPending, adminListShops, adminSetPaid,
+    exportData, importData, deleteShop, purgeClient,
     get mode() { return backend ? backend.mode : "local"; },
     get shopId() { return shopId; },
     get notFound() { return notFound; },
