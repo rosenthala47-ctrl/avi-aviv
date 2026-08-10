@@ -741,6 +741,20 @@ UG.Store = (function () {
     });
     if (clash) return { ok: false, reason: "התור נתפס הרגע — נסו שעה אחרת" };
 
+    /* חלון ההרשמה. הבעלים פטור משניהם — הוא עדיין יכול לרשום לקוח מזדמן
+       ברגע האחרון, או לתעד תספורת שכבר קרתה. */
+    if (String(data.userId || "").indexOf("owner:") !== 0) {
+      const lead = u.dateTime(data.date, data.start).getTime() - Date.now();
+      // מועד שכבר עבר — לא ניתן להזמין (גם אם דף ישן עדיין מציג אותו)
+      if (lead <= 0) return { ok: false, reason: "המועד הזה כבר עבר — בחרו מועד אחר" };
+      // "סגירת הרשמה": משבצת פנויה שנותרו לה פחות מהזמן שהוגדר מוסתרת מהלקוח,
+      // ולכן גם אי אפשר להזמין אותה — למשל מדף שנשאר פתוח ברקע.
+      const cutoffMin = Math.max(0, Number((cur.shop && cur.shop.hideFreeBeforeMin) || 0));
+      if (cutoffMin && lead < cutoffMin * 60000) {
+        return { ok: false, reason: "ההרשמה לתור הזה נסגרה — בחרו מועד אחר" };
+      }
+    }
+
     // כמה פעמים הלקוח הזה כבר לא הגיע בעבר (לפי מזהה או טלפון) — כדי להתריע למנהל
     const priorNoShow = cur.bookings.filter((b) =>
       b.status === "noshow" &&
@@ -788,7 +802,11 @@ UG.Store = (function () {
     const t = u.toMin(start), end = t + step;
     if (t < u.toMin(sched.open) || end > u.toMin(sched.close)) return false;
     if ((cur.blocks || []).includes(dateKey + "|" + start)) return false;
-    if (u.dateTime(dateKey, start).getTime() <= Date.now()) return false;
+    const lead = u.dateTime(dateKey, start).getTime() - Date.now();
+    if (lead <= 0) return false;
+    // אחרי "סגירת ההרשמה" המשבצת כבר לא נחשבת פנויה — אין טעם להתריע שהתפנתה
+    const cutoffMin = Math.max(0, Number((cur.shop && cur.shop.hideFreeBeforeMin) || 0));
+    if (cutoffMin && lead < cutoffMin * 60000) return false;
     return !cur.bookings.some((b) =>
       b.status !== "cancelled" && b.date === dateKey &&
       t < u.toMin(b.end) && end > u.toMin(b.start));

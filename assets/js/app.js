@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "104";
+  const APP_VERSION = "105";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -362,6 +362,12 @@
       .map((k) => k.split("|")[1]);
   }
 
+  /* "סגירת הרשמה" — כמה דקות לפני התור מפסיקים להציג אותו ללקוחות אם הוא
+     עדיין פנוי. 0 / לא מוגדר = כבוי. משמש גם באפליקציה וגם בשכבת הנתונים. */
+  function hideFreeCutoffMin(st) {
+    return Math.max(0, Number((st && st.shop && st.shop.hideFreeBeforeMin) || 0));
+  }
+
   // רשת השעות שהלקוח רואה: שעות הפעילות (פחות חסומות) + שעות שנפתחו ידנית
   function gridSlots(dateKey) {
     const st = Store.get();
@@ -382,23 +388,35 @@
       const bs = u.toMin(b.start), be = u.toMin(b.end);
       return t < be && (t + step) > bs;
     }) || null;
+    /* משבצת פנויה שנותרו לה פחות מ-cutoff דקות — מוסתרת מהלקוח. מחשבים לפי
+       חותמת זמן מלאה (ולא דקות ביום) כדי שזה יעבוד גם כשהחלון חוצה חצות. */
+    const cutoffMs = hideFreeCutoffMin(st) * 60000;
+    const nowTs = now.getTime();
+    const hiddenAt = (start, booking) => {
+      if (!cutoffMs || booking) return false;
+      const lead = u.dateTime(dateKey, start).getTime() - nowTs;
+      return lead > 0 && lead < cutoffMs;
+    };
+    const mk = (start, t, blocked) => {
+      const booking = bookingAt(t);
+      return { start, booking, blocked, past: isToday && t <= nowMin, hidden: hiddenAt(start, booking) };
+    };
     const byStart = new Map();
     // שעות בתוך הפעילות
     if (active) for (let t = open; t + step <= close; t += step) {
       const start = u.toHHMM(t);
-      byStart.set(start, { start, booking: bookingAt(t), blocked: blocks.has(dateKey + "|" + start), past: isToday && t <= nowMin });
+      byStart.set(start, mk(start, t, blocks.has(dateKey + "|" + start)));
     }
     // שעות שנפתחו ידנית מחוץ לפעילות
     opened.forEach((start) => {
       if (byStart.has(start)) return;
-      const t = u.toMin(start);
-      byStart.set(start, { start, booking: bookingAt(t), blocked: false, past: isToday && t <= nowMin });
+      byStart.set(start, mk(start, u.toMin(start), false));
     });
     return [...byStart.values()].sort((a, z) => u.toMin(a.start) - u.toMin(z.start));
   }
 
-  /* רשת יום מלאה לתצוגת הבעלים (06:00–24:00) — כדי לפתוח שעות מעבר לפעילות.
-     available = השעה זמינה ללקוחות; inHours = בתוך שעות הפעילות הקבועות. */
+  /* רשת יום מלאה לתצוגת הבעלים (00:00–24:00) — כדי לפתוח כל שעה ביממה,
+     כולל לילה ומוקדם בבוקר. available = זמין ללקוחות; inHours = בתוך שעות הפעילות. */
   function ownerDayGrid(dateKey) {
     const st = Store.get();
     const dow = u.parseKey(dateKey).getDay();
@@ -407,13 +425,15 @@
     const open = active ? u.toMin(sched.open) : 0, close = active ? u.toMin(sched.close) : 0;
     const step = st.shop.slotStep || 45;
     const phase = active ? (open % step) : 0;      // יישור לרשת שעות הפעילות
-    const dayStart = 6 * 60, dayEnd = 24 * 60;
+    const dayStart = 0, dayEnd = 24 * 60;
     const now = new Date();
     const isToday = u.isSameDay(u.parseKey(dateKey), now);
     const nowMin = now.getHours() * 60 + now.getMinutes();
     const blocks = new Set(st.blocks || []);
     const opens = new Set(st.opens || []);
     const dayBookings = st.bookings.filter((b) => b.status !== "cancelled" && b.date === dateKey);
+    const cutoffMs = hideFreeCutoffMin(st) * 60000;
+    const nowTs = now.getTime();
     let t = dayStart; while (((t % step) + step) % step !== phase) t++;
     const slots = [];
     for (; t + step <= dayEnd; t += step) {
@@ -422,8 +442,12 @@
       const opened = opens.has(dateKey + "|" + start);
       const blocked = blocks.has(dateKey + "|" + start);
       const booking = dayBookings.find((b) => { const bs = u.toMin(b.start), be = u.toMin(b.end); return t < be && end > bs; }) || null;
+      const available = (inHours && !blocked) || opened;
+      // נסגר להרשמה: פנוי וזמין, אבל קרוב מדי למועד לפי הגדרת "סגירת ההרשמה"
+      const lead = u.dateTime(dateKey, start).getTime() - nowTs;
+      const signupClosed = !!cutoffMs && !booking && available && lead > 0 && lead < cutoffMs;
       slots.push({ start, booking, inHours, opened, past: isToday && t <= nowMin,
-        available: (inHours && !blocked) || opened });
+        available, signupClosed });
     }
     return slots;
   }
@@ -1288,7 +1312,7 @@
 
     // שעות — רשת אחידה; מסתירים משבצות שעברו/חסומות, מסמנים תפוסות
     let slotsHtml;
-    const allSlots = gridSlots(view.selDate).filter((s) => !s.past && !s.blocked);
+    const allSlots = gridSlots(view.selDate).filter((s) => !s.past && !s.blocked && !s.hidden);
     const hasFree = allSlots.some((s) => !s.booking);
     if (closed.has(view.selDate)) {
       slotsHtml = emptyState("🌴", "המספרה בחופשה ביום זה", "בחרו יום אחר מהיומן");
@@ -2131,7 +2155,7 @@
     if (!contact) return;
     const [dateKey, start] = key.split("|");
     // אם בינתיים השעה התפנתה — הצע להזמין ישר
-    const freeNow = gridSlots(dateKey).some((s) => s.start === start && !s.booking && !s.blocked && !s.past);
+    const freeNow = gridSlots(dateKey).some((s) => s.start === start && !s.booking && !s.blocked && !s.past && !s.hidden);
     if (freeNow) {
       closeModal();
       view.selDate = dateKey; view.selSlot = start; view.clientTab = "book";
@@ -2274,9 +2298,10 @@
     </div>`;
   }
 
+  // כל שעות היממה (00:00–24:00) — כדי לאפשר שעות פעילות גם בלילה ומוקדם בבוקר
   function timeOptions(selected) {
     let html = "";
-    for (let m = 6 * 60; m <= 24 * 60; m += 15) {
+    for (let m = 0; m <= 24 * 60; m += 15) {
       const v = u.toHHMM(m % (24 * 60) === 0 && m !== 0 ? 24 * 60 - 0 : m);
       const label = m === 24 * 60 ? "24:00" : v;
       const val = m === 24 * 60 ? "23:59" : v;
@@ -2318,13 +2343,15 @@
           <span class="status-tag status-booked">תפוס</span>
         </div>`;
       }
-      const state = s.available
+      const state = s.signupClosed
+        ? "נסגר להרשמה"
+        : s.available
         ? (s.inHours ? "פנוי" : "פתוח")
         : (s.inHours ? "לא פנוי" : "מחוץ לשעות");
       return `
       <div class="slot-line ${s.available ? "" : "off"} ${s.inHours ? "" : "extra"}">
         <span class="sl-time">${s.start}</span>
-        <div class="sl-mid"><span class="sl-state ${s.available ? "free" : "blocked"}">${state}${(s.available && !s.inHours) ? " ⏰" : ""}</span></div>
+        <div class="sl-mid"><span class="sl-state ${s.signupClosed ? "closed" : s.available ? "free" : "blocked"}">${state}${(s.available && !s.inHours && !s.signupClosed) ? " ⏰" : ""}</span></div>
         <label class="switch">
           <input type="checkbox" data-slot-open="${view.oDate}|${s.start}" data-inhours="${s.inHours ? "1" : "0"}" ${s.available ? "checked" : ""}>
           <span class="track"></span><span class="thumb"></span>
@@ -2337,7 +2364,7 @@
       <div class="days-scroll">${dayChips}</div>
       <div class="section-title">${esc(u.longDate(view.oDate))} · סימון זמינות</div>
       ${body}
-      <p class="hint">כל השעות מ-06:00 עד חצות מוצגות כאן. הדליקו מתג כדי לפתוח שעה ללקוחות — <b>גם מחוץ לשעות הפעילות הרגילות</b> (מסומן ⏰). כבו מתג כדי לסמן שעה כלא-פנויה. שעה שכבר נקבעה מסומנת ״תפוס״.</p>
+      <p class="hint">כל שעות היממה (00:00–24:00) מוצגות כאן — אפשר לפתוח תורים גם בלילה ומוקדם בבוקר. הדליקו מתג כדי לפתוח שעה ללקוחות — <b>גם מחוץ לשעות הפעילות הרגילות</b> (מסומן ⏰). כבו מתג כדי לסמן שעה כלא-פנויה. שעה שכבר נקבעה מסומנת ״תפוס״.</p>
     `;
   }
 
@@ -3452,6 +3479,13 @@
           <span>לשלוח גם תזכורת יום לפני התור</span>
         </label>
         <p class="hint" style="margin:4px 0 14px">תזכורת נוספת שנשלחת כיממה מראש — מקטינה ביטולים ואי-הגעות.</p>
+        <div class="field"><label>סגירת ההרשמה לפני התור</label>
+          <select class="input" id="set-hidefree">
+            <option value="0" ${!Number(st.shop.hideFreeBeforeMin) ? "selected" : ""}>ללא — אפשר להזמין עד הרגע האחרון</option>
+            ${[30, 60, 90, 120, 180, 240, 360, 720].map((n) => `<option value="${n}" ${Number(st.shop.hideFreeBeforeMin) === n ? "selected" : ""}>${n >= 60 ? (n % 60 ? (n / 60).toFixed(1) : n / 60) + " שעות לפני" : n + " דקות לפני"}</option>`).join("")}
+          </select>
+          <p class="hint" style="margin:6px 0 0">תור שנשאר פנוי כשנותר פחות מהזמן הזה ייעלם ממסך הלקוחות. למשל: אם תבחרו שעה, ותור של 14:00 עדיין פנוי ב-13:00 — הוא לא יוצג יותר. אצלכם ביומן הוא ממשיך להופיע, ותוכלו לרשום אליו לקוח מזדמן.</p>
+        </div>
         <button class="btn btn-primary" data-act="save-settings">שמירת הגדרות</button>
       </div>
 
@@ -4695,7 +4729,7 @@
         case "alert-book": {
           const { id, date, start } = t.dataset;
           view.clientTab = "book"; view.selDate = date;
-          const free = gridSlots(date).some((s) => s.start === start && !s.booking && !s.blocked && !s.past);
+          const free = gridSlots(date).some((s) => s.start === start && !s.booking && !s.blocked && !s.past && !s.hidden);
           if (free) {
             view.selSlot = start; render(); openConfirm();
           } else {
@@ -5169,6 +5203,7 @@
       slotStep: Number($("#set-step").value),
       reminderMinutes: Number($("#set-remind").value),
       remindDayBefore: !($("#set-remind-day") && !$("#set-remind-day").checked),
+      hideFreeBeforeMin: Number(($("#set-hidefree") && $("#set-hidefree").value) || 0),
     }, socPatch));
     toast("ההגדרות נשמרו ✓", "good", "⚙️"); render();
   }
