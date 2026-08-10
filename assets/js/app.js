@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "105";
+  const APP_VERSION = "106";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1370,9 +1370,9 @@
     `;
   }
 
-  /* כרטיס "התקן אפליקציה" בולט ללקוח — מוסתר אם כבר מותקן (מסך מלא) */
+  /* כרטיס "התקן אפליקציה" בולט ללקוח — מוסתר אם כבר מותקן */
   function installCard() {
-    if (isStandalone()) return "";
+    if (appInstalled()) return "";
     return `
       <div class="section-title">📲 קבעו תור בקליק — התקינו כאפליקציה</div>
       <div class="card">
@@ -1384,6 +1384,19 @@
           </div>
         </div>
         <button class="btn btn-primary btn-sm" data-act="install-app" style="width:100%;margin-top:13px">📲 התקנת האפליקציה</button>
+        ${isIOS() ? `<div class="hint" style="text-align:center;margin-top:8px">באייפון: לחצו על <b>שיתוף</b> ⬆️ ואז <b>״הוסף למסך הבית״</b></div>` : ""}
+      </div>`;
+  }
+
+  /* כרטיס התקנה להגדרות הספר — נעלם לגמרי אחרי שהאפליקציה מותקנת (מסך מלא),
+     כדי שהכפתור לא יופיע לאחר ההורדה. */
+  function installSettingsCard() {
+    if (appInstalled()) return "";
+    return `
+      <div class="section-title">📲 התקנה על מסך הבית</div>
+      <div class="card">
+        <p class="hint" style="margin-top:0;margin-bottom:12px">התקינו את BarberTor כאפליקציה — אייקון על מסך הבית, פתיחה מהירה וקבלת התראות גם כשהיא סגורה.</p>
+        <button class="btn btn-primary btn-sm" data-act="install-app" style="width:100%">📲 התקנת האפליקציה</button>
         ${isIOS() ? `<div class="hint" style="text-align:center;margin-top:8px">באייפון: לחצו על <b>שיתוף</b> ⬆️ ואז <b>״הוסף למסך הבית״</b></div>` : ""}
       </div>`;
   }
@@ -3489,6 +3502,8 @@
         <button class="btn btn-primary" data-act="save-settings">שמירת הגדרות</button>
       </div>
 
+      ${installSettingsCard()}
+
       <div class="section-title">התראות</div>
       <div class="card">
         <div class="conn-line" style="margin-bottom:12px">
@@ -4611,7 +4626,7 @@
           if (UG.Auth) UG.Auth.signOut().finally(() => { toast("התנתקת מהחשבון", "", "🔓"); render(); });
           break;
         case "install-app": doInstall(); break;
-        case "install-dismiss": suppressInstall(3); hideInstallBar(); break;
+        case "install-dismiss": suppressInstall(); hideInstallBar(); break;
         case "cookie-ok":
           localStorage.setItem("ug_cookie_ok", "1"); hideCookieBar();
           setTimeout(maybeShowInstall, 400); break;
@@ -5285,16 +5300,27 @@
      התקנה כאפליקציה (PWA) — הודעת "הוסף למסך הבית" בכניסה
      =======================================================================*/
   let deferredPrompt = null;
+  // ההודעה על המסך נשארת עד שמתקינים בפועל. ה-X רק מסתיר לסשן הנוכחי (בזיכרון,
+  // לא נשמר) — לכן היא חוזרת בטעינה הבאה כל עוד האפליקציה לא הותקנה.
+  let installDismissedSession = false;
   function isStandalone() {
     return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
   }
+  /* "האם האפליקציה מותקנת" לצורך הסתרת כפתורי ההתקנה. מסך-מלא הוא הסימן הוודאי,
+     אבל אחרי התקנה מהדפדפן המשתמש נשאר בלשונית רגילה (display-mode עדיין browser),
+     ולכן זוכרים את אירוע ההתקנה גם ב-localStorage כדי שהכפתור לא יחזור. */
+  function markInstalled() { try { localStorage.setItem("ug_installed", "1"); } catch (e) {} }
+  function appInstalled() {
+    if (isStandalone()) return true;
+    try { return localStorage.getItem("ug_installed") === "1"; } catch (e) { return false; }
+  }
   function isIOS() { return /iphone|ipad|ipod/i.test(navigator.userAgent); }
-  function installSuppressed() { return Date.now() < Number(localStorage.getItem("ug_install_dismiss") || 0); }
-  function suppressInstall(days) { localStorage.setItem("ug_install_dismiss", String(Date.now() + days * 86400000)); }
+  function installSuppressed() { return installDismissedSession; }
+  function suppressInstall() { installDismissedSession = true; }
   function hideInstallBar() { const b = document.getElementById("installBar"); if (b) b.classList.remove("show"); }
 
   function showInstallBar(mode) {
-    if (isStandalone() || installSuppressed()) return;
+    if (appInstalled() || installSuppressed()) return;
     let bar = document.getElementById("installBar");
     if (!bar) { bar = document.createElement("div"); bar.id = "installBar"; bar.className = "install-bar"; document.body.appendChild(bar); }
     const card = (body) => `<div class="install-card"><div class="ic-ico">📲</div>${body}<button class="ic-x" data-act="install-dismiss" aria-label="סגור">✕</button></div>`;
@@ -5317,15 +5343,16 @@
   }
 
   function maybeShowInstall() {
-    if (isStandalone() || installSuppressed() || !cookieAccepted()) return;  // לא מעל באנר העוגיות
+    if (appInstalled() || installSuppressed() || !cookieAccepted()) return;  // לא מעל באנר העוגיות
     if (deferredPrompt) showInstallBar("android");
     else if (isIOS()) showInstallBar("ios");
     else if (/android/i.test(navigator.userAgent)) showInstallBar("generic");
   }
   function initInstall() {
-    if (isStandalone()) return;
+    if (appInstalled()) return;
     window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferredPrompt = e; maybeShowInstall(); });
     window.addEventListener("appinstalled", () => {
+      markInstalled();                  // לזכור שהותקן — כדי שהכפתור לא יחזור בדפדפן
       hideInstallBar(); deferredPrompt = null;
       toast("האפליקציה הותקנה 🎉", "good", "📲");
       try { render(); } catch (e) {}   // להסתיר את כרטיס ההתקנה
