@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "110";
+  const APP_VERSION = "111";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -70,10 +70,10 @@
   }
 
   /* עמוד לקוח מצומצם: כל התוכן (מוצרים/ביקורות/גלריה/רשתות) בעמוד "בית" אחד,
-     עם כפתור "הזמנת תור" שמוביל לעמוד ההזמנה. כרגע נבדק על "try" בלבד לפני
-     החלה על כל המספרות. שנה את הרשימה כדי להחיל על עוד מספרות, או ["*"] לכולן. */
+     עם כפתור "הזמנת תור" שמוביל לעמוד ההזמנה. נבדק על "try" ואושר — מופעל
+     כעת על כל המספרות. */
   function condensedClient() {
-    return SHOP === "try";
+    return true;
   }
 
   /* האם להציג מקטע בעמוד הלקוח. ברירת מחדל: מוצג. הספר יכול לכבות מקטעים
@@ -88,7 +88,7 @@
   /* ---------- מצב תצוגה מקומי (לא נשמר בשרת) ---------- */
   const view = {
     route: (function () { const r = localStorage.getItem(ROUTEKEY); return r === "owner" || r === "client" ? r : "client"; })(), // client | owner
-    clientTab: (function () { const def = SHOP === "try" ? "home" : "book"; try { const t = localStorage.getItem("ug_ctab__" + SHOP); return ["book", "gallery", "products", "reviews", "mine", "home"].includes(t) ? t : def; } catch (e) { return def; } })(),   // נשמר כדי לא לאבד מיקום ברענון
+    clientTab: (function () { const def = condensedClient() ? "home" : "book"; try { const t = localStorage.getItem("ug_ctab__" + SHOP); return ["book", "gallery", "products", "reviews", "mine", "home"].includes(t) ? t : def; } catch (e) { return def; } })(),   // נשמר כדי לא לאבד מיקום ברענון
     ownerTab: (function () { try { return localStorage.getItem("ug_otab__" + SHOP) || "cal"; } catch (e) { return "cal"; } })(),  // cal | hours | services | bookings | clients | report | publish | settings
     selService: null,
     selStaff: "",        // ספר מועדף שהלקוח בחר (בקשה בלבד)
@@ -616,7 +616,7 @@
         <button class="btn btn-sm" data-act="exit-preview">חזרה לניהול ›</button>
       </div>` : "";
 
-    // מבנה מצומצם (כרגע "try"): בית | התורים שלי, וכפתור "הזמנת תור" בעמוד הבית
+    // מבנה מצומצם: בית | התורים שלי, וכפתור "הזמנת תור" בעמוד הבית
     if (condensedClient()) {
       if (!["home", "book", "mine"].includes(view.clientTab)) view.clientTab = "home";
       let cbody;
