@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "112";
+  const APP_VERSION = "113";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -2327,6 +2327,9 @@
     const todayCount = st.bookings.filter((b) => b.status !== "cancelled" && b.date === todayKey).length;
     // מנוי הסתיים — נועלים את הניהול ומציגים מסך הפעלה
     const locked = subStatus().state === "expired";
+    // לשוניות שעברו לתוך "הגדרות" במבנה המסודר (try): נגישות מתפריט הניהול,
+    // ומקבלות כפתור "חזרה להגדרות" בראש.
+    const SETTINGS_CHILDREN = ["hours", "services", "products", "clients", "report", "publish"];
     let body;
     if (locked) body = paywallBody();
     else if (view.ownerTab === "cal") body = ownerCal(st);
@@ -2338,6 +2341,9 @@
     else if (view.ownerTab === "report") body = ownerReport(st);
     else if (view.ownerTab === "publish") body = ownerPublish(st);
     else body = ownerSettings(st);
+    if (!locked && tidyOwner() && SETTINGS_CHILDREN.includes(view.ownerTab)) {
+      body = `<button class="btn btn-ghost btn-sm home-back" data-otab="settings">‹ חזרה להגדרות</button>` + body;
+    }
 
     const upcomingCount = st.bookings.filter((b) =>
       b.status !== "cancelled" && u.dateTime(b.date, b.start).getTime() > now).length;
@@ -2356,16 +2362,19 @@
       products: ["🛍️", "מוצרים"], bookings: ["🎟️", "תורים"], clients: ["👥", "לקוחות"],
       report: ["📊", "דוח"], publish: ["📣", "פרסום"], settings: ["⚙️", "הגדרות"],
     };
-    // סדר מסודר לפי שימוש: עבודה יומית → הצעה → תובנות → ניהול
+    // מסודר (try): רק עבודה יומית בסרגל — יומן, תורים, הגדרות. כל השאר בתוך ההגדרות.
     const tabOrder = tidyOwner()
-      ? ["cal", "bookings", "services", "products", "clients", "report", "hours", "publish", "settings"]
+      ? ["cal", "bookings", "settings"]
       : ["cal", "hours", "services", "products", "bookings", "clients", "report", "publish", "settings"];
     const tabBtn = (key) => {
       const [ico, label] = TAB_DEF[key];
       const icoHtml = key === "bookings"
         ? `<span class="tb-ico" style="position:relative">${ico}${upcomingCount ? `<span class="badge-count" style="inset-inline-start:auto;inset-inline-end:-10px;top:-6px">${upcomingCount}</span>` : ""}</span>`
         : `<span class="tb-ico">${ico}</span>`;
-      return `<button data-otab="${key}" class="${view.ownerTab === key ? "active" : ""}">${icoHtml}${label}</button>`;
+      // לשונית "הגדרות" פעילה גם כשגולשים בעמוד-בן שלה (שעות/שירותים/דוח וכו')
+      const active = view.ownerTab === key ||
+        (key === "settings" && tidyOwner() && SETTINGS_CHILDREN.includes(view.ownerTab));
+      return `<button data-otab="${key}" class="${active ? "active" : ""}">${icoHtml}${label}</button>`;
     };
 
     return `
@@ -3540,15 +3549,8 @@
           </label>`).join("")}
         <button class="btn btn-primary" data-act="save-settings" style="margin-top:14px">שמירה</button>
       </div>`;
-    const cBusiness = `
-      <div class="section-title">📇 פרטי העסק</div>
-      <div class="card">
-        <div class="field"><label>שם העסק</label>
-          <input class="input" id="set-name" value="${esc(st.shop.name)}"></div>
-        <div class="field"><label>תיאור קצר</label>
-          <input class="input" id="set-tag" value="${esc(st.shop.tagline || "")}"></div>
-        <div class="field"><label>קצת עלינו (יוצג ללקוחות בעמוד ההזמנה)</label>
-          <textarea class="input" id="set-about" rows="3" placeholder="ספרו על המספרה — ותק, התמחות, אווירה…" style="resize:vertical;line-height:1.6">${esc(st.shop.about || "")}</textarea></div>
+    // בלוק הרשתות החברתיות — משותף לכרטיס השטוח ולכרטיס המסודר
+    const socialBlock = `
         <div class="field"><label>רשתות חברתיות <span class="opt">(לא חובה)</span></label>
           <div class="hint" style="margin:0 0 10px">מלאו רק את מה שיש לכם. הלקוחות יראו אייקונים לחיצים בעמוד ההזמנה — לחיצה תפתח את העמוד שלכם ברשת.</div>
           ${SOCIAL_PLATFORMS.map((p) => `
@@ -3560,18 +3562,13 @@
                 <button type="button" class="btn btn-sm" data-act="soc-test" data-p="${p.key}" data-src="#set-${p.key}">פתחו לבדיקה ↗</button>
               </div>
             </div>`).join("")}
-        </div>
-        <div class="field"><label>כתובת המספרה (לכפתור ״איך מגיעים״)</label>
-          <input class="input" id="set-addr" value="${esc(st.shop.address || "")}" placeholder="רבי טרפון 12, ירושלים"></div>
-        <div class="field-row">
-          <div class="field"><label>טלפון</label>
-            <input class="input" id="set-phone" type="tel" value="${esc(st.shop.phone || "")}"></div>
-          <div class="field"><label>מרווח בין תורים</label>
-            <select class="input" id="set-step">
-              ${[30, 45, 60].map((n) => `<option value="${n}" ${st.shop.slotStep === n ? "selected" : ""}>${n} דקות</option>`).join("")}
-            </select>
-          </div>
-        </div>
+        </div>`;
+    // הגדרות תזכורות ומרווחי תורים — משותפות (בכרטיס נפרד במבנה המסודר)
+    const bookingFields = `
+        <div class="field"><label>מרווח בין תורים</label>
+          <select class="input" id="set-step">
+            ${[30, 45, 60].map((n) => `<option value="${n}" ${st.shop.slotStep === n ? "selected" : ""}>${n} דקות</option>`).join("")}
+          </select></div>
         <div class="field"><label>שליחת תזכורת ללקוח — כמה זמן לפני התור</label>
           <select class="input" id="set-remind">
             ${[30, 60, 90, 120].map((n) => `<option value="${n}" ${st.shop.reminderMinutes === n ? "selected" : ""}>${n} דקות לפני</option>`).join("")}
@@ -3588,7 +3585,47 @@
             ${[30, 60, 90, 120, 180, 240, 360, 720].map((n) => `<option value="${n}" ${Number(st.shop.hideFreeBeforeMin) === n ? "selected" : ""}>${n >= 60 ? (n % 60 ? (n / 60).toFixed(1) : n / 60) + " שעות לפני" : n + " דקות לפני"}</option>`).join("")}
           </select>
           <p class="hint" style="margin:6px 0 0">תור שנשאר פנוי כשנותר פחות מהזמן הזה ייעלם ממסך הלקוחות. למשל: אם תבחרו שעה, ותור של 14:00 עדיין פנוי ב-13:00 — הוא לא יוצג יותר. אצלכם ביומן הוא ממשיך להופיע, ותוכלו לרשום אליו לקוח מזדמן.</p>
-        </div>
+        </div>`;
+    // כרטיס פרטי העסק (זהות) — בלי הגדרות התורים
+    const cBusinessInfo = `
+      <div class="section-title">📇 פרטי העסק</div>
+      <div class="card">
+        <div class="field"><label>שם העסק</label>
+          <input class="input" id="set-name" value="${esc(st.shop.name)}"></div>
+        <div class="field"><label>תיאור קצר</label>
+          <input class="input" id="set-tag" value="${esc(st.shop.tagline || "")}"></div>
+        <div class="field"><label>קצת עלינו (יוצג ללקוחות בעמוד ההזמנה)</label>
+          <textarea class="input" id="set-about" rows="3" placeholder="ספרו על המספרה — ותק, התמחות, אווירה…" style="resize:vertical;line-height:1.6">${esc(st.shop.about || "")}</textarea></div>
+        ${socialBlock}
+        <div class="field"><label>כתובת המספרה (לכפתור ״איך מגיעים״)</label>
+          <input class="input" id="set-addr" value="${esc(st.shop.address || "")}" placeholder="רבי טרפון 12, ירושלים"></div>
+        <div class="field"><label>טלפון</label>
+          <input class="input" id="set-phone" type="tel" value="${esc(st.shop.phone || "")}"></div>
+        <button class="btn btn-primary" data-act="save-settings">שמירת הגדרות</button>
+      </div>`;
+    // כרטיס תורים ותזכורות — במבנה המסודר בלבד
+    const cBooking = `
+      <div class="section-title">⏰ תורים ותזכורות</div>
+      <div class="card">
+        ${bookingFields}
+        <button class="btn btn-primary" data-act="save-settings" style="margin-top:12px">שמירת הגדרות</button>
+      </div>`;
+    // כרטיס פרטי העסק המקורי (שטוח) — זהות + תורים יחד, לשאר המספרות
+    const cBusiness = `
+      <div class="section-title">📇 פרטי העסק</div>
+      <div class="card">
+        <div class="field"><label>שם העסק</label>
+          <input class="input" id="set-name" value="${esc(st.shop.name)}"></div>
+        <div class="field"><label>תיאור קצר</label>
+          <input class="input" id="set-tag" value="${esc(st.shop.tagline || "")}"></div>
+        <div class="field"><label>קצת עלינו (יוצג ללקוחות בעמוד ההזמנה)</label>
+          <textarea class="input" id="set-about" rows="3" placeholder="ספרו על המספרה — ותק, התמחות, אווירה…" style="resize:vertical;line-height:1.6">${esc(st.shop.about || "")}</textarea></div>
+        ${socialBlock}
+        <div class="field"><label>כתובת המספרה (לכפתור ״איך מגיעים״)</label>
+          <input class="input" id="set-addr" value="${esc(st.shop.address || "")}" placeholder="רבי טרפון 12, ירושלים"></div>
+        <div class="field"><label>טלפון</label>
+          <input class="input" id="set-phone" type="tel" value="${esc(st.shop.phone || "")}"></div>
+        ${bookingFields}
         <button class="btn btn-primary" data-act="save-settings">שמירת הגדרות</button>
       </div>`;
     const cInstall = installSettingsCard();
@@ -3645,17 +3682,37 @@
         · BarberTor
       </p>`;
 
-    // מבנה מסודר (כרגע "try"): כרטיסים מקובצים בקבוצות מתקפלות לפי נושא
+    // מבנה מסודר (כרגע "try"): תפריט ניהול בראש + כרטיסים מקובצים בקבוצות מתקפלות
     if (tidyOwner()) {
       const grp = (id, title, body) => body && body.trim() ? `
         <details class="set-group" id="setg-${id}"${setGroupOpen[id] ? " open" : ""}>
           <summary class="set-group-head"><span class="sg-title">${title}</span><span class="sg-chev">⌄</span></summary>
           <div class="set-group-body">${body}</div>
         </details>` : "";
-      return `<div class="set-groups">
-        ${grp("biz", "📇 פרטי העסק והתורים", cBusiness + cStaff)}
+      // תפריט הניהול — הלשוניות שירדו מהסרגל התחתון, נגישות מכאן
+      const navItems = [
+        ["hours", "🕐", "שעות פעילות", "ימים ושעות עבודה, חופשות"],
+        ["services", "✂️", "שירותים", "שמות, מחירים ומשכי זמן"],
+        ["products", "🛍️", "מוצרים", "מוצרים למכירה בעמוד הלקוח"],
+        ["clients", "👥", "לקוחות", "ספר הלקוחות וחסימות"],
+        ["report", "📊", "דוח והכנסות", "סיכום חודשי וביקורות"],
+        ["publish", "📣", "פרסום וקישור", "הקישור, QR והודעה ללקוחות"],
+      ];
+      const navCard = `
+        <div class="section-title">🗂️ ניהול המספרה</div>
+        <div class="card set-nav">
+          ${navItems.map(([key, ico, label, sub]) => `
+            <button class="set-nav-item" data-otab="${key}">
+              <span class="sni-ico">${ico}</span>
+              <span class="sni-body"><span class="sni-label">${esc(label)}</span><span class="sni-sub">${esc(sub)}</span></span>
+              <span class="sni-arrow">‹</span>
+            </button>`).join("")}
+        </div>`;
+      return `${navCard}
+      <div class="set-groups">
+        ${grp("biz", "📇 פרטי העסק", cBusinessInfo)}
+        ${grp("booking", "⏰ תורים ותזכורות", cBooking)}
         ${grp("brand", "🎨 מיתוג ועיצוב", cLogo + cCover + cStyle)}
-        ${grp("share", "📣 שיתוף וקישור ללקוחות", cLink + cQr)}
         ${grp("client", "👁️ עמוד הלקוח", cClientShow + cGallery)}
         ${grp("alerts", "🔔 התראות ואבטחה", cNotif + cSecurity + cInstall)}
         ${grp("tools", "🛠️ כלים ותחזוקה", cBackup + cConnection + cSupport)}
