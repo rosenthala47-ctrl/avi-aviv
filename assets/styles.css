@@ -220,12 +220,43 @@
   margin: -4px 0 4px; border-radius: 16px; overflow: hidden; aspect-ratio: 16 / 7; background: var(--surface-2);
 }
 .client-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
-/* עמוד לקוח מצומצם — כפתור הזמנה בולט בראש עמוד הבית + כפתור חזרה */
-.home-book-cta {
-  font-size: 17px; font-weight: 800; padding: 16px; margin: 2px 0 6px;
-  box-shadow: 0 8px 22px rgba(56,189,248,.28);
+
+/* ===== עמוד לקוח מצומצם: כותרת-על עם תמונת נושא + כפתור הזמנה בולט ===== */
+/* התמונה יוצאת לרוחב מלא ונמזגת אל רקע העמוד; הכותרת והכפתור יושבים מעליה. */
+.home-hero {
+  position: relative; margin: -18px -18px 16px; overflow: hidden;
+  display: flex; align-items: flex-end;
 }
+.home-hero.has-cover { min-height: 210px; }
+.home-hero.no-cover { margin: -6px 0 6px; min-height: 0; }
+.home-hero-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+/* הכהיה עדינה למעלה + מעבר חלק אל רקע הדף למטה — כך התמונה מתמזגת ולא "צפה" */
+.home-hero.has-cover::after {
+  content: ""; position: absolute; inset: 0; z-index: 1;
+  background: linear-gradient(to bottom, rgba(0,0,0,.10) 0%, rgba(0,0,0,.32) 52%, var(--bg) 100%);
+}
+.home-hero-body { position: relative; z-index: 2; width: 100%; padding: 20px 18px 6px; text-align: center; }
+.home-hero-title { font-size: 25px; font-weight: 800; letter-spacing: -.3px; line-height: 1.1; }
+.home-hero-sub { font-size: 14px; color: var(--muted); margin-top: 4px; }
+.home-hero.has-cover .home-hero-title { color: #fff; text-shadow: 0 2px 12px rgba(0,0,0,.55); }
+.home-hero.has-cover .home-hero-sub { color: rgba(255,255,255,.9); text-shadow: 0 1px 8px rgba(0,0,0,.5); }
+
+/* ‎.btn.home-book-cta‎ — ספציפיות גבוהה מ-‎.btn‎ (שמוגדר בהמשך) כדי לא להידרס */
+.btn.home-book-cta {
+  width: 100%; margin-top: 15px; padding: 18px;
+  font-size: 18.5px; font-weight: 800; letter-spacing: .2px;
+  color: var(--sky-ink); border: none; border-radius: 16px;
+  background: linear-gradient(145deg, var(--sky), var(--sky-strong));
+  box-shadow: var(--shadow-sky);
+  animation: hbcPulse 2.6s ease-in-out infinite;
+}
+.btn.home-book-cta .hbc-emoji { font-size: 21px; }
+.btn.home-book-cta:active { transform: scale(.98); animation: none; }
+@keyframes hbcPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.018); } }
+@media (prefers-reduced-motion: reduce) { .home-book-cta { animation: none; } }
+
 .home-back { width: auto; margin-bottom: 8px; }
+.cli-show-row { margin-top: 10px; }
 /* תצוגה מקדימה של קאבר בהגדרות */
 .cover-preview {
   border-radius: 12px; overflow: hidden; aspect-ratio: 16 / 7; background: var(--surface-2);

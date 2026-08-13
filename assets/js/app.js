@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "108";
+  const APP_VERSION = "109";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -75,6 +75,10 @@
   function condensedClient() {
     return SHOP === "try";
   }
+
+  /* האם להציג מקטע בעמוד הלקוח. ברירת מחדל: מוצג. הספר יכול לכבות מקטעים
+     מ״הגדרות → מה מוצג בעמוד הלקוח״ (נשמר כ-false על ה-shop). */
+  function cShow(st, key) { return !(st && st.shop && st.shop[key] === false); }
   // פתיחת כתובת חיצונית בצורה שתעבוד בדפדפן ובכל מעטפת (מפה/יומן/וואטסאפ)
   function openExternal(url) {
     try { if (isCordovaOnly()) { window.open(url, "_system"); return; } } catch (e) {}
@@ -633,10 +637,15 @@
       </div>`;
     }
 
-    const hasProducts = activeProducts(st).length > 0;
-    // אם לשונית ״מוצרים״ נבחרה אבל אין מוצרים (הספר הסיר) — חזרה לקביעת תור
-    if (view.clientTab === "products" && !hasProducts) view.clientTab = "book";
-    if (view.clientTab === "home") view.clientTab = "book";   // "בית" קיים רק במבנה המצומצם
+    // אילו לשוניות מוצגות — לפי מוצרים קיימים והמתגים שהספר בחר בהגדרות
+    const tabGallery = cShow(st, "showGallery");
+    const tabProducts = activeProducts(st).length > 0 && cShow(st, "showProducts");
+    const tabReviews = cShow(st, "showReviews");
+    // אם הלשונית הפעילה כובתה — חזרה לקביעת תור
+    if ((view.clientTab === "gallery" && !tabGallery) ||
+        (view.clientTab === "products" && !tabProducts) ||
+        (view.clientTab === "reviews" && !tabReviews) ||
+        view.clientTab === "home") view.clientTab = "book";   // "בית" קיים רק במבנה המצומצם
     let body;
     if (view.clientTab === "gallery") body = clientGallery();
     else if (view.clientTab === "reviews") body = clientReviews();
@@ -651,12 +660,12 @@
       <div class="tabbar">
         <button data-tab="book" class="${view.clientTab === "book" ? "active" : ""}">
           <span class="tb-ico">🗓️</span>קביעת תור</button>
-        <button data-tab="gallery" class="${view.clientTab === "gallery" ? "active" : ""}">
-          <span class="tb-ico">🖼️</span>גלריה</button>
-        ${hasProducts ? `<button data-tab="products" class="${view.clientTab === "products" ? "active" : ""}">
+        ${tabGallery ? `<button data-tab="gallery" class="${view.clientTab === "gallery" ? "active" : ""}">
+          <span class="tb-ico">🖼️</span>גלריה</button>` : ""}
+        ${tabProducts ? `<button data-tab="products" class="${view.clientTab === "products" ? "active" : ""}">
           <span class="tb-ico">🛍️</span>מוצרים</button>` : ""}
-        <button data-tab="reviews" class="${view.clientTab === "reviews" ? "active" : ""}">
-          <span class="tb-ico">⭐</span>ביקורות</button>
+        ${tabReviews ? `<button data-tab="reviews" class="${view.clientTab === "reviews" ? "active" : ""}">
+          <span class="tb-ico">⭐</span>ביקורות</button>` : ""}
         <button data-tab="mine" class="${view.clientTab === "mine" ? "active" : ""}">
           <span class="tb-ico">🎟️</span>התורים שלי</button>
       </div>
@@ -665,23 +674,32 @@
 
   /* ===== עמוד "בית" מצומצם — כפתור הזמנה בראש + כל התוכן בעמוד אחד ===== */
   function clientHome(st, services) {
-    const bookCta = `<button class="btn btn-primary home-book-cta" data-tab="book">🗓️ הזמנת תור</button>`;
+    const hasCover = !!st.shop.cover;
+    // תמונת נושא רחבה בראש הדף, שנמזגת אל רקע העמוד; מעליה כותרת המספרה + כפתור הזמנה
+    const hero = `
+      <div class="home-hero ${hasCover ? "has-cover" : "no-cover"}">
+        ${hasCover ? `<img class="home-hero-img" src="${esc(st.shop.cover)}" alt="">` : ""}
+        <div class="home-hero-body">
+          <div class="home-hero-title">${esc(st.shop.name || "")}</div>
+          ${st.shop.tagline ? `<div class="home-hero-sub">${esc(st.shop.tagline)}</div>` : ""}
+          <button class="btn home-book-cta" data-tab="book"><span class="hbc-emoji">🗓️</span> להזמנת תור</button>
+        </div>
+      </div>`;
     return `
-      ${st.shop.cover ? `<div class="client-cover"><img src="${esc(st.shop.cover)}" alt=""></div>` : ""}
+      ${hero}
       ${rescheduleBanner(st)}
       ${alertBanner(st)}
       ${notifBanner()}
       ${arrivalBanner(st)}
       ${reviewBanner(st)}
-      ${bookCta}
       ${aboutCard(st)}
-      ${homeProducts(st)}
-      ${homeReviews(st)}
-      ${homeGallery()}
-      ${hoursCard(st)}
+      ${cShow(st, "showProducts") ? homeProducts(st) : ""}
+      ${cShow(st, "showReviews") ? homeReviews(st) : ""}
+      ${cShow(st, "showGallery") ? homeGallery() : ""}
+      ${cShow(st, "showHours") ? hoursCard(st) : ""}
       ${mapsCard(st)}
       ${installCard()}
-      ${shareCard()}
+      ${cShow(st, "showShare") ? shareCard() : ""}
       <p class="hint" style="text-align:center;margin-top:22px">
         מנהלים מספרה? <a href="#new" data-act="open-signup" style="color:var(--sky)">פתחו מערכת תורים משלכם ›</a>
       </p>
@@ -1471,10 +1489,10 @@
       <button class="btn btn-primary" data-act="open-confirm" ${view.selSlot ? "" : "disabled"}>${ctaLabel}</button>
       ${condensedClient() ? "" : `
       ${aboutCard(st)}
-      ${hoursCard(st)}
+      ${cShow(st, "showHours") ? hoursCard(st) : ""}
       ${installCard()}
       ${mapsCard(st)}
-      ${shareCard()}
+      ${cShow(st, "showShare") ? shareCard() : ""}
       <p class="hint" style="text-align:center;margin-top:22px">
         מנהלים מספרה? <a href="#new" data-act="open-signup" style="color:var(--sky)">פתחו מערכת תורים משלכם ›</a>
       </p>
@@ -3486,6 +3504,24 @@
       </div>
       ${ownerSecuritySection(st)}
       ${ownerGallerySection()}
+
+      <div class="section-title">👁️ מה מוצג בעמוד הלקוח</div>
+      <div class="card">
+        <p class="hint" style="margin-top:0;margin-bottom:12px">בחרו אילו מקטעים הלקוחות יראו. כיבוי מקטע מסתיר אותו מהלקוחות (לא מוחק כלום).</p>
+        ${[
+          ["showReviews", "⭐", "ביקורות"],
+          ["showGallery", "🖼️", "גלריית תספורות"],
+          ["showProducts", "🛍️", "מוצרים למכירה"],
+          ["showHours", "🕒", "שעות פעילות"],
+          ["showShare", "📣", "כפתור שיתוף המספרה"],
+        ].map(([key, ico, label]) => `
+          <label class="ab-custom cli-show-row">
+            <input type="checkbox" id="set-${key}" ${cShow(st, key) ? "checked" : ""}>
+            <span>${ico} ${esc(label)}</span>
+          </label>`).join("")}
+        <button class="btn btn-primary" data-act="save-settings" style="margin-top:14px">שמירה</button>
+      </div>
+
       <div class="section-title">פרטי העסק</div>
       <div class="card">
         <div class="field"><label>שם העסק</label>
@@ -5161,6 +5197,12 @@
       reminderMinutes: Number($("#set-remind").value),
       remindDayBefore: !($("#set-remind-day") && !$("#set-remind-day").checked),
       hideFreeBeforeMin: Number(($("#set-hidefree") && $("#set-hidefree").value) || 0),
+      // מה מוצג בעמוד הלקוח (checkbox מסומן = מוצג). ברירת מחדל: מוצג.
+      showReviews: !($("#set-showReviews") && !$("#set-showReviews").checked),
+      showGallery: !($("#set-showGallery") && !$("#set-showGallery").checked),
+      showProducts: !($("#set-showProducts") && !$("#set-showProducts").checked),
+      showHours: !($("#set-showHours") && !$("#set-showHours").checked),
+      showShare: !($("#set-showShare") && !$("#set-showShare").checked),
     }, socPatch));
     toast("ההגדרות נשמרו ✓", "good", "⚙️"); render();
   }
