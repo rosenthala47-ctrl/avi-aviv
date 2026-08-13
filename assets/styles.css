@@ -432,6 +432,9 @@ a { color: var(--sky); text-decoration: none; }
   font-size: 13px; color: var(--muted); flex: none; max-width: 40%;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* אייקון שהוא תמונה (מוצר) במקום אמוג׳י */
+.set-row .sr-ico-img { padding: 0; overflow: hidden; }
+.set-row .sr-ico-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 /* שורת מתג — לא לחיצה, המתג עצמו הוא הפעולה */
 .set-row.set-row-static { cursor: default; }
 .set-row.set-row-static:active { background: none; }

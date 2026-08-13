@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "115";
+  const APP_VERSION = "116";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -83,6 +83,25 @@
   /* דף מנהל מסודר: הגדרות מקובצות בקבוצות מתקפלות + סדר לשוניות חדש.
      נבדק על "try" בלבד לפני החלה על כולן. */
   function tidyOwner() { return SHOP === "try"; }
+
+  /* שורת רשימה אחידה בדף המנהל המסודר: אייקון צבעוני, כותרת, תת-כותרת,
+     ערך נוכחי וחץ. o.img = תמונה במקום אמוג׳י; o.nav = מאפייני הניווט;
+     o.ltr = הערך נכתב משמאל לימין (טווח שעות, אחרת העברית הופכת אותו). */
+  function setRow(o) {
+    const bg = o.color || "var(--surface-3)";
+    const ico = o.img
+      ? `<span class="sr-ico sr-ico-img" style="background:${bg}"><img src="${o.img}" alt=""></span>`
+      : `<span class="sr-ico" style="background:${bg}">${o.ico || ""}</span>`;
+    return `<button class="set-row" ${o.nav || ""}>${ico}
+      <span class="sr-body"><span class="sr-label">${esc(o.label)}</span>${o.sub ? `<span class="sr-sub">${esc(o.sub)}</span>` : ""}</span>
+      ${o.val ? `<span class="sr-val"${o.ltr ? ` dir="ltr"` : ""}>${esc(o.val)}</span>` : ""}
+      <span class="sr-chev">‹</span>
+    </button>`;
+  }
+  // כותרת עמוד-משנה + כפתור חזרה
+  function subBack(label) {
+    return `<button class="btn btn-ghost btn-sm home-back" data-act="sub-back">‹ ${esc(label || "חזרה")}</button>`;
+  }
   // מצב פתיחה של קבוצות ההגדרות (נשמר בזיכרון בין רינדורים)
   const setGroupOpen = { biz: true };
   // פתיחת כתובת חיצונית בצורה שתעבוד בדפדפן ובכל מעטפת (מפה/יומן/וואטסאפ)
@@ -98,6 +117,7 @@
     ownerTab: (function () { try { return localStorage.getItem("ug_otab__" + SHOP) || "cal"; } catch (e) { return "cal"; } })(),  // cal | hours | services | bookings | clients | report | publish | settings
     settingsPage: null,  // במבנה המסודר: קטגוריית הגדרות פתוחה (business/booking/brand/...) או null=רשימה
     settingsItem: null,  // הפריט הפתוח בתוך הקטגוריה (רמה שלישית) או null=רשימת הפריטים
+    subPage: null,       // עמוד-משנה בתוך לשוניות הניהול (שעות/פרסום) או null=הרשימה
     selService: null,
     selStaff: "",        // ספר מועדף שהלקוח בחר (בקשה בלבד)
     selDate: null,       // יום נבחר בצד הלקוח
@@ -2499,11 +2519,7 @@
       <div class="hint" style="margin:14px 0 8px;font-weight:700">תאריכים חסומים:</div>
       <div class="vac-list">${upcomingClosed.map((k) => `
         <span class="vac-chip">${esc(u.longDate(k))}<button data-act="del-vacation" data-key="${k}" aria-label="הסר">✕</button></span>`).join("")}</div>` : "";
-    return `
-      <div class="section-title">ימי הפעילות ושעות העבודה</div>
-      <div class="card">${rows.join("")}</div>
-      <p class="hint">כל שינוי נשמר מיד ומתעדכן אצל הלקוחות בזמן אמת. שעות העבודה קובעות אילו שעות מוצגות בלשונית ״יומן״.</p>
-
+    const vacationsCard = `
       <div class="section-title">🌴 חופשות וסגירת תאריכים</div>
       <div class="card">
         <p class="hint" style="margin-top:0;margin-bottom:11px">חסמו יום בודד או טווח (חופשה) — הלקוחות לא יוכלו להזמין בתאריכים אלה.</p>
@@ -2513,7 +2529,55 @@
         </div>
         <button class="btn btn-primary btn-sm" data-act="add-vacation" style="width:100%">חסימת התאריכים</button>
         ${closedList}
-      </div>
+      </div>`;
+
+    // מבנה מסודר: שורה לכל יום → לחיצה פותחת את עריכת אותו יום
+    if (tidyOwner()) {
+      if (view.subPage === "vac") return subBack("חזרה לשעות") + vacationsCard;
+      const dayIdx = /^day([0-6])$/.exec(view.subPage || "");
+      if (dayIdx) {
+        const i = Number(dayIdx[1]); const d = st.schedule[i];
+        return subBack("חזרה לשעות") + `
+          <div class="section-title">🕐 יום ${esc(u.DOW[i])}</div>
+          <div class="card">
+            <label class="ab-custom" style="margin-top:0">
+              <input type="checkbox" data-active="${i}" ${d.active ? "checked" : ""}>
+              <span>פתוח ביום ${esc(u.DOW[i])}</span>
+            </label>
+            ${d.active ? `
+            <div class="field-row" style="margin-top:14px">
+              <div class="field"><label>שעת פתיחה</label>
+                <select class="input" data-time="open" data-day="${i}">${timeOptions(d.open)}</select></div>
+              <div class="field"><label>שעת סגירה</label>
+                <select class="input" data-time="close" data-day="${i}">${timeOptions(d.close)}</select></div>
+            </div>` : `<p class="hint" style="margin:14px 0 0">היום סגור. הדליקו את המתג כדי לקבוע שעות עבודה.</p>`}
+            <p class="hint" style="margin:14px 0 0">כל שינוי נשמר מיד ומתעדכן אצל הלקוחות בזמן אמת.</p>
+          </div>`;
+      }
+      view.subPage = null;
+      const dayColors = ["#0ea5e9", "#22c55e", "#f59e0b", "#8b5cf6", "#ec4899", "#14b8a6", "#64748b"];
+      return `
+        <div class="section-title">🕐 ימי הפעילות</div>
+        <div class="card set-list">
+          ${st.schedule.map((d, i) => setRow({
+            nav: `data-act="sub-page" data-sub="day${i}"`, ico: "📅", color: dayColors[i],
+            label: "יום " + u.DOW[i], val: d.active ? d.open + "–" + d.close : "סגור",
+            ltr: !!d.active,   // טווח שעות נכתב משמאל לימין, אחרת העברית הופכת אותו
+          })).join("")}
+        </div>
+        <div class="card set-list">
+          ${setRow({ nav: `data-act="sub-page" data-sub="vac"`, ico: "🌴", color: "#f97316",
+            label: "חופשות וסגירת תאריכים", sub: "חסימת ימים שבהם לא עובדים",
+            val: upcomingClosed.length ? upcomingClosed.length + " תאריכים" : "אין" })}
+        </div>
+        <p class="hint">שעות העבודה קובעות אילו שעות מוצגות ללקוחות ובלשונית ״יומן״.</p>`;
+    }
+
+    return `
+      <div class="section-title">ימי הפעילות ושעות העבודה</div>
+      <div class="card">${rows.join("")}</div>
+      <p class="hint">כל שינוי נשמר מיד ומתעדכן אצל הלקוחות בזמן אמת. שעות העבודה קובעות אילו שעות מוצגות בלשונית ״יומן״.</p>
+      ${vacationsCard}
     `;
   }
 
@@ -2529,6 +2593,17 @@
           <button class="icon-btn" data-act="edit-svc" data-id="${s.id}">✏️</button>
         </div>
       </div>`).join("");
+    if (tidyOwner()) {
+      return `
+        <div class="section-title">✂️ השירותים שאתה מציע</div>
+        ${st.services.length ? `<div class="card set-list">${st.services.map((s) => setRow({
+          nav: `data-act="edit-svc" data-id="${s.id}"`, ico: esc(s.icon || "✂️"), color: "#0ea5e9",
+          label: s.name, sub: u.fmtDuration(s.durationMin), val: u.fmtPrice(s.price),
+        })).join("")}</div>` : emptyState("✂️", "אין שירותים", "הוסיפו את השירות הראשון")}
+        <div style="height:14px"></div>
+        <button class="btn btn-primary" data-act="add-svc">＋ הוספת שירות</button>
+        <p class="hint">שם השירות, המחיר והמשך מתעדכנים אצל כל הלקוחות מיד.</p>`;
+    }
     return `
       <div class="section-title">השירותים שאתה מציע</div>
       ${items || emptyState("✂️", "אין שירותים", "הוסיפו את השירות הראשון")}
@@ -2554,8 +2629,21 @@
           <button class="icon-btn" data-act="edit-product" data-id="${p.id}">✏️</button>
         </div>
       </div>`).join("");
+    const noPhoneNote = !waOk ? `<div class="card notice-card">📱 כדי להוסיף מוצרים צריך קודם להזין מספר טלפון נייד ב<b>הגדרות ← טלפון</b> — דרכו הלקוחות פונים בוואטסאפ.</div>` : "";
+    if (tidyOwner()) {
+      return `
+        ${noPhoneNote}
+        <div class="section-title">🛍️ המוצרים שאתה מוכר</div>
+        ${products.length ? `<div class="card set-list">${products.map((p) => setRow({
+          nav: `data-act="edit-product" data-id="${p.id}"`, ico: "🛍️", img: p.image ? esc(p.image) : "",
+          color: "#22c55e", label: p.name, sub: p.description || "", val: u.fmtPrice(p.price),
+        })).join("")}</div>` : emptyState("🛍️", "אין עדיין מוצרים", "הוסיפו מוצר ראשון — קרם, שעווה, שמפו…")}
+        <div style="height:14px"></div>
+        <button class="btn btn-primary" data-act="add-product" ${waOk ? "" : 'disabled style="opacity:.5"'}>＋ הוספת מוצר</button>
+        <p class="hint">הלקוחות רואים את המוצרים בעמוד ״מוצרים״, ויכולים לפנות אליך ישירות בוואטסאפ להזמנה.</p>`;
+    }
     return `
-      ${!waOk ? `<div class="card notice-card">📱 כדי להוסיף מוצרים צריך קודם להזין מספר טלפון נייד ב<b>הגדרות ← טלפון</b> — דרכו הלקוחות פונים בוואטסאפ.</div>` : ""}
+      ${noPhoneNote}
       <div class="section-title">המוצרים שאתה מוכר</div>
       ${items || emptyState("🛍️", "אין עדיין מוצרים", "הוסיפו מוצר ראשון — קרם, שעווה, שמפו…")}
       <div style="height:14px"></div>
@@ -2914,7 +3002,8 @@
     closeModal(); toast(`${nm} נחסם — לא יוכל לקבוע אונליין`, "", "🚫"); render();
   }
 
-  function ownerClients(st) {
+  /* צבירת רשימת הלקוחות — משמשת גם את הרשימה וגם את חלון הפרטים */
+  function clientsAgg(st) {
     const map = new Map();
     // אנשי הקשר שיובאו — מופיעים גם אם עדיין לא הזמינו תור
     (st.contacts || []).forEach((c) => {
@@ -2935,7 +3024,11 @@
       const ts = u.dateTime(b.date, b.start).getTime();
       if (ts > c.lastTs) { c.lastTs = ts; c.lastDate = b.date; c.imported = false; }
     });
-    const clients = [...map.values()].sort((a, z) => z.lastTs - a.lastTs);
+    return [...map.values()].sort((a, z) => z.lastTs - a.lastTs);
+  }
+
+  function ownerClients(st) {
+    const clients = clientsAgg(st);
     const importBtn = `<button class="btn btn-primary" data-act="import-clients" style="margin-bottom:14px">📥 ייבוא רשימת לקוחות</button>`;
     if (!clients.length) return importBtn + emptyState("👥", "אין עדיין לקוחות", "ייבאו את רשימת הלקוחות שלכם, או שהם יופיעו כאן אחרי שיזמינו תור");
     const actionsRow = `
@@ -2945,13 +3038,48 @@
       </div>`;
     const totalSpent = clients.reduce((s, c) => s + c.spent, 0);
     const totalVisits = clients.reduce((s, c) => s + c.visits, 0);
-    return `
-      ${actionsRow}
+    const chips = `
       <div class="stat-chips">
         <div class="stat-chip"><div class="sc-num">${clients.length}</div><div class="sc-lbl">לקוחות</div></div>
         <div class="stat-chip"><div class="sc-num">${totalVisits}</div><div class="sc-lbl">ביקורים</div></div>
         <div class="stat-chip"><div class="sc-num">${u.fmtPrice(totalSpent)}</div><div class="sc-lbl">סה״כ</div></div>
-      </div>
+      </div>`;
+    const importedNote = clients.some((c) => c.imported) ? `
+      <div class="info-note">
+        <b>ℹ️ מה זה "לקוח מיובא"?</b>
+        <p>לקוח שהוספת מרשימת הלקוחות שלך אך עדיין לא הזמין תור. ברגע שיזמין תור (או שתקבע לו תור ידני) — הוא יהפוך ללקוח מלא עם היסטוריית ביקורים והכנסות, והתג ייעלם.</p>
+      </div>` : "";
+
+    /* מסודר: שורה אחידה לכל לקוח — לחיצה פותחת את כרטיס הלקוח עם הפעולות */
+    if (tidyOwner()) {
+      return `
+        ${actionsRow}
+        ${chips}
+        <div class="section-title">כל הלקוחות</div>
+        <div class="card set-list">
+          ${clients.map((c) => {
+            const blocked = isClientBlocked(c);
+            const bits = [];
+            if (c.visits) bits.push(c.visits + " ביקורים");
+            if (c.lastDate) bits.push("אחרון " + u.relativeDay(c.lastDate));
+            if (c.noShows) bits.push("❌ " + c.noShows + " לא הגיע");
+            return setRow({
+              ico: (String(c.name).trim()[0]) || "?",
+              color: blocked ? "var(--bad)" : "var(--sky)",
+              label: (blocked ? "🚫 " : "") + c.name,
+              sub: bits.length ? bits.join(" · ") : "עדיין לא הזמין תור",
+              val: c.spent ? u.fmtPrice(c.spent) : "",
+              nav: `data-act="client-detail" data-key="${esc(c.key)}"`,
+            });
+          }).join("")}
+        </div>
+        ${importedNote}
+      `;
+    }
+
+    return `
+      ${actionsRow}
+      ${chips}
       <div class="section-title">כל הלקוחות</div>
       ${clients.map((c) => `
         <div class="card${isClientBlocked(c) ? " cli-blocked" : ""}" style="padding:13px 15px">
@@ -2973,11 +3101,7 @@
                  </div>`}
           </div>
         </div>`).join("")}
-      ${clients.some((c) => c.imported) ? `
-      <div class="info-note">
-        <b>ℹ️ מה זה "לקוח מיובא"?</b>
-        <p>לקוח שהוספת מרשימת הלקוחות שלך אך עדיין לא הזמין תור. ברגע שיזמין תור (או שתקבע לו תור ידני) — הוא יהפוך ללקוח מלא עם היסטוריית ביקורים והכנסות, והתג ייעלם.</p>
-      </div>` : ""}
+      ${importedNote}
     `;
   }
 
@@ -3147,23 +3271,31 @@
 
   function clientDetail(key) {
     const st = Store.get();
+    const c = clientsAgg(st).find((x) => x.key === key);
+    if (!c) return;
     const bks = st.bookings.filter((b) => b.status !== "cancelled" && clientKey(b) === key)
       .sort((a, z) => u.dateTime(z.date, z.start) - u.dateTime(a.date, a.start));
-    if (!bks.length) return;
-    const name = bks[0].userName || "לקוח";
-    const phone = (bks.find((b) => b.phone) || {}).phone || "";
-    const spent = bks.filter((b) => b.status === "confirmed").reduce((s, b) => s + Number(b.price || 0), 0);
+    const blocked = isClientBlocked(c);
+    // הפעולות שהיו קודם על כרטיס הלקוח ברשימה — עברו לכאן
+    const acts = blocked
+      ? `<button class="btn" data-act="unblock-client" data-key="${esc(blockKeyOf(c))}">🔓 ביטול החסימה</button>`
+      : c.imported
+      ? `<button class="btn btn-danger" data-act="del-contact" data-id="${esc(c.contactId || "")}">🗑️ הסרה מהרשימה</button>`
+      : `<button class="btn btn-danger" data-act="block-client" data-key="${esc(c.key)}">🚫 חסימת הלקוח</button>`;
     openModal(`
-      <div class="m-title">${esc(name)}</div>
-      <div class="m-sub">${bks.length} תורים · ${u.fmtPrice(spent)} סה״כ${phone ? ` · <a href="tel:${esc(phone)}">${esc(phone)}</a>` : ""}</div>
-      <div style="max-height:52vh;overflow-y:auto;margin-top:8px">
-        ${bks.map((b) => `
+      <div class="m-title">${esc(c.name)}${blocked ? " 🚫" : ""}</div>
+      <div class="m-sub">${bks.length} תורים · ${u.fmtPrice(c.spent)} סה״כ${c.phone ? ` · <a href="tel:${esc(c.phone)}">${esc(u.fmtPhone(c.phone))}</a>` : ""}</div>
+      ${blocked ? `<p class="hint" style="margin:10px 0 0;color:var(--bad)">הלקוח חסום — לא יכול לקבוע תור אונליין.</p>` : ""}
+      ${(!blocked && c.noShows >= 2) ? `<p class="hint" style="margin:10px 0 0;color:var(--bad)">⚠️ לא הגיע ${c.noShows} פעמים — כדאי לשקול חסימה.</p>` : ""}
+      <div style="max-height:44vh;overflow-y:auto;margin-top:8px">
+        ${bks.length ? bks.map((b) => `
           <div class="summary-row">
             <span class="sr-k">${esc(u.longDate(b.date))} · ${esc(b.start)}</span>
             <span class="sr-v">${esc(b.serviceName)} · ${u.fmtPrice(b.price)} ${b.status === "confirmed" ? "✓" : ""}</span>
-          </div>`).join("")}
+          </div>`).join("") : `<p class="hint" style="margin:6px 0 0">עדיין לא הזמין תור.</p>`}
       </div>
-      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:14px">סגירה</button>
+      <div style="margin-top:14px">${acts}</div>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">סגירה</button>
     `);
   }
 
@@ -3215,7 +3347,8 @@
       ? reviews.slice(0, 30).map((r) => reviewCardHtml(r)).join("")
       : `<p class="hint" style="margin-top:4px">אין עדיין ביקורות — לקוחות מתבקשים לדרג אחרי כל תספורת.</p>`;
 
-    return `
+    const revTitle = `ביקורות לקוחות${avg ? ` · ממוצע ${avg} ★` : ""}`;
+    const head = `
       <div class="month-nav">
         <button class="icon-btn" data-act="stat-prev" title="חודש קודם">‹</button>
         <div class="mn-label">${ymLabel(ym)}</div>
@@ -3227,8 +3360,27 @@
       </div>
       ${rows.length ? `<button class="btn btn-sm" data-act="export-report" style="margin-bottom:12px">📊 ייצוא לאקסל</button>` : ""}
       ${table}
-      <p class="hint">הדוח מציג תורים שהלקוח אישר בהם הגעה. בתחילת כל חודש הטבלה מתחילה מאפס — אפשר לדפדף לחודשים קודמים עם החצים.</p>
-      <div class="section-title">ביקורות לקוחות${avg ? ` · ממוצע ${avg} ★` : ""}</div>
+      <p class="hint">הדוח מציג תורים שהלקוח אישר בהם הגעה. בתחילת כל חודש הטבלה מתחילה מאפס — אפשר לדפדף לחודשים קודמים עם החצים.</p>`;
+
+    /* מסודר: הביקורות יוצאות לעמוד-משנה משלהן במקום כותרת בתוך הדוח */
+    if (tidyOwner()) {
+      if (view.subPage === "rev") {
+        return subBack("חזרה לדוח") + `<div class="section-title">${revTitle}</div>` + revHtml;
+      }
+      view.subPage = null;
+      return head + `
+        <div class="card set-list" style="margin-top:14px">
+          ${setRow({
+            nav: `data-act="sub-page" data-sub="rev"`, ico: "⭐", color: "#f59e0b",
+            label: "ביקורות לקוחות",
+            sub: reviews.length ? `${reviews.length} ביקורות מלקוחות` : "אין עדיין ביקורות",
+            val: avg ? avg + " ★" : "",
+          })}
+        </div>`;
+    }
+
+    return head + `
+      <div class="section-title">${revTitle}</div>
       ${revHtml}
     `;
   }
@@ -3406,6 +3558,41 @@
     const link = clientLink();
     const owner = (st.shop.ownerName || "").trim().split(/\s+/)[0];
     const svcCount = (st.services || []).filter((s) => s.active !== false).length;
+
+    // מבנה מסודר: רשימת שורות → כל אחת פותחת את הכלי עצמו
+    if (tidyOwner()) {
+      if (view.subPage === "link") return subBack("חזרה לפרסום") + pubLinkCard(link);
+      if (view.subPage === "qr") return subBack("חזרה לפרסום") + qrShareCard();
+      if (view.subPage === "bc") return subBack("חזרה לפרסום") + pubBroadcastCard();
+      if (view.subPage === "how") return subBack("חזרה לפרסום") + pubHowCard();
+      view.subPage = null;
+      return `
+        <div class="pub-hero">
+          <div class="pub-ico${st.shop.logo ? " has-img" : ""}">${st.shop.logo
+            ? `<img class="pub-logo" src="${esc(st.shop.logo)}" alt="">` : "📣"}</div>
+          <h2>${owner ? esc(owner) + ", המספרה שלך מוכנה!" : "המספרה שלך מוכנה!"}</h2>
+          <p>שלח/י את הקישור הזה ללקוחות — הם יזמינו תור לבד, ישירות מהטלפון.</p>
+        </div>
+        <div class="card set-list">
+          ${setRow({ nav: `data-act="sub-page" data-sub="link"`, ico: "🔗", color: "#0ea5e9",
+            label: "הקישור האישי שלך", sub: "העתקה, שיתוף ותצוגת לקוח" })}
+          ${setRow({ nav: `data-act="sub-page" data-sub="qr"`, ico: "📷", color: "#8b5cf6",
+            label: "קוד QR", sub: "להדפסה ולתלייה בחנות" })}
+          ${setRow({ nav: `data-act="sub-page" data-sub="bc"`, ico: "📢", color: "#ef4444",
+            label: "הודעה לכל הלקוחות", sub: "התראה באפליקציה או וואטסאפ" })}
+          ${setRow({ nav: `data-act="sub-page" data-sub="how"`, ico: "💡", color: "#f59e0b",
+            label: "איך זה עובד?", sub: "3 שלבים פשוטים" })}
+        </div>
+        ${svcCount ? "" : `
+        <div class="banner good" style="margin-top:14px">
+          <span class="bn-ico">✂️</span>
+          <div class="bn-body">
+            <div class="bn-title">כדאי להוסיף שירותים</div>
+            <div class="bn-sub">הגדירו סוגי תספורת, מחירים ומשך — מ״הגדרות ← שירותים״.</div>
+          </div>
+        </div>`}`;
+    }
+
     return `
       <div class="pub-hero">
         <div class="pub-ico${st.shop.logo ? " has-img" : ""}">${st.shop.logo
@@ -3414,6 +3601,27 @@
         <p>שלח/י את הקישור הזה ללקוחות — הם יזמינו תור לבד, ישירות מהטלפון.</p>
       </div>
 
+      ${pubLinkCard(link)}
+
+      ${qrShareCard()}
+
+      ${pubBroadcastCard()}
+      ${pubHowCard()}
+
+      ${svcCount ? "" : `
+      <div class="banner good" style="margin-top:14px">
+        <span class="bn-ico">✂️</span>
+        <div class="bn-body">
+          <div class="bn-title">כדאי להוסיף שירותים</div>
+          <div class="bn-sub">הגדירו סוגי תספורת, מחירים ומשך — בלשונית ״שירותים״.</div>
+        </div>
+      </div>`}
+    `;
+  }
+
+  /* כרטיסי לשונית הפרסום — מופרדים כדי שישמשו גם כעמודי-משנה במבנה המסודר */
+  function pubLinkCard(link) {
+    return `
       <div class="section-title">🔗 הקישור האישי שלך</div>
       <div class="card">
         <div class="pub-link">${esc(link)}</div>
@@ -3427,10 +3635,10 @@
           <b>🔒 הקישור בטוח לשיתוף</b>
           <p>לקוח שפותח את הקישור רואה <b>רק את עמוד ההזמנה</b> — לעולם לא את הניהול. הניהול נפתח אך ורק במכשיר שלך, אחרי כניסה עם הסיסמה. לחצו ״👁️ תצוגת לקוח״ כדי לראות בדיוק מה הלקוח רואה.</p>
         </div>
-      </div>
-
-      ${qrShareCard()}
-
+      </div>`;
+  }
+  function pubBroadcastCard() {
+    return `
       <div class="section-title">📢 הודעה לכל הלקוחות</div>
       <div class="card">
         <div class="hint" style="margin:0 0 11px">כתבו הודעה — היא תגיע כהתראה לטלפון של כל הלקוחות שהזמינו דרך האפליקציה, גם כשהיא סגורה.</div>
@@ -3447,8 +3655,10 @@
         <div class="hint" style="margin:6px 0 14px">מיידי וחינם · עד ${broadcastRecipients()} לקוחות — רק מי שאישר התראות</div>
         <button class="btn btn-wa" data-act="wa-blast">📲 שליחה בוואטסאפ</button>
         <div class="hint" style="margin:6px 0 0">מגיע ל-${clientsWithPhone().length} לקוחות עם טלפון — גם בלי אפליקציה · נשלח מהוואטסאפ שלך, לקוח-לקוח</div>
-      </div>
-
+      </div>`;
+  }
+  function pubHowCard() {
+    return `
       <div class="section-title">איך זה עובד?</div>
       <div class="card">
         <div class="pub-step"><span class="ps-n">1</span><div><b>שולח/ת את הקישור</b><div class="hint">בוואטסאפ, אינסטגרם או סטטוס — לכל הלקוחות.</div></div></div>
@@ -3464,17 +3674,7 @@
             <div class="hint" style="margin-top:2px">שירותים, מחירים, שעות ותמונות — מה שתשנה/י כאן, הלקוחות רואים בקישור בזמן אמת. אין צורך לשלוח קישור חדש.</div>
           </div>
         </div>
-      </div>
-
-      ${svcCount ? "" : `
-      <div class="banner good" style="margin-top:14px">
-        <span class="bn-ico">✂️</span>
-        <div class="bn-body">
-          <div class="bn-title">כדאי להוסיף שירותים</div>
-          <div class="bn-sub">הגדירו סוגי תספורת, מחירים ומשך — בלשונית ״שירותים״.</div>
-        </div>
-      </div>`}
-    `;
+      </div>`;
   }
 
   function ownerSettings(st) {
@@ -4760,7 +4960,7 @@
       if (t.dataset.tab) { view.clientTab = t.dataset.tab; render(); return; }
       if (t.dataset.otab) {
         view.ownerTab = t.dataset.otab;
-        view.settingsPage = null; view.settingsItem = null;   // מעבר לשונית מאפס את הניווט בהגדרות
+        view.settingsPage = null; view.settingsItem = null; view.subPage = null;   // מעבר לשונית מאפס ניווט פנימי
         try { localStorage.setItem("ug_otab__" + SHOP, view.ownerTab); } catch (e2) {}
         try { $("#oscroll") && ($("#oscroll").scrollTop = 0); } catch (e3) {}
         render(); return;
@@ -4787,6 +4987,15 @@
           render(); break;
         case "settings-item-back":
           view.settingsItem = null;
+          try { $("#oscroll") && ($("#oscroll").scrollTop = 0); } catch (e4) {}
+          render(); break;
+        // עמוד-משנה בתוך לשוניות הניהול (יום בשעות, קישור/QR בפרסום וכו')
+        case "sub-page":
+          view.subPage = t.dataset.sub || null;
+          try { $("#oscroll") && ($("#oscroll").scrollTop = 0); } catch (e4) {}
+          render(); break;
+        case "sub-back":
+          view.subPage = null;
           try { $("#oscroll") && ($("#oscroll").scrollTop = 0); } catch (e4) {}
           render(); break;
 
@@ -5082,6 +5291,7 @@
         case "do-block-client": doBlockClient(); break;
         case "unblock-client":
           await Store.unblockClient(t.dataset.key);
+          closeModal();  // הפעולה זמינה גם מתוך כרטיס הלקוח
           toast("החסימה הוסרה ✓", "good", "🔓"); render(); break;
 
         // תצוגת לקוח (בעלים)
@@ -5114,6 +5324,7 @@
         case "adm-extend": admExtend(t.dataset.sid, Number(t.dataset.m)); break;
         case "del-contact":
           await Store.removeContact(t.dataset.id);
+          closeModal();  // הפעולה זמינה גם מתוך כרטיס הלקוח
           toast("הלקוח הוסר מהרשימה", "", "🗑️"); render(); break;
 
         // סימון "לא הגיע"
