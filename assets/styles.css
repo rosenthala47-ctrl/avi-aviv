@@ -385,6 +385,29 @@ a { color: var(--sky); text-decoration: none; }
 .section-title { font-size: 13px; font-weight: 700; color: var(--muted); margin: 22px 4px 12px; letter-spacing: .3px; }
 .section-title:first-child { margin-top: 4px; }
 
+/* ==== דף הגדרות מסודר: קבוצות מתקפלות ==== */
+.set-groups { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
+.set-group {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); overflow: hidden;
+}
+.set-group-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 16px; cursor: pointer; list-style: none;
+  font-weight: 800; font-size: 16px; color: var(--text); user-select: none;
+}
+.set-group-head::-webkit-details-marker { display: none; }
+.set-group-head:active { background: var(--surface-2); }
+.set-group-head .sg-chev {
+  font-size: 20px; color: var(--muted); transition: transform .2s; line-height: 1;
+}
+.set-group[open] > .set-group-head { border-bottom: 1px solid var(--line); }
+.set-group[open] > .set-group-head .sg-chev { transform: rotate(180deg); }
+.set-group-body { padding: 4px 14px 16px; }
+/* בתוך קבוצה, כותרת-המשנה של כל כרטיס עדינה יותר כדי שכותרת-הקבוצה תוביל */
+.set-group-body .section-title { font-size: 12px; margin: 16px 2px 8px; opacity: .85; }
+.set-group-body .section-title:first-child { margin-top: 6px; }
+
 /* ==== כרטיסים ==== */
 .card {
   background: linear-gradient(180deg, var(--surface), var(--bg-2));

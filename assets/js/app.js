@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "111";
+  const APP_VERSION = "112";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -79,6 +79,12 @@
   /* האם להציג מקטע בעמוד הלקוח. ברירת מחדל: מוצג. הספר יכול לכבות מקטעים
      מ״הגדרות → מה מוצג בעמוד הלקוח״ (נשמר כ-false על ה-shop). */
   function cShow(st, key) { return !(st && st.shop && st.shop[key] === false); }
+
+  /* דף מנהל מסודר: הגדרות מקובצות בקבוצות מתקפלות + סדר לשוניות חדש.
+     נבדק על "try" בלבד לפני החלה על כולן. */
+  function tidyOwner() { return SHOP === "try"; }
+  // מצב פתיחה של קבוצות ההגדרות (נשמר בזיכרון בין רינדורים)
+  const setGroupOpen = { biz: true };
   // פתיחת כתובת חיצונית בצורה שתעבוד בדפדפן ובכל מעטפת (מפה/יומן/וואטסאפ)
   function openExternal(url) {
     try { if (isCordovaOnly()) { window.open(url, "_system"); return; } } catch (e) {}
@@ -2344,6 +2350,24 @@
       clients: "לקוחות", report: "דוח", publish: "פרסום", settings: "הגדרות",
     }[view.ownerTab] || "ניהול העסק");
 
+    // הגדרת כל לשונית: מפתח, אייקון, תווית. הסדר בהמשך נקבע לפי tidyOwner().
+    const TAB_DEF = {
+      cal: ["🗓️", "יומן"], hours: ["🕐", "שעות"], services: ["✂️", "שירותים"],
+      products: ["🛍️", "מוצרים"], bookings: ["🎟️", "תורים"], clients: ["👥", "לקוחות"],
+      report: ["📊", "דוח"], publish: ["📣", "פרסום"], settings: ["⚙️", "הגדרות"],
+    };
+    // סדר מסודר לפי שימוש: עבודה יומית → הצעה → תובנות → ניהול
+    const tabOrder = tidyOwner()
+      ? ["cal", "bookings", "services", "products", "clients", "report", "hours", "publish", "settings"]
+      : ["cal", "hours", "services", "products", "bookings", "clients", "report", "publish", "settings"];
+    const tabBtn = (key) => {
+      const [ico, label] = TAB_DEF[key];
+      const icoHtml = key === "bookings"
+        ? `<span class="tb-ico" style="position:relative">${ico}${upcomingCount ? `<span class="badge-count" style="inset-inline-start:auto;inset-inline-end:-10px;top:-6px">${upcomingCount}</span>` : ""}</span>`
+        : `<span class="tb-ico">${ico}</span>`;
+      return `<button data-otab="${key}" class="${view.ownerTab === key ? "active" : ""}">${icoHtml}${label}</button>`;
+    };
+
     return `
     <div class="screen active">
       ${topbar(tabLabel, {})}
@@ -2352,16 +2376,7 @@
       <div class="otabbar-wrap">
         <button class="tab-arrow tab-arrow-start" data-tabscroll="start" aria-label="עוד לשונית">›</button>
         <div class="tabbar scroll" id="otabbar">
-          <button data-otab="cal" class="${view.ownerTab === "cal" ? "active" : ""}"><span class="tb-ico">🗓️</span>יומן</button>
-          <button data-otab="hours" class="${view.ownerTab === "hours" ? "active" : ""}"><span class="tb-ico">🕐</span>שעות</button>
-          <button data-otab="services" class="${view.ownerTab === "services" ? "active" : ""}"><span class="tb-ico">✂️</span>שירותים</button>
-          <button data-otab="products" class="${view.ownerTab === "products" ? "active" : ""}"><span class="tb-ico">🛍️</span>מוצרים</button>
-          <button data-otab="bookings" class="${view.ownerTab === "bookings" ? "active" : ""}">
-            <span class="tb-ico" style="position:relative">🎟️${upcomingCount ? `<span class="badge-count" style="inset-inline-start:auto;inset-inline-end:-10px;top:-6px">${upcomingCount}</span>` : ""}</span>תורים</button>
-          <button data-otab="clients" class="${view.ownerTab === "clients" ? "active" : ""}"><span class="tb-ico">👥</span>לקוחות</button>
-          <button data-otab="report" class="${view.ownerTab === "report" ? "active" : ""}"><span class="tb-ico">📊</span>דוח</button>
-          <button data-otab="publish" class="${view.ownerTab === "publish" ? "active" : ""}"><span class="tb-ico">📣</span>פרסום</button>
-          <button data-otab="settings" class="${view.ownerTab === "settings" ? "active" : ""}"><span class="tb-ico">⚙️</span>הגדרות</button>
+          ${tabOrder.map(tabBtn).join("")}
         </div>
         <button class="tab-arrow tab-arrow-end" data-tabscroll="end" aria-label="עוד לשונית">‹</button>
       </div>`}
@@ -3446,7 +3461,7 @@
   function ownerSettings(st) {
     const logo = st.shop.logo || "";
     const cover = st.shop.cover || "";
-    return `
+    const cLogo = `
       <div class="section-title">🖼️ לוגו המספרה</div>
       <div class="card">
         <div class="logo-set">
@@ -3462,7 +3477,8 @@
             <input type="file" accept="image/*" data-logofile style="display:none">
           </div>
         </div>
-      </div>
+      </div>`;
+    const cCover = `
       <div class="section-title">🌄 תמונת נושא (קאבר)</div>
       <div class="card">
         <div class="cover-preview${cover ? " has-img" : ""}">${cover ? `<img src="${esc(cover)}" alt="קאבר">` : "🌄 אין תמונת נושא"}</div>
@@ -3472,7 +3488,8 @@
           ${cover ? `<button class="btn btn-danger btn-sm" data-act="cover-remove">הסרה</button>` : ""}
         </div>
         <input type="file" accept="image/*" data-coverfile style="display:none">
-      </div>
+      </div>`;
+    const cLink = `
       <div class="section-title">🔗 הקישור שלך ללקוחות</div>
       <div class="card">
         <div class="hint" style="margin-bottom:10px">שלחו את הקישור הזה ללקוחות — הוא פותח את המספרה שלכם:</div>
@@ -3482,8 +3499,9 @@
           <button class="btn btn-sm" data-act="share-app">🔗 שיתוף</button>
           <button class="btn btn-wa btn-sm" data-act="share-wa"><svg class="wa-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M.057 24l1.687-6.163a11.867 11.867 0 01-1.587-5.945C.16 5.335 5.495 0 12.05 0a11.82 11.82 0 018.413 3.488 11.824 11.824 0 013.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 01-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.767.967-.94 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>וואטסאפ</button>
         </div>
-      </div>
-      ${qrShareCard()}
+      </div>`;
+    const cQr = qrShareCard();
+    const cStyle = `
       <div class="section-title">🎨 סגנון העיצוב</div>
       <div class="card">
         <p class="hint" style="margin-top:0;margin-bottom:12px">כך ייראה האתר — אצלכם ואצל הלקוחות.</p>
@@ -3493,7 +3511,8 @@
             <span class="so-body"><span class="so-name">${esc(s.name)}</span><span class="hint" style="display:block">${esc(s.desc)}</span></span>
             <span class="so-check">✓</span>
           </button>`).join("")}</div>
-      </div>
+      </div>`;
+    const cStaff = `
       <div class="section-title">🧑‍🔧 ספרים במספרה</div>
       <div class="card">
         <p class="hint" style="margin-top:0;margin-bottom:${(st.shop.staff || []).length ? "10px" : "12px"}">${(st.shop.staff || []).length
@@ -3501,10 +3520,10 @@
           : "אין ספרים מוגדרים. הוסיפו שמות כדי לאפשר ללקוח לבחור ספר מועדף."}</p>
         ${(st.shop.staff || []).length ? `<div class="staff-chips">${st.shop.staff.map((n) => `<span class="staff-chip">🧑 ${esc(n)}</span>`).join("")}</div>` : ""}
         <button class="btn btn-sm" data-act="edit-staff" style="margin-top:12px">${(st.shop.staff || []).length ? "עריכת רשימת הספרים" : "＋ הוספת ספרים"}</button>
-      </div>
-      ${ownerSecuritySection(st)}
-      ${ownerGallerySection()}
-
+      </div>`;
+    const cSecurity = ownerSecuritySection(st);
+    const cGallery = ownerGallerySection();
+    const cClientShow = `
       <div class="section-title">👁️ מה מוצג בעמוד הלקוח</div>
       <div class="card">
         <p class="hint" style="margin-top:0;margin-bottom:12px">בחרו אילו מקטעים הלקוחות יראו. כיבוי מקטע מסתיר אותו מהלקוחות (לא מוחק כלום).</p>
@@ -3520,9 +3539,9 @@
             <span>${ico} ${esc(label)}</span>
           </label>`).join("")}
         <button class="btn btn-primary" data-act="save-settings" style="margin-top:14px">שמירה</button>
-      </div>
-
-      <div class="section-title">פרטי העסק</div>
+      </div>`;
+    const cBusiness = `
+      <div class="section-title">📇 פרטי העסק</div>
       <div class="card">
         <div class="field"><label>שם העסק</label>
           <input class="input" id="set-name" value="${esc(st.shop.name)}"></div>
@@ -3571,22 +3590,20 @@
           <p class="hint" style="margin:6px 0 0">תור שנשאר פנוי כשנותר פחות מהזמן הזה ייעלם ממסך הלקוחות. למשל: אם תבחרו שעה, ותור של 14:00 עדיין פנוי ב-13:00 — הוא לא יוצג יותר. אצלכם ביומן הוא ממשיך להופיע, ותוכלו לרשום אליו לקוח מזדמן.</p>
         </div>
         <button class="btn btn-primary" data-act="save-settings">שמירת הגדרות</button>
-      </div>
-
-      ${installSettingsCard()}
-
-      <div class="section-title">התראות</div>
+      </div>`;
+    const cInstall = installSettingsCard();
+    const cNotif = `
+      <div class="section-title">🔔 התראות</div>
       <div class="card">
         <div class="conn-line" style="margin-bottom:12px">
           <span class="conn-dot ${Notify.permission() === "granted" ? "" : "local"}"></span>
           ${Notify.permission() === "granted" ? "התראות פעילות — תקבל הודעה על כל תור חדש" : "התראות כבויות"}
         </div>
         <button class="btn" data-act="enable-notif">${Notify.permission() === "granted" ? "בדיקת התראה" : "אפשר קבלת התראות על תורים חדשים"}</button>
-      </div>
-
-      ${supportCard()}
-
-      <div class="section-title">חיבור</div>
+      </div>`;
+    const cSupport = supportCard();
+    const cConnection = `
+      <div class="section-title">🔌 חיבור וגרסה</div>
       <div class="card">
         <div class="conn-line">
           <span class="conn-dot ${Store.mode === "cloud" ? "" : "local"}"></span>
@@ -3596,8 +3613,8 @@
           <span class="conn-dot"></span>גרסה ${APP_VERSION}
         </div>
         <button class="btn btn-sm" data-act="force-update" style="margin-top:12px">🔄 בדיקת עדכון</button>
-      </div>
-
+      </div>`;
+    const cBackup = `
       <div class="section-title">💾 גיבוי הנתונים</div>
       <div class="card">
         <p class="hint" style="margin-top:0">הורידו עותק של כל נתוני המספרה — תורים, לקוחות, שירותים, מוצרים ושעות פעילות. שמרו אותו במקום בטוח. מומלץ לגבות אחת לחודש.</p>
@@ -3608,26 +3625,48 @@
         <p class="hint" style="margin:12px 0 0">שחזור מגיבוי <b>דורס</b> את כל הנתונים הנוכחיים במספרה.</p>
         <button class="btn btn-sm" data-act="backup-restore" style="margin-top:10px">⬆️ שחזור מקובץ גיבוי</button>
         <input type="file" accept="application/json,.json" data-backupfile style="display:none">
-      </div>
-
-      <div class="section-title">יציאה</div>
+      </div>`;
+    const cLogout = `
+      <div class="section-title">🚪 יציאה</div>
       <div class="card">
         <p class="hint" style="margin-top:0">יציאה מהניהול במכשיר הזה — שימושי במכשיר משותף או להחלפת מספרה. הנתונים נשמרים; כדי להיכנס שוב צריך את הכתובת והסיסמה.</p>
         <button class="btn btn-danger" data-act="owner-logout" style="margin-top:12px">🚪 יציאה / החלפת מספרה</button>
-      </div>
-
+      </div>`;
+    const cDanger = `
       <div class="section-title" style="color:var(--bad)">⚠️ אזור מסוכן</div>
       <div class="card danger-zone">
         <p class="hint" style="margin-top:0">מחיקת המספרה תמחק <b>לצמיתות</b> את כל התורים, הלקוחות, התמונות, המוצרים וההגדרות. הקישור שלכם יתפנה ואחרים יוכלו לקחת אותו. <b>אי אפשר לשחזר.</b></p>
         <button class="btn btn-danger" data-act="delete-shop" style="margin-top:12px">🗑️ מחיקת המספרה לצמיתות</button>
-      </div>
-
+      </div>`;
+    const footer = `
       <p class="hint" style="text-align:center;margin-top:20px">
         <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--muted)">מדיניות פרטיות</a>
         · <a href="terms.html" target="_blank" rel="noopener" style="color:var(--muted)">תנאי שימוש</a>
         · BarberTor
-      </p>
-    `;
+      </p>`;
+
+    // מבנה מסודר (כרגע "try"): כרטיסים מקובצים בקבוצות מתקפלות לפי נושא
+    if (tidyOwner()) {
+      const grp = (id, title, body) => body && body.trim() ? `
+        <details class="set-group" id="setg-${id}"${setGroupOpen[id] ? " open" : ""}>
+          <summary class="set-group-head"><span class="sg-title">${title}</span><span class="sg-chev">⌄</span></summary>
+          <div class="set-group-body">${body}</div>
+        </details>` : "";
+      return `<div class="set-groups">
+        ${grp("biz", "📇 פרטי העסק והתורים", cBusiness + cStaff)}
+        ${grp("brand", "🎨 מיתוג ועיצוב", cLogo + cCover + cStyle)}
+        ${grp("share", "📣 שיתוף וקישור ללקוחות", cLink + cQr)}
+        ${grp("client", "👁️ עמוד הלקוח", cClientShow + cGallery)}
+        ${grp("alerts", "🔔 התראות ואבטחה", cNotif + cSecurity + cInstall)}
+        ${grp("tools", "🛠️ כלים ותחזוקה", cBackup + cConnection + cSupport)}
+        ${grp("account", "🚪 חשבון", cLogout + cDanger)}
+      </div>${footer}`;
+    }
+
+    // מבנה שטוח מקורי — לכל שאר המספרות (סדר זהה למקור)
+    return cLogo + cCover + cLink + cQr + cStyle + cStaff + cSecurity + cGallery +
+      cClientShow + cBusiness + cInstall + cNotif + cSupport + cConnection +
+      cBackup + cLogout + cDanger + footer;
   }
 
   function confirmOwnerLogout() {
@@ -4510,6 +4549,14 @@
      חיווט אירועים (delegation)
      =======================================================================*/
   function wire() {
+    // שמירת מצב פתיחה/סגירה של קבוצות ההגדרות. אירוע toggle אינו עולה (bubbling),
+    // אבל נלכד בשלב ה-capture, כך שמאזין יחיד על document מספיק.
+    document.addEventListener("toggle", (e) => {
+      const d = e.target;
+      if (d && d.classList && d.classList.contains("set-group") && d.id) {
+        setGroupOpen[d.id.replace(/^setg-/, "")] = d.open;
+      }
+    }, true);
     // מעטפת Cordova: פתיחת קישורים חיצוניים (Waze / מפות) בדפדפן המערכת במקום בתוך האפליקציה
     if (isCordovaOnly()) {
       document.addEventListener("click", (e) => {
