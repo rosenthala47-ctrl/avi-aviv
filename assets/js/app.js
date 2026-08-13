@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "109";
+  const APP_VERSION = "110";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -693,13 +693,13 @@
       ${arrivalBanner(st)}
       ${reviewBanner(st)}
       ${aboutCard(st)}
-      ${cShow(st, "showProducts") ? homeProducts(st) : ""}
-      ${cShow(st, "showReviews") ? homeReviews(st) : ""}
       ${cShow(st, "showGallery") ? homeGallery() : ""}
       ${cShow(st, "showHours") ? hoursCard(st) : ""}
       ${mapsCard(st)}
       ${installCard()}
       ${cShow(st, "showShare") ? shareCard() : ""}
+      ${cShow(st, "showProducts") ? homeProducts(st) : ""}
+      ${cShow(st, "showReviews") ? homeReviews(st) : ""}
       <p class="hint" style="text-align:center;margin-top:22px">
         מנהלים מספרה? <a href="#new" data-act="open-signup" style="color:var(--sky)">פתחו מערכת תורים משלכם ›</a>
       </p>
