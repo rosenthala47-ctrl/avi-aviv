@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "113";
+  const APP_VERSION = "114";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -96,6 +96,7 @@
     route: (function () { const r = localStorage.getItem(ROUTEKEY); return r === "owner" || r === "client" ? r : "client"; })(), // client | owner
     clientTab: (function () { const def = condensedClient() ? "home" : "book"; try { const t = localStorage.getItem("ug_ctab__" + SHOP); return ["book", "gallery", "products", "reviews", "mine", "home"].includes(t) ? t : def; } catch (e) { return def; } })(),   // נשמר כדי לא לאבד מיקום ברענון
     ownerTab: (function () { try { return localStorage.getItem("ug_otab__" + SHOP) || "cal"; } catch (e) { return "cal"; } })(),  // cal | hours | services | bookings | clients | report | publish | settings
+    settingsPage: null,  // במבנה המסודר: קטגוריית הגדרות פתוחה (business/booking/brand/...) או null=רשימה
     selService: null,
     selStaff: "",        // ספר מועדף שהלקוח בחר (בקשה בלבד)
     selDate: null,       // יום נבחר בצד הלקוח
@@ -2351,7 +2352,13 @@
     const banners = locked ? "" :
       subBanner() + spamBanner() + (view.ownerTab !== "settings" ? ownerNotifBanner() : "");
 
-    const tabLabel = locked ? "המנוי הסתיים" : ({
+    const settingsPageLabel = {
+      business: "פרטי העסק", booking: "תורים ותזכורות", brand: "מיתוג ועיצוב",
+      client: "עמוד הלקוח", alerts: "התראות ואבטחה", tools: "כלים ותחזוקה", account: "חשבון",
+    };
+    const tabLabel = locked ? "המנוי הסתיים"
+      : (tidyOwner() && view.ownerTab === "settings" && view.settingsPage && settingsPageLabel[view.settingsPage])
+      || ({
       cal: "יומן", hours: "שעות", services: "שירותים", products: "מוצרים", bookings: "תורים",
       clients: "לקוחות", report: "דוח", publish: "פרסום", settings: "הגדרות",
     }[view.ownerTab] || "ניהול העסק");
@@ -2381,14 +2388,16 @@
     <div class="screen active">
       ${topbar(tabLabel, {})}
       <div class="content" id="oscroll">${banners}${body}</div>
-      ${locked ? "" : `
+      ${locked ? "" : (tidyOwner()
+        ? `<div class="tabbar" id="otabbar">${tabOrder.map(tabBtn).join("")}</div>`
+        : `
       <div class="otabbar-wrap">
         <button class="tab-arrow tab-arrow-start" data-tabscroll="start" aria-label="עוד לשונית">›</button>
         <div class="tabbar scroll" id="otabbar">
           ${tabOrder.map(tabBtn).join("")}
         </div>
         <button class="tab-arrow tab-arrow-end" data-tabscroll="end" aria-label="עוד לשונית">‹</button>
-      </div>`}
+      </div>`)}
     </div>`;
   }
 
@@ -3682,42 +3691,60 @@
         · BarberTor
       </p>`;
 
-    // מבנה מסודר (כרגע "try"): תפריט ניהול בראש + כרטיסים מקובצים בקבוצות מתקפלות
+    // מבנה מסודר (כרגע "try"): רשימת קטגוריות → כל אחת פותחת עמוד עם כל האפשרויות שלה
     if (tidyOwner()) {
-      const grp = (id, title, body) => body && body.trim() ? `
-        <details class="set-group" id="setg-${id}"${setGroupOpen[id] ? " open" : ""}>
-          <summary class="set-group-head"><span class="sg-title">${title}</span><span class="sg-chev">⌄</span></summary>
-          <div class="set-group-body">${body}</div>
-        </details>` : "";
-      // תפריט הניהול — הלשוניות שירדו מהסרגל התחתון, נגישות מכאן
-      const navItems = [
-        ["hours", "🕐", "שעות פעילות", "ימים ושעות עבודה, חופשות"],
-        ["services", "✂️", "שירותים", "שמות, מחירים ומשכי זמן"],
-        ["products", "🛍️", "מוצרים", "מוצרים למכירה בעמוד הלקוח"],
-        ["clients", "👥", "לקוחות", "ספר הלקוחות וחסימות"],
-        ["report", "📊", "דוח והכנסות", "סיכום חודשי וביקורות"],
-        ["publish", "📣", "פרסום וקישור", "הקישור, QR והודעה ללקוחות"],
-      ];
-      const navCard = `
-        <div class="section-title">🗂️ ניהול המספרה</div>
-        <div class="card set-nav">
-          ${navItems.map(([key, ico, label, sub]) => `
-            <button class="set-nav-item" data-otab="${key}">
-              <span class="sni-ico">${ico}</span>
-              <span class="sni-body"><span class="sni-label">${esc(label)}</span><span class="sni-sub">${esc(sub)}</span></span>
-              <span class="sni-arrow">‹</span>
-            </button>`).join("")}
-        </div>`;
-      return `${navCard}
-      <div class="set-groups">
-        ${grp("biz", "📇 פרטי העסק", cBusinessInfo)}
-        ${grp("booking", "⏰ תורים ותזכורות", cBooking)}
-        ${grp("brand", "🎨 מיתוג ועיצוב", cLogo + cCover + cStyle)}
-        ${grp("client", "👁️ עמוד הלקוח", cClientShow + cGallery)}
-        ${grp("alerts", "🔔 התראות ואבטחה", cNotif + cSecurity + cInstall)}
-        ${grp("tools", "🛠️ כלים ותחזוקה", cBackup + cConnection + cSupport)}
-        ${grp("account", "🚪 חשבון", cLogout + cDanger)}
-      </div>${footer}`;
+      // תוכן עמוד-הפירוט לכל קטגוריית הגדרות
+      const detailPages = {
+        business: cBusinessInfo + cStaff,
+        booking: cBooking,
+        brand: cLogo + cCover + cStyle,
+        client: cClientShow + cGallery,
+        alerts: cNotif + cSecurity + cInstall,
+        tools: cBackup + cConnection + cSupport,
+        account: cLogout + cDanger,
+      };
+      // עמוד פירוט פתוח — מציג את כל האפשרויות של הקטגוריה + כפתור חזרה
+      if (view.settingsPage && detailPages[view.settingsPage]) {
+        return `<button class="btn btn-ghost btn-sm home-back" data-act="settings-back">‹ חזרה להגדרות</button>` +
+          detailPages[view.settingsPage] + footer;
+      }
+      view.settingsPage = null;
+
+      // רשימת הקטגוריות — כל שורה בעיצוב אחיד (אייקון צבעוני + כותרת + חץ)
+      const row = (nav, ico, color, label, sub) => `
+        <button class="set-row" ${nav}>
+          <span class="sr-ico" style="background:${color}">${ico}</span>
+          <span class="sr-body"><span class="sr-label">${esc(label)}</span>${sub ? `<span class="sr-sub">${esc(sub)}</span>` : ""}</span>
+          <span class="sr-chev">‹</span>
+        </button>`;
+      const pageRow = (page, ico, color, label, sub) => row(`data-act="settings-page" data-page="${page}"`, ico, color, label, sub);
+      const tabRow = (tab, ico, color, label, sub) => row(`data-otab="${tab}"`, ico, color, label, sub);
+
+      return `
+        <div class="section-title">🗂️ ניהול יומי</div>
+        <div class="card set-list">
+          ${tabRow("hours", "🕐", "#8b6f47", "שעות פעילות", "ימים ושעות עבודה, חופשות")}
+          ${tabRow("services", "✂️", "#0ea5e9", "שירותים", "שמות, מחירים ומשכי זמן")}
+          ${tabRow("products", "🛍️", "#22c55e", "מוצרים", "מוצרים למכירה בעמוד הלקוח")}
+          ${tabRow("clients", "👥", "#6366f1", "לקוחות", "ספר הלקוחות וחסימות")}
+          ${tabRow("report", "📊", "#a855f7", "דוח והכנסות", "סיכום חודשי וביקורות")}
+          ${tabRow("publish", "📣", "#ef4444", "פרסום וקישור", "הקישור, QR והודעה ללקוחות")}
+        </div>
+
+        <div class="section-title">⚙️ הגדרות המספרה</div>
+        <div class="card set-list">
+          ${pageRow("business", "📇", "#0ea5e9", "פרטי העסק", "שם, תיאור, רשתות, כתובת וטלפון")}
+          ${pageRow("booking", "⏰", "#f59e0b", "תורים ותזכורות", "מרווח, תזכורות וסגירת הרשמה")}
+          ${pageRow("brand", "🎨", "#ec4899", "מיתוג ועיצוב", "לוגו, תמונת נושא וסגנון")}
+          ${pageRow("client", "👁️", "#14b8a6", "עמוד הלקוח", "מה מוצג ללקוחות + גלריה")}
+        </div>
+
+        <div class="card set-list">
+          ${pageRow("alerts", "🔔", "#f97316", "התראות ואבטחה", "התראות פוש ואבטחת חשבון")}
+          ${pageRow("tools", "🛠️", "#64748b", "כלים ותחזוקה", "גיבוי, גרסה ותמיכה")}
+          ${pageRow("account", "🚪", "#ef4444", "חשבון", "יציאה ומחיקת המספרה")}
+        </div>
+        ${footer}`;
     }
 
     // מבנה שטוח מקורי — לכל שאר המספרות (סדר זהה למקור)
@@ -4649,7 +4676,9 @@
       if (t.dataset.tab) { view.clientTab = t.dataset.tab; render(); return; }
       if (t.dataset.otab) {
         view.ownerTab = t.dataset.otab;
+        view.settingsPage = null;   // מעבר לשונית מאפס את עמוד-ההגדרות הפתוח
         try { localStorage.setItem("ug_otab__" + SHOP, view.ownerTab); } catch (e2) {}
+        try { $("#oscroll") && ($("#oscroll").scrollTop = 0); } catch (e3) {}
         render(); return;
       }
 
@@ -4658,6 +4687,16 @@
 
       switch (act) {
         case "close-modal": closeModal(); break;
+
+        // ניווט בהגדרות המסודרות: פתיחת עמוד קטגוריה / חזרה לרשימה
+        case "settings-page":
+          view.settingsPage = t.dataset.page || null;
+          try { $("#oscroll") && ($("#oscroll").scrollTop = 0); } catch (e4) {}
+          render(); break;
+        case "settings-back":
+          view.settingsPage = null;
+          try { $("#oscroll") && ($("#oscroll").scrollTop = 0); } catch (e4) {}
+          render(); break;
 
         case "open-confirm": openConfirm(); break;
         case "do-book": doBook(); break;
@@ -5286,28 +5325,26 @@
   }
 
   async function saveSettings() {
-    const socPatch = {};
-    SOCIAL_PLATFORMS.forEach((p) => {
-      const el = $("#set-" + p.key);
-      socPatch[p.key] = socialHandle(el ? el.value : "", p.key);
-    });
-    await Store.saveShop(Object.assign({
-      name: $("#set-name").value.trim() || "המספרה",
-      tagline: $("#set-tag").value.trim(),
-      about: ($("#set-about") && $("#set-about").value.trim()) || "",
-      address: $("#set-addr").value.trim(),
-      phone: $("#set-phone").value.trim(),
-      slotStep: Number($("#set-step").value),
-      reminderMinutes: Number($("#set-remind").value),
-      remindDayBefore: !($("#set-remind-day") && !$("#set-remind-day").checked),
-      hideFreeBeforeMin: Number(($("#set-hidefree") && $("#set-hidefree").value) || 0),
-      // מה מוצג בעמוד הלקוח (checkbox מסומן = מוצג). ברירת מחדל: מוצג.
-      showReviews: !($("#set-showReviews") && !$("#set-showReviews").checked),
-      showGallery: !($("#set-showGallery") && !$("#set-showGallery").checked),
-      showProducts: !($("#set-showProducts") && !$("#set-showProducts").checked),
-      showHours: !($("#set-showHours") && !$("#set-showHours").checked),
-      showShare: !($("#set-showShare") && !$("#set-showShare").checked),
-    }, socPatch));
+    // חשוב: במבנה המסודר כל קטגוריה בעמוד נפרד, אז רק חלק מהשדות קיימים ב-DOM.
+    // מעדכנים אך ורק שדות שקיימים כרגע — כדי לא לקרוס ולא לדרוס ערכים של עמוד אחר.
+    const patch = {};
+    const put = (sel, key, fn) => { const el = $(sel); if (el) patch[key] = fn(el); };
+    put("#set-name", "name", (el) => el.value.trim() || "המספרה");
+    put("#set-tag", "tagline", (el) => el.value.trim());
+    put("#set-about", "about", (el) => el.value.trim());
+    put("#set-addr", "address", (el) => el.value.trim());
+    put("#set-phone", "phone", (el) => el.value.trim());
+    put("#set-step", "slotStep", (el) => Number(el.value));
+    put("#set-remind", "reminderMinutes", (el) => Number(el.value));
+    put("#set-remind-day", "remindDayBefore", (el) => !!el.checked);
+    put("#set-hidefree", "hideFreeBeforeMin", (el) => Number(el.value || 0));
+    put("#set-showReviews", "showReviews", (el) => !!el.checked);
+    put("#set-showGallery", "showGallery", (el) => !!el.checked);
+    put("#set-showProducts", "showProducts", (el) => !!el.checked);
+    put("#set-showHours", "showHours", (el) => !!el.checked);
+    put("#set-showShare", "showShare", (el) => !!el.checked);
+    SOCIAL_PLATFORMS.forEach((p) => { const el = $("#set-" + p.key); if (el) patch[p.key] = socialHandle(el.value, p.key); });
+    await Store.saveShop(patch);
     toast("ההגדרות נשמרו ✓", "good", "⚙️"); render();
   }
 
