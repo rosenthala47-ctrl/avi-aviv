@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "107";
+  const APP_VERSION = "108";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -68,6 +68,13 @@
     const list = (window.UG_CONFIG && UG_CONFIG.authShops) || [];
     return list.indexOf("*") !== -1 || list.indexOf(SHOP) !== -1;
   }
+
+  /* עמוד לקוח מצומצם: כל התוכן (מוצרים/ביקורות/גלריה/רשתות) בעמוד "בית" אחד,
+     עם כפתור "הזמנת תור" שמוביל לעמוד ההזמנה. כרגע נבדק על "try" בלבד לפני
+     החלה על כל המספרות. שנה את הרשימה כדי להחיל על עוד מספרות, או ["*"] לכולן. */
+  function condensedClient() {
+    return SHOP === "try";
+  }
   // פתיחת כתובת חיצונית בצורה שתעבוד בדפדפן ובכל מעטפת (מפה/יומן/וואטסאפ)
   function openExternal(url) {
     try { if (isCordovaOnly()) { window.open(url, "_system"); return; } } catch (e) {}
@@ -77,7 +84,7 @@
   /* ---------- מצב תצוגה מקומי (לא נשמר בשרת) ---------- */
   const view = {
     route: (function () { const r = localStorage.getItem(ROUTEKEY); return r === "owner" || r === "client" ? r : "client"; })(), // client | owner
-    clientTab: (function () { try { const t = localStorage.getItem("ug_ctab__" + SHOP); return ["book", "gallery", "products", "reviews", "mine"].includes(t) ? t : "book"; } catch (e) { return "book"; } })(),   // נשמר כדי לא לאבד מיקום ברענון
+    clientTab: (function () { const def = SHOP === "try" ? "home" : "book"; try { const t = localStorage.getItem("ug_ctab__" + SHOP); return ["book", "gallery", "products", "reviews", "mine", "home"].includes(t) ? t : def; } catch (e) { return def; } })(),   // נשמר כדי לא לאבד מיקום ברענון
     ownerTab: (function () { try { return localStorage.getItem("ug_otab__" + SHOP) || "cal"; } catch (e) { return "cal"; } })(),  // cal | hours | services | bookings | clients | report | publish | settings
     selService: null,
     selStaff: "",        // ספר מועדף שהלקוח בחר (בקשה בלבד)
@@ -599,9 +606,37 @@
     if (!view.selService || !activeServices.find((s) => s.id === view.selService)) {
       view.selService = activeServices[0] ? activeServices[0].id : null;
     }
+    const previewBar = view.ownerPreview ? `
+      <div class="preview-bar">
+        <span>👁️ תצוגת לקוח — כך הלקוחות רואים את הדף</span>
+        <button class="btn btn-sm" data-act="exit-preview">חזרה לניהול ›</button>
+      </div>` : "";
+
+    // מבנה מצומצם (כרגע "try"): בית | התורים שלי, וכפתור "הזמנת תור" בעמוד הבית
+    if (condensedClient()) {
+      if (!["home", "book", "mine"].includes(view.clientTab)) view.clientTab = "home";
+      let cbody;
+      if (view.clientTab === "book") cbody = clientBook(st, activeServices);
+      else if (view.clientTab === "mine") cbody = clientMine(st);
+      else cbody = clientHome(st, activeServices);
+      return `
+      <div class="screen active">
+        ${previewBar}
+        ${topbar("קביעת תור", {})}
+        <div class="content" id="cscroll">${cbody}</div>
+        <div class="tabbar">
+          <button data-tab="home" class="${view.clientTab === "home" || view.clientTab === "book" ? "active" : ""}">
+            <span class="tb-ico">🏠</span>בית</button>
+          <button data-tab="mine" class="${view.clientTab === "mine" ? "active" : ""}">
+            <span class="tb-ico">🎟️</span>התורים שלי</button>
+        </div>
+      </div>`;
+    }
+
     const hasProducts = activeProducts(st).length > 0;
     // אם לשונית ״מוצרים״ נבחרה אבל אין מוצרים (הספר הסיר) — חזרה לקביעת תור
     if (view.clientTab === "products" && !hasProducts) view.clientTab = "book";
+    if (view.clientTab === "home") view.clientTab = "book";   // "בית" קיים רק במבנה המצומצם
     let body;
     if (view.clientTab === "gallery") body = clientGallery();
     else if (view.clientTab === "reviews") body = clientReviews();
@@ -610,11 +645,7 @@
     else body = clientBook(st, activeServices);
     return `
     <div class="screen active">
-      ${view.ownerPreview ? `
-      <div class="preview-bar">
-        <span>👁️ תצוגת לקוח — כך הלקוחות רואים את הדף</span>
-        <button class="btn btn-sm" data-act="exit-preview">חזרה לניהול ›</button>
-      </div>` : ""}
+      ${previewBar}
       ${topbar("קביעת תור", {})}
       <div class="content" id="cscroll">${body}</div>
       <div class="tabbar">
@@ -630,6 +661,91 @@
           <span class="tb-ico">🎟️</span>התורים שלי</button>
       </div>
     </div>`;
+  }
+
+  /* ===== עמוד "בית" מצומצם — כפתור הזמנה בראש + כל התוכן בעמוד אחד ===== */
+  function clientHome(st, services) {
+    const bookCta = `<button class="btn btn-primary home-book-cta" data-tab="book">🗓️ הזמנת תור</button>`;
+    return `
+      ${st.shop.cover ? `<div class="client-cover"><img src="${esc(st.shop.cover)}" alt=""></div>` : ""}
+      ${rescheduleBanner(st)}
+      ${alertBanner(st)}
+      ${notifBanner()}
+      ${arrivalBanner(st)}
+      ${reviewBanner(st)}
+      ${bookCta}
+      ${aboutCard(st)}
+      ${homeProducts(st)}
+      ${homeReviews(st)}
+      ${homeGallery()}
+      ${hoursCard(st)}
+      ${mapsCard(st)}
+      ${installCard()}
+      ${shareCard()}
+      <p class="hint" style="text-align:center;margin-top:22px">
+        מנהלים מספרה? <a href="#new" data-act="open-signup" style="color:var(--sky)">פתחו מערכת תורים משלכם ›</a>
+      </p>
+      <p class="hint" style="text-align:center;margin-top:8px">
+        <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--muted)">מדיניות פרטיות</a>
+        · <a href="terms.html" target="_blank" rel="noopener" style="color:var(--muted)">תנאי שימוש</a>
+        · <span data-act="delete-my-data" style="color:var(--muted);text-decoration:underline;cursor:pointer">מחיקת הנתונים שלי</span>
+      </p>
+    `;
+  }
+
+  // מוצרים כמקטע בעמוד הבית — ריק אם אין מוצרים (בלי "אין מוצרים")
+  function homeProducts(st) {
+    const products = activeProducts(st);
+    if (!products.length) return "";
+    const waOk = !!waIntl(st.shop.phone || "");
+    return `
+      <div class="section-title">🛍️ המוצרים שלנו</div>
+      ${products.map((p) => `
+        <div class="card prod-card">
+          ${p.image ? `<div class="prod-card-img" data-act="product-zoom" data-id="${p.id}"><img src="${esc(p.image)}" alt="${esc(p.name)}"><span class="prod-zoom-hint">🔍</span></div>` : ""}
+          <div class="prod-card-body">
+            <div class="prod-card-top">
+              <span class="prod-card-name">${esc(p.name)}</span>
+              <span class="prod-card-price">${u.fmtPrice(p.price)}</span>
+            </div>
+            ${p.description ? `<p class="prod-card-desc">${esc(p.description)}</p>` : ""}
+            ${waOk
+              ? `<button class="btn btn-wa" data-act="product-interest" data-id="${p.id}">💬 מעניין אותי — פרטים לקנייה</button>`
+              : `<p class="hint">לפרטים ולרכישה — פנו אל המספרה.</p>`}
+          </div>
+        </div>`).join("")}
+    `;
+  }
+
+  // ביקורות כמקטע בעמוד הבית (בלי כרטיס "קצת עלינו" שכבר מוצג למעלה)
+  function homeReviews(st) {
+    const reviews = (st.reviews || []).slice().sort((a, z) => (z.createdAt || 0) - (a.createdAt || 0));
+    const avg = reviews.length ? reviews.reduce((s, r) => s + Number(r.rating || 0), 0) / reviews.length : 0;
+    let html = `
+      <div class="section-title">⭐ ביקורות</div>
+      <div class="reviews-hero">
+        <div class="rh-avg">${reviews.length ? avg.toFixed(1) : "—"}</div>
+        ${starsRow(Math.round(avg))}
+        <div class="rh-count">${reviews.length} ${reviews.length === 1 ? "ביקורת" : "ביקורות"}</div>
+      </div>
+      <button class="btn btn-primary" data-act="add-review" style="margin-bottom:16px">＋ כתיבת ביקורת</button>`;
+    if (reviews.length) html += reviews.map((r) => reviewCardHtml(r)).join("");
+    return html;
+  }
+
+  // גלריה כמקטע בעמוד הבית — ריק אם אין תמונות
+  function homeGallery() {
+    const photos = Store.getGallery();
+    if (!photos.length) return "";
+    return `
+      <div class="section-title">🖼️ גלריית תספורות</div>
+      <div class="gallery-grid">
+        ${photos.map((p) => `
+          <button class="gphoto" data-photo="${p.id}">
+            <img src="${p.dataUrl}" alt="${esc(p.caption || "תספורת")}" loading="lazy">
+            ${p.caption ? `<span class="gcap">${esc(p.caption)}</span>` : ""}
+          </button>`).join("")}
+      </div>`;
   }
 
   /* ---------- גלריה (תמונות בלבד) ---------- */
@@ -1336,7 +1452,7 @@
       : "בחרו שעה לתור";
 
     return `
-      ${st.shop.cover ? `<div class="client-cover"><img src="${esc(st.shop.cover)}" alt=""></div>` : ""}
+      ${condensedClient() ? `<button class="btn btn-ghost btn-sm home-back" data-tab="home">‹ חזרה לעמוד הבית</button>` : (st.shop.cover ? `<div class="client-cover"><img src="${esc(st.shop.cover)}" alt=""></div>` : "")}
       ${rescheduleBanner(st)}
       ${alertBanner(st)}
       ${notifBanner()}
@@ -1353,7 +1469,7 @@
 
       <div style="height:14px"></div>
       <button class="btn btn-primary" data-act="open-confirm" ${view.selSlot ? "" : "disabled"}>${ctaLabel}</button>
-
+      ${condensedClient() ? "" : `
       ${aboutCard(st)}
       ${hoursCard(st)}
       ${installCard()}
@@ -1366,7 +1482,7 @@
         <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--muted)">מדיניות פרטיות</a>
         · <a href="terms.html" target="_blank" rel="noopener" style="color:var(--muted)">תנאי שימוש</a>
         · <span data-act="delete-my-data" style="color:var(--muted);text-decoration:underline;cursor:pointer">מחיקת הנתונים שלי</span>
-      </p>
+      </p>`}
     `;
   }
 
@@ -1661,7 +1777,7 @@
 
     if (!mine.length && !myWaits.length) {
       return alertBanner(st) + reviewBanner(st) +
-        emptyState("🎟️", "אין לך תורים", "עברו ל״קביעת תור״ כדי לקבוע את התור הראשון");
+        emptyState("🎟️", "אין לך תורים", condensedClient() ? "לחצו ״בית״ ואז ״הזמנת תור״ כדי לקבוע את התור הראשון" : "עברו ל״קביעת תור״ כדי לקבוע את התור הראשון");
     }
     const card = (x, isPast) => {
       const b = x.b;
@@ -5306,7 +5422,7 @@
     Store.subscribe(onStoreChange);
     Store.subscribeGallery(() => {
       // רענון כשמסתכלים על גלריה ולא באמצע הקלדה
-      const onGalleryView = (view.route === "client" && view.clientTab === "gallery") ||
+      const onGalleryView = (view.route === "client" && (view.clientTab === "gallery" || view.clientTab === "home")) ||
         (view.route === "owner" && view.ownerTab === "settings");
       if (onGalleryView && !isEditingRoot()) render();
     });

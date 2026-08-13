@@ -220,6 +220,12 @@
   margin: -4px 0 4px; border-radius: 16px; overflow: hidden; aspect-ratio: 16 / 7; background: var(--surface-2);
 }
 .client-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* עמוד לקוח מצומצם — כפתור הזמנה בולט בראש עמוד הבית + כפתור חזרה */
+.home-book-cta {
+  font-size: 17px; font-weight: 800; padding: 16px; margin: 2px 0 6px;
+  box-shadow: 0 8px 22px rgba(56,189,248,.28);
+}
+.home-back { width: auto; margin-bottom: 8px; }
 /* תצוגה מקדימה של קאבר בהגדרות */
 .cover-preview {
   border-radius: 12px; overflow: hidden; aspect-ratio: 16 / 7; background: var(--surface-2);
