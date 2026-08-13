@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "114";
+  const APP_VERSION = "115";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -97,6 +97,7 @@
     clientTab: (function () { const def = condensedClient() ? "home" : "book"; try { const t = localStorage.getItem("ug_ctab__" + SHOP); return ["book", "gallery", "products", "reviews", "mine", "home"].includes(t) ? t : def; } catch (e) { return def; } })(),   // נשמר כדי לא לאבד מיקום ברענון
     ownerTab: (function () { try { return localStorage.getItem("ug_otab__" + SHOP) || "cal"; } catch (e) { return "cal"; } })(),  // cal | hours | services | bookings | clients | report | publish | settings
     settingsPage: null,  // במבנה המסודר: קטגוריית הגדרות פתוחה (business/booking/brand/...) או null=רשימה
+    settingsItem: null,  // הפריט הפתוח בתוך הקטגוריה (רמה שלישית) או null=רשימת הפריטים
     selService: null,
     selStaff: "",        // ספר מועדף שהלקוח בחר (בקשה בלבד)
     selDate: null,       // יום נבחר בצד הלקוח
@@ -2357,7 +2358,7 @@
       client: "עמוד הלקוח", alerts: "התראות ואבטחה", tools: "כלים ותחזוקה", account: "חשבון",
     };
     const tabLabel = locked ? "המנוי הסתיים"
-      : (tidyOwner() && view.ownerTab === "settings" && view.settingsPage && settingsPageLabel[view.settingsPage])
+      : (tidyOwner() && view.ownerTab === "settings" && view.settingsPage && !view.settingsItem && settingsPageLabel[view.settingsPage])
       || ({
       cal: "יומן", hours: "שעות", services: "שירותים", products: "מוצרים", bookings: "תורים",
       clients: "לקוחות", report: "דוח", publish: "פרסום", settings: "הגדרות",
@@ -3691,35 +3692,118 @@
         · BarberTor
       </p>`;
 
-    // מבנה מסודר (כרגע "try"): רשימת קטגוריות → כל אחת פותחת עמוד עם כל האפשרויות שלה
+    // מבנה מסודר (כרגע "try"): קטגוריות → פריטים → ההגדרה עצמה (שלוש רמות)
     if (tidyOwner()) {
-      // תוכן עמוד-הפירוט לכל קטגוריית הגדרות
-      const detailPages = {
-        business: cBusinessInfo + cStaff,
-        booking: cBooking,
-        brand: cLogo + cCover + cStyle,
-        client: cClientShow + cGallery,
-        alerts: cNotif + cSecurity + cInstall,
-        tools: cBackup + cConnection + cSupport,
-        account: cLogout + cDanger,
+      // כרטיס עריכה לשדה בודד (רמה שלישית)
+      const editCard = (title, inner, hint) => `
+        <div class="section-title">${title}</div>
+        <div class="card">
+          ${inner}
+          ${hint ? `<p class="hint" style="margin:10px 0 0">${hint}</p>` : ""}
+          <button class="btn btn-primary" data-act="save-settings" style="margin-top:14px">שמירה</button>
+        </div>`;
+      const hideFreeLabel = (n) => !Number(n) ? "ללא"
+        : (n >= 60 ? (n % 60 ? (n / 60).toFixed(1) : n / 60) + " שעות לפני" : n + " דקות לפני");
+      const styleName = (WIZ_STYLES.find((s) => s.id === (st.shop.style || "sky")) || {}).name || "";
+      const socCount = SOCIAL_PLATFORMS.filter((p) => socialHandle(st.shop[p.key] || "", p.key)).length;
+
+      /* מבנה ההגדרות. לכל פריט: אייקון, צבע, כותרת, ערך נוכחי (val),
+         ותוכן העריכה (card) — או type:"toggle" למתג ישיר בשורה. */
+      const setPages = {
+        business: [
+          { id: "name", ico: "🏷️", color: "#0ea5e9", label: "שם העסק", val: st.shop.name,
+            card: editCard("🏷️ שם העסק", `<input class="input" id="set-name" value="${esc(st.shop.name)}">`, "השם שהלקוחות רואים בראש עמוד ההזמנה.") },
+          { id: "tagline", ico: "💬", color: "#38bdf8", label: "תיאור קצר", val: st.shop.tagline || "—",
+            card: editCard("💬 תיאור קצר", `<input class="input" id="set-tag" value="${esc(st.shop.tagline || "")}" placeholder="למשל: תספורות גברים">`, "שורה קצרה שמופיעה מתחת לשם המספרה.") },
+          { id: "about", ico: "📝", color: "#8b5cf6", label: "קצת עלינו", val: (st.shop.about || "").trim() ? "מולא" : "—",
+            card: editCard("📝 קצת עלינו", `<textarea class="input" id="set-about" rows="4" placeholder="ספרו על המספרה — ותק, התמחות, אווירה…" style="resize:vertical;line-height:1.6">${esc(st.shop.about || "")}</textarea>`, "יוצג ללקוחות בעמוד ההזמנה.") },
+          { id: "social", ico: "🌐", color: "#ec4899", label: "רשתות חברתיות", val: socCount ? socCount + " מולאו" : "—",
+            card: `<div class="section-title">🌐 רשתות חברתיות</div><div class="card">${socialBlock}<button class="btn btn-primary" data-act="save-settings" style="margin-top:6px">שמירה</button></div>` },
+          { id: "address", ico: "📍", color: "#22c55e", label: "כתובת המספרה", val: st.shop.address || "—",
+            card: editCard("📍 כתובת המספרה", `<input class="input" id="set-addr" value="${esc(st.shop.address || "")}" placeholder="רבי טרפון 12, ירושלים">`, "משמשת לכפתור ״איך מגיעים״ בעמוד הלקוח.") },
+          { id: "phone", ico: "📞", color: "#14b8a6", label: "טלפון", val: st.shop.phone || "—",
+            card: editCard("📞 טלפון", `<input class="input" id="set-phone" type="tel" value="${esc(st.shop.phone || "")}">`, "מוצג ללקוחות, ומשמש גם לפניות בוואטסאפ על מוצרים.") },
+          { id: "staff", ico: "🧑‍🔧", color: "#6366f1", label: "ספרים במספרה", val: (st.shop.staff || []).length ? (st.shop.staff || []).length + " ספרים" : "—", card: cStaff },
+        ],
+        booking: [
+          { id: "step", ico: "⏱️", color: "#f59e0b", label: "מרווח בין תורים", val: (st.shop.slotStep || 45) + " דקות",
+            card: editCard("⏱️ מרווח בין תורים", `<select class="input" id="set-step">${[30, 45, 60].map((n) => `<option value="${n}" ${st.shop.slotStep === n ? "selected" : ""}>${n} דקות</option>`).join("")}</select>`, "כל כמה זמן מתחיל תור חדש ביומן.") },
+          { id: "remind", ico: "⏰", color: "#ef4444", label: "תזכורת לפני התור", val: (st.shop.reminderMinutes || 60) + " דקות לפני",
+            card: editCard("⏰ תזכורת לפני התור", `<select class="input" id="set-remind">${[30, 60, 90, 120].map((n) => `<option value="${n}" ${st.shop.reminderMinutes === n ? "selected" : ""}>${n} דקות לפני</option>`).join("")}</select>`, "מתי תישלח ללקוח התראה על התור המתקרב.") },
+          { id: "remindDay", type: "toggle", key: "remindDayBefore", ico: "📅", color: "#8b5cf6",
+            label: "תזכורת יום לפני", sub: "תזכורת נוספת כיממה מראש — מקטינה ביטולים", on: st.shop.remindDayBefore !== false },
+          { id: "hidefree", ico: "🚫", color: "#64748b", label: "סגירת ההרשמה", val: hideFreeLabel(st.shop.hideFreeBeforeMin),
+            card: editCard("🚫 סגירת ההרשמה לפני התור",
+              `<select class="input" id="set-hidefree"><option value="0" ${!Number(st.shop.hideFreeBeforeMin) ? "selected" : ""}>ללא — אפשר להזמין עד הרגע האחרון</option>${[30, 60, 90, 120, 180, 240, 360, 720].map((n) => `<option value="${n}" ${Number(st.shop.hideFreeBeforeMin) === n ? "selected" : ""}>${hideFreeLabel(n)}</option>`).join("")}</select>`,
+              "תור שנשאר פנוי כשנותר פחות מהזמן הזה ייעלם ממסך הלקוחות. אצלכם ביומן הוא ממשיך להופיע, ותוכלו לרשום אליו לקוח מזדמן.") },
+        ],
+        brand: [
+          { id: "logo", ico: "🖼️", color: "#0ea5e9", label: "לוגו המספרה", val: st.shop.logo ? "הועלה" : "—", card: cLogo },
+          { id: "cover", ico: "🌄", color: "#22c55e", label: "תמונת נושא", val: st.shop.cover ? "הועלתה" : "—", card: cCover },
+          { id: "style", ico: "🎨", color: "#ec4899", label: "סגנון העיצוב", val: styleName, card: cStyle },
+        ],
+        client: [
+          { id: "showReviews", type: "toggle", key: "showReviews", ico: "⭐", color: "#f59e0b", label: "ביקורות", sub: "הצגת ביקורות בעמוד הלקוח", on: cShow(st, "showReviews") },
+          { id: "showGallery", type: "toggle", key: "showGallery", ico: "🖼️", color: "#0ea5e9", label: "גלריית תספורות", sub: "הצגת הגלריה בעמוד הלקוח", on: cShow(st, "showGallery") },
+          { id: "showProducts", type: "toggle", key: "showProducts", ico: "🛍️", color: "#22c55e", label: "מוצרים למכירה", sub: "הצגת המוצרים בעמוד הלקוח", on: cShow(st, "showProducts") },
+          { id: "showHours", type: "toggle", key: "showHours", ico: "🕒", color: "#8b6f47", label: "שעות פעילות", sub: "הצגת שעות הפעילות בעמוד הלקוח", on: cShow(st, "showHours") },
+          { id: "showShare", type: "toggle", key: "showShare", ico: "📣", color: "#ef4444", label: "כפתור שיתוף", sub: "הצגת כרטיס השיתוף בעמוד הלקוח", on: cShow(st, "showShare") },
+          { id: "gallery", ico: "📷", color: "#6366f1", label: "ניהול הגלריה", val: Store.getGallery().length + " תמונות", card: cGallery },
+        ],
+        alerts: [
+          { id: "notif", ico: "🔔", color: "#f97316", label: "התראות", val: Notify.permission() === "granted" ? "פעילות" : "כבויות", card: cNotif },
+          { id: "security", ico: "🔒", color: "#22c55e", label: "אבטחת החשבון", val: (st.shop && st.shop.ownerUid) ? "מאובטח" : "לא מאובטח", card: cSecurity },
+        ].concat(cInstall ? [{ id: "install", ico: "📲", color: "#0ea5e9", label: "התקנה על מסך הבית", val: "", card: cInstall }] : []),
+        tools: [
+          { id: "backup", ico: "💾", color: "#0ea5e9", label: "גיבוי הנתונים", val: "", card: cBackup },
+          { id: "connection", ico: "🔌", color: "#64748b", label: "חיבור וגרסה", val: "גרסה " + APP_VERSION, card: cConnection },
+        ].concat(cSupport ? [{ id: "support", ico: "🛟", color: "#22c55e", label: "תמיכה", val: "", card: cSupport }] : []),
+        account: [
+          { id: "logout", ico: "🚪", color: "#f59e0b", label: "יציאה מהניהול", val: "", card: cLogout },
+          { id: "danger", ico: "🗑️", color: "#ef4444", label: "מחיקת המספרה", val: "", card: cDanger },
+        ],
       };
-      // עמוד פירוט פתוח — מציג את כל האפשרויות של הקטגוריה + כפתור חזרה
-      if (view.settingsPage && detailPages[view.settingsPage]) {
-        return `<button class="btn btn-ghost btn-sm home-back" data-act="settings-back">‹ חזרה להגדרות</button>` +
-          detailPages[view.settingsPage] + footer;
+
+      const backBtn = (act, label) => `<button class="btn btn-ghost btn-sm home-back" data-act="${act}">‹ ${label}</button>`;
+
+      // רמה 3 — ההגדרה עצמה
+      if (view.settingsPage && view.settingsItem) {
+        const item = (setPages[view.settingsPage] || []).find((x) => x.id === view.settingsItem);
+        if (item && item.card) return backBtn("settings-item-back", "חזרה") + item.card + footer;
+        view.settingsItem = null;
+      }
+
+      // שורה בעיצוב אחיד: אייקון צבעוני + כותרת + ערך/מתג + חץ
+      const rowInner = (ico, color, label, sub) => `
+        <span class="sr-ico" style="background:${color}">${ico}</span>
+        <span class="sr-body"><span class="sr-label">${esc(label)}</span>${sub ? `<span class="sr-sub">${esc(sub)}</span>` : ""}</span>`;
+      const navRow = (nav, ico, color, label, sub, val) => `
+        <button class="set-row" ${nav}>${rowInner(ico, color, label, sub)}
+          ${val ? `<span class="sr-val">${esc(val)}</span>` : ""}
+          <span class="sr-chev">‹</span>
+        </button>`;
+      const toggleRow = (it) => `
+        <div class="set-row set-row-static">${rowInner(it.ico, it.color, it.label, it.sub)}
+          <label class="switch">
+            <input type="checkbox" data-settoggle="${it.key}" ${it.on ? "checked" : ""}>
+            <span class="track"></span><span class="thumb"></span>
+          </label>
+        </div>`;
+
+      // רמה 2 — פריטי הקטגוריה
+      if (view.settingsPage && setPages[view.settingsPage]) {
+        const items = setPages[view.settingsPage];
+        return backBtn("settings-back", "חזרה להגדרות") + `
+          <div class="card set-list">
+            ${items.map((it) => it.type === "toggle" ? toggleRow(it)
+              : navRow(`data-act="settings-item" data-item="${it.id}"`, it.ico, it.color, it.label, it.sub, it.val)).join("")}
+          </div>${footer}`;
       }
       view.settingsPage = null;
 
-      // רשימת הקטגוריות — כל שורה בעיצוב אחיד (אייקון צבעוני + כותרת + חץ)
-      const row = (nav, ico, color, label, sub) => `
-        <button class="set-row" ${nav}>
-          <span class="sr-ico" style="background:${color}">${ico}</span>
-          <span class="sr-body"><span class="sr-label">${esc(label)}</span>${sub ? `<span class="sr-sub">${esc(sub)}</span>` : ""}</span>
-          <span class="sr-chev">‹</span>
-        </button>`;
-      const pageRow = (page, ico, color, label, sub) => row(`data-act="settings-page" data-page="${page}"`, ico, color, label, sub);
-      const tabRow = (tab, ico, color, label, sub) => row(`data-otab="${tab}"`, ico, color, label, sub);
-
+      // רמה 1 — רשימת הקטגוריות
+      const pageRow = (page, ico, color, label, sub) => navRow(`data-act="settings-page" data-page="${page}"`, ico, color, label, sub, "");
+      const tabRow = (tab, ico, color, label, sub) => navRow(`data-otab="${tab}"`, ico, color, label, sub, "");
       return `
         <div class="section-title">🗂️ ניהול יומי</div>
         <div class="card set-list">
@@ -4676,7 +4760,7 @@
       if (t.dataset.tab) { view.clientTab = t.dataset.tab; render(); return; }
       if (t.dataset.otab) {
         view.ownerTab = t.dataset.otab;
-        view.settingsPage = null;   // מעבר לשונית מאפס את עמוד-ההגדרות הפתוח
+        view.settingsPage = null; view.settingsItem = null;   // מעבר לשונית מאפס את הניווט בהגדרות
         try { localStorage.setItem("ug_otab__" + SHOP, view.ownerTab); } catch (e2) {}
         try { $("#oscroll") && ($("#oscroll").scrollTop = 0); } catch (e3) {}
         render(); return;
@@ -4688,13 +4772,21 @@
       switch (act) {
         case "close-modal": closeModal(); break;
 
-        // ניווט בהגדרות המסודרות: פתיחת עמוד קטגוריה / חזרה לרשימה
+        // ניווט בהגדרות המסודרות: קטגוריה → פריט → חזרה
         case "settings-page":
-          view.settingsPage = t.dataset.page || null;
+          view.settingsPage = t.dataset.page || null; view.settingsItem = null;
           try { $("#oscroll") && ($("#oscroll").scrollTop = 0); } catch (e4) {}
           render(); break;
         case "settings-back":
-          view.settingsPage = null;
+          view.settingsPage = null; view.settingsItem = null;
+          try { $("#oscroll") && ($("#oscroll").scrollTop = 0); } catch (e4) {}
+          render(); break;
+        case "settings-item":
+          view.settingsItem = t.dataset.item || null;
+          try { $("#oscroll") && ($("#oscroll").scrollTop = 0); } catch (e4) {}
+          render(); break;
+        case "settings-item-back":
+          view.settingsItem = null;
           try { $("#oscroll") && ($("#oscroll").scrollTop = 0); } catch (e4) {}
           render(); break;
 
@@ -5175,6 +5267,13 @@
           const clr = $("#pm-clear"); if (clr) clr.style.display = "";
           haptic(14);
         } catch (e) { toast("לא הצלחנו לטעון את התמונה", "", "⚠️"); }
+        return;
+      }
+      // מתג הגדרה ישיר בשורת ההגדרות — נשמר מיד, בלי כפתור שמירה
+      if (a.dataset.settoggle && a.type === "checkbox") {
+        const patch = {}; patch[a.dataset.settoggle] = a.checked;
+        await Store.saveShop(patch);
+        haptic(12); render();
         return;
       }
       if (a.dataset.slotOpen !== undefined && a.type === "checkbox") {
