@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "117";
+  const APP_VERSION = "118";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -2808,7 +2808,12 @@
 
   function refreshAddBooking() {
     captureAddBooking();
+    // שומר את מיקום הגלילה של סרגל הימים — אחרת בחירת יום גוללת בחזרה להתחלה
+    const prevDays = $("#modal .days-scroll");
+    const daysScroll = prevDays ? prevDays.scrollLeft : null;
     $("#modal").innerHTML = `<div class="m-handle"></div>` + addBookingHtml();
+    const newDays = $("#modal .days-scroll");
+    if (newDays && daysScroll !== null) newDays.scrollLeft = daysScroll;
     wireAddBooking();
   }
 
@@ -4288,7 +4293,13 @@
     // להתחלה מעצמה; זזה רק כשהספר עצמו גולל.
     const prevTabbar = $("#otabbar");
     const tabbarScroll = prevTabbar ? prevTabbar.scrollLeft : null;
+    // אותו דבר עבור סרגל בחירת הימים (קביעת תור) — בחירת יום גוללת מחדש את כל
+    // המסך, ובלי זה הגלילה הצידה של הימים הייתה קופצת בחזרה ליום הראשון.
+    const prevDays = $(".days-scroll");
+    const daysScroll = prevDays ? prevDays.scrollLeft : null;
     $("#root").innerHTML = view.route === "owner" ? renderOwner() : renderClient();
+    const newDays = $(".days-scroll");
+    if (newDays && daysScroll !== null) newDays.scrollLeft = daysScroll;
     const newTabbar = $("#otabbar");
     if (newTabbar) {
       if (tabbarScroll !== null) {
