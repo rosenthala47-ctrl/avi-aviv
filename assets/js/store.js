@@ -59,6 +59,14 @@ UG.Store = (function () {
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
 
+  /* RTDB לא שומר מערכים ממש: מערך עם "חורים" חוזר כאובייקט עם מפתחות מספריים,
+     ומערך ריק לא נשמר כלל וחוזר null. כאן מחזירים תמיד מערך אמיתי. */
+  function asArray(v) {
+    if (Array.isArray(v)) return v.filter((x) => x != null);
+    if (v && typeof v === "object") return Object.keys(v).map((k) => v[k]).filter((x) => x != null);
+    return [];
+  }
+
   /* מיזוג בטוח מול ברירת המחדל (למקרה של גרסאות ישנות בזיכרון) */
   function normalize(s) {
     const base = defaultState();
@@ -245,15 +253,32 @@ UG.Store = (function () {
           platform: (navigator.userAgent || "").slice(0, 120), updatedAt: Date.now(),
         }));
       },
-      // הזמנה בטוחה מפני התנגשות — קריאה טרייה מהשרת, בדיקת חפיפה, ואז כתיבה
+      /* הזמנה בטוחה מפני התנגשות.
+         חשוב: כאן חייבת להיות טרנזקציה אמיתית של RTDB, ולא "קרא ואז כתוב".
+         שני לקוחות שמזמינים באותו רגע (למשל אחרי התראת "התפנה תור", שמעירה
+         את כל הממתינים בבת אחת) היו קוראים את אותו מצב, וכל אחד היה כותב את
+         כל צומת המספרה מחדש — כך שההזמנה של הראשון נמחקת בשקט, למרות שהוא
+         קיבל אישור. הטרנזקציה מריצה את הפונקציה שוב מול נתוני השרת בכל
+         התנגשות, ולכן ההזמנה השנייה רואה את הראשונה ומזהה חפיפה.
+         הטרנזקציה מוגבלת לצומת bookings בלבד, כדי שהזמנה של לקוח לא תדרוס
+         שינוי הגדרות שהספר עשה באותו רגע. */
       transactBooking(build) {
+        const bkRef = ref.child("bookings");
         return ref.once("value").then((snap) => {
           if (!snap.exists()) return { ok: false, reason: "המספרה לא נמצאה" };
-          const cur = normalize(snap.val());
-          const res = build(cur);
-          if (!res.ok) return res;
-          cur.updatedAt = Date.now();
-          return ref.set(clone(cur)).then(() => res);
+          const base = normalize(snap.val());
+          let out = null;
+          return bkRef.transaction((curBookings) => {
+            // RTDB עשוי להריץ את הפונקציה כמה פעמים; רק הריצה האחרונה נכתבת
+            const cur = Object.assign({}, base, { bookings: asArray(curBookings) });
+            out = build(cur);
+            if (!out.ok) return;           // undefined = ביטול הטרנזקציה ללא כתיבה
+            return cur.bookings;
+          }, undefined, false).then((r) => {
+            if (out && !out.ok) return out;
+            if (!r || !r.committed) return { ok: false, reason: "התור נתפס הרגע — נסו שעה אחרת" };
+            return out || { ok: false, reason: "ההזמנה נכשלה — נסו שוב" };
+          });
         });
       },
       exists() { return ref.once("value").then((snap) => snap.exists()); },
@@ -729,6 +754,13 @@ UG.Store = (function () {
     }
     const startMin = u.toMin(data.start);
     const endMin = startMin + svc.durationMin;
+    /* תור שגולש מעבר לחצות. בלי הבדיקה הזו שעת הסיום נשמרת כ-"24:15" — שעה
+       שאינה קיימת — ובדיקת החפיפה (שמשווה רק תורים באותו תאריך) לא הייתה
+       חוסמת את המשבצות המוקדמות של המחרת, כך שהספר היה נקבע פעמיים.
+       רלוונטי מאז שאפשר לפתוח שעות גם בלילה. */
+    if (endMin > 24 * 60) {
+      return { ok: false, reason: "התור חורג מעבר לחצות — בחרו שעה מוקדמת יותר" };
+    }
     // האם הבעלים חסם את השעה הזו?
     if ((cur.blocks || []).includes(data.date + "|" + data.start)) {
       return { ok: false, reason: "השעה כבר אינה זמינה" };

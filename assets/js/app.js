@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "118";
+  const APP_VERSION = "119";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -788,7 +788,7 @@
       <div class="gallery-grid">
         ${photos.map((p) => `
           <button class="gphoto" data-photo="${p.id}">
-            <img src="${p.dataUrl}" alt="${esc(p.caption || "תספורת")}" loading="lazy">
+            <img src="${esc(p.dataUrl)}" alt="${esc(p.caption || "תספורת")}" loading="lazy">
             ${p.caption ? `<span class="gcap">${esc(p.caption)}</span>` : ""}
           </button>`).join("")}
       </div>`;
@@ -803,7 +803,7 @@
       <div class="gallery-grid">
         ${photos.map((p) => `
           <button class="gphoto" data-photo="${p.id}">
-            <img src="${p.dataUrl}" alt="${esc(p.caption || "תספורת")}" loading="lazy">
+            <img src="${esc(p.dataUrl)}" alt="${esc(p.caption || "תספורת")}" loading="lazy">
             ${p.caption ? `<span class="gcap">${esc(p.caption)}</span>` : ""}
           </button>`).join("")}
       </div>`;
@@ -3501,7 +3501,7 @@
         ${photos.length ? `<div class="gallery-grid" style="margin-top:14px">
           ${photos.map((p) => `
             <div class="gphoto">
-              <img src="${p.dataUrl}" loading="lazy">
+              <img src="${esc(p.dataUrl)}" loading="lazy">
               <button class="gdel" data-delphoto="${p.id}" aria-label="מחיקה">✕</button>
             </div>`).join("")}
         </div>` : ""}
@@ -5485,7 +5485,7 @@
           const dataUrl = await compressImage(f, 900, 0.72);
           if ($("#modal")) $("#modal").__prodImg = dataUrl;
           const prev = $("#pm-prev");
-          if (prev) { prev.classList.add("has-img"); prev.innerHTML = `<img src="${dataUrl}" alt="">`; }
+          if (prev) { prev.classList.add("has-img"); prev.innerHTML = `<img src="${esc(dataUrl)}" alt="">`; }
           const clr = $("#pm-clear"); if (clr) clr.style.display = "";
           haptic(14);
         } catch (e) { toast("לא הצלחנו לטעון את התמונה", "", "⚠️"); }

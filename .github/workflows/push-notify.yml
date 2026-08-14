@@ -29,4 +29,6 @@ jobs:
         working-directory: .github/scripts
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          # השעות במסד הן זמן מקומי של המספרה — הראנר חייב לרוץ באותו אזור זמן
+          TZ: Asia/Jerusalem
         run: node send-push.js
