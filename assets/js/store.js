@@ -166,6 +166,8 @@ UG.Store = (function () {
         s.updatedAt = Date.now();
         return ref.set(s);
       },
+      // כתיבת שדות בודדים (מקבילה ל-updateChildren של RTDB)
+      updateChildren(patch) { return ref.update(patch); },
       onRemote(cb) {
         ref.onSnapshot((snap) => {
           if (snap.exists && !snap.metadata.hasPendingWrites) cb(snap.data());
@@ -231,6 +233,9 @@ UG.Store = (function () {
         s.updatedAt = Date.now();
         return ref.set(clone(s));   // clone → JSON נקי (RTDB לא מקבל undefined)
       },
+      // כתיבת חלק מצמתי המספרה בלבד (למשל רק bookings) — כתיבה אטומית לכמה נתיבים.
+      // מאפשר ללקוח לכתוב תור/המתנה/ביקורת גם כשההגדרות נעולות לבעלים בלבד.
+      updateChildren(patch) { return ref.update(clone(patch)); },
       onRemote(cb) {
         ref.on("value", (snap) => { if (snap.exists()) cb(snap.val()); });
       },
@@ -339,7 +344,32 @@ UG.Store = (function () {
      =======================================================================*/
   function emit() { subs.forEach((fn) => { try { fn(state); } catch (e) { console.error(e); } }); }
 
-  function persist() { return backend.write(state).then(emit); }
+  // דיווח על כשל כתיבה (למשל חוקי האבטחה חסמו) — האפליקציה נרשמת כדי להציע
+  // התחברות מחדש כשמספרה מאובטחת מנוהלת בלי חשבון הבעלים.
+  let writeErrorCb = null;
+  function onWriteError(fn) { writeErrorCb = fn; }
+  function reportWriteError(err) {
+    if (writeErrorCb) { try { writeErrorCb(err); } catch (e) {} }
+    return err;
+  }
+
+  function persist() {
+    return backend.write(state).then(emit, (err) => { throw reportWriteError(err); });
+  }
+
+  /* כתיבת חלק מצמתי המספרה בלבד (bookings/waitlist/alerts/reviews).
+     פעולות של לקוח עוברות דרך כאן, כדי שיוכלו לכתוב את הצומת שלהן גם כששאר
+     ההגדרות נעולות לבעלים. במצב מקומי (בלי ענן) — כתיבה מלאה רגילה. */
+  function persistChildren(keys) {
+    if (backend.updateChildren) {
+      const patch = {};
+      keys.forEach((k) => { patch[k] = state[k] === undefined ? null : state[k]; });
+      state.updatedAt = Date.now();
+      patch.updatedAt = state.updatedAt;
+      return backend.updateChildren(patch).then(emit, (err) => { throw reportWriteError(err); });
+    }
+    return persist();
+  }
 
   async function reloadFromRemote(remoteData) {
     if (remoteData) { state = normalize(remoteData); emit(); return; }
@@ -875,9 +905,10 @@ UG.Store = (function () {
       b.status = status;
       if (status === "cancelled") {
         if (by) b.cancelledBy = by;
-        processFreed(state, b);
+        processFreed(state, b);   // מעדכן גם waitlist ו-alerts
       }
-      await persist();
+      // לקוח מבטל את התור שלו — כותב רק את הצמתים שהשתנו (מותר גם במספרה נעולה)
+      await persistChildren(["bookings", "waitlist", "alerts"]);
     }
     return b;
   }
@@ -894,19 +925,19 @@ UG.Store = (function () {
         userId: data.userId, userName: data.userName, phone: data.phone || "",
         createdAt: Date.now(),
       });
-      await persist();
+      await persistChildren(["waitlist"]);
     }
   }
   async function leaveWaitlist(id) {
     refreshLocal();
     state.waitlist = (state.waitlist || []).filter((w) => w.id !== id);
-    await persist();
+    await persistChildren(["waitlist"]);
   }
   async function consumeAlert(ids) {
     refreshLocal();
     const set = new Set(Array.isArray(ids) ? ids : [ids]);
     state.alerts = (state.alerts || []).filter((a) => !set.has(a.id));
-    await persist();
+    await persistChildren(["alerts"]);
   }
 
   /* ---------- טוקן פוש (FCM) ---------- */
@@ -925,7 +956,7 @@ UG.Store = (function () {
     const i = state.reviews.findIndex((x) => x.bookingId === r.bookingId && x.userId === r.userId);
     if (i >= 0) state.reviews[i] = Object.assign({}, state.reviews[i], r, { updatedAt: Date.now() });
     else state.reviews.push(Object.assign({ id: u.uid(), createdAt: Date.now() }, r));
-    await persist();
+    await persistChildren(["reviews"]);
   }
 
   // מחיקת רשומת תור לצמיתות (לניקוי הדוח)
@@ -961,7 +992,7 @@ UG.Store = (function () {
     subscribeGallery, getGallery, addPhoto, removePhoto,
     createShop, shopExists, peekShop, passcodeTaken, registerPasscodeIfFree,
     getSub, markPaymentPending, adminListShops, adminSetPaid,
-    exportData, importData, deleteShop, purgeClient,
+    exportData, importData, deleteShop, purgeClient, onWriteError,
     get mode() { return backend ? backend.mode : "local"; },
     get shopId() { return shopId; },
     get notFound() { return notFound; },

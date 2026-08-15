@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "119";
+  const APP_VERSION = "120";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -5924,6 +5924,18 @@
     if (!privacyAccepted() && !gateShowing) setTimeout(() => promptPrivacy(), 600);
     else setTimeout(() => promptNotif(), 1200);   // הזמנה לאישור התראות — בכל כניסה עד שיאשר
     Store.subscribe(onStoreChange);
+    // מספרה מאובטחת שמנוהלת בלי חשבון הבעלים — שמירה תיחסם ע״י חוקי האבטחה.
+    // במקום כישלון שקט, מציעים לספר להתחבר עם החשבון (יש גם "שכחתי סיסמה").
+    if (Store.onWriteError) Store.onWriteError((err) => {
+      const shop = (Store.get() && Store.get().shop) || {};
+      const msg = String((err && (err.code || err.message)) || err || "");
+      const denied = /permission[_ ]denied/i.test(msg);
+      const notOwner = !(UG.Auth && UG.Auth.currentUid && UG.Auth.currentUid() === shop.ownerUid);
+      if (denied && view.route === "owner" && shop.ownerUid && UG.Auth && authAvail && notOwner) {
+        toast("כדי לשמור שינויים התחברו עם חשבון הבעלים", "", "🔒");
+        if (!$("#modalBack.open")) promptOwnerLogin(shop.ownerUid);
+      }
+    });
     Store.subscribeGallery(() => {
       // רענון כשמסתכלים על גלריה ולא באמצע הקלדה
       const onGalleryView = (view.route === "client" && (view.clientTab === "gallery" || view.clientTab === "home")) ||
