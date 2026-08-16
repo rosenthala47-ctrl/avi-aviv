@@ -30,32 +30,78 @@
         rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"></noscript>
   <script>try { document.documentElement.setAttribute("data-theme", localStorage.getItem("ug_theme") || "dark"); } catch (e) {}</script>
-  <link rel="stylesheet" href="assets/styles.css?v=125" />
+  <link rel="stylesheet" href="assets/styles.css?v=126" />
 </head>
 <body>
   <div class="app">
     <div id="root"></div>
   </div>
 
-  <!-- רשת ביטחון: אם אחרי 9 שניות המסך עדיין ריק (הטעינה נתקעה מסיבה כלשהי) —
-       מציגים כפתור רענון במקום מסך ריק/תקוע, כדי שאף אחד לא יישאר תקוע.
-       זה סקריפט עצמאי שאינו נוגע ברצף הטעינה של האפליקציה. renderNow מבטל
-       את הטיימר ברגע שמשהו מוצג בהצלחה. -->
+  <!-- רשת ביטחון + אבחון: רץ גם כשהאפליקציה תקועה. תופס שגיאות, ואם המסך
+       נשאר ריק — מציג כפתור "איפוס מלא" (מנקה SW+מטמון) + מידע אבחון. אינו נוגע
+       ברצף הטעינה; renderNow מבטל את הטיימר ברגע שמשהו מוצג בהצלחה. -->
   <script>
-    window.__ugBootFail = setTimeout(function () {
-      var r = document.getElementById("root");
-      if (r && r.children.length === 0) {
+    (function () {
+      window.__ugTrace = [];
+      window.__ugMark = function (m) { try { window.__ugTrace.push(m + " @" + Math.round(performance.now()) + "ms"); } catch (e) {} };
+      window.__ugMark("html");
+      window.__ugErr = [];
+      window.addEventListener("error", function (ev) {
+        try { window.__ugErr.push("ERR: " + (ev.message || "") + " @" + ((ev.filename || "").split("/").pop()) + ":" + (ev.lineno || "")); } catch (e) {}
+      });
+      window.addEventListener("unhandledrejection", function (ev) {
+        try { var r = ev.reason; window.__ugErr.push("REJECT: " + ((r && (r.message || r.code)) || r || "")); } catch (e) {}
+      });
+
+      function fullReset() {
+        var done = function () { location.reload(true); };
+        try {
+          var jobs = [];
+          if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+            jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+              return Promise.all(rs.map(function (r) { return r.unregister(); }));
+            }).catch(function () {}));
+          }
+          if (window.caches && caches.keys) {
+            jobs.push(caches.keys().then(function (ks) {
+              return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+            }).catch(function () {}));
+          }
+          Promise.all(jobs).then(done, done);
+          setTimeout(done, 2500);   // ביטחון — לא להישאר תקוע גם אם הניקוי נתקע
+        } catch (e) { done(); }
+      }
+      window.__ugFullReset = fullReset;
+
+      window.__ugBootFail = setTimeout(function () {
+        var r = document.getElementById("root");
+        if (!r || r.children.length > 0) return;
+        var diag = [
+          "UG=" + (typeof window.UG),
+          "Store=" + (window.UG && typeof window.UG.Store),
+          "CONFIG=" + (typeof window.UG_CONFIG),
+          "firebase=" + (typeof window.firebase),
+          "online=" + (navigator.onLine),
+          "sw=" + (navigator.serviceWorker && navigator.serviceWorker.controller ? "yes" : "no"),
+          "trace=[" + (window.__ugTrace || []).join(" | ") + "]",
+          "err=[" + (window.__ugErr || []).join(" ; ") + "]"
+        ].join("\n");
         r.innerHTML =
           '<div style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;' +
-          'justify-content:center;gap:16px;font-family:Heebo,system-ui,sans-serif;color:#e8edf4;background:#0a0c10;' +
-          'padding:24px;text-align:center">' +
+          'justify-content:center;gap:14px;font-family:Heebo,system-ui,sans-serif;color:#e8edf4;background:#0a0c10;' +
+          'padding:22px;text-align:center">' +
           '<div style="font-size:34px">💈</div>' +
-          '<div style="font-size:15px;opacity:.85">הטעינה מתעכבת. נסו רענון.</div>' +
-          '<button onclick="location.reload(true)" style="background:#38bdf8;color:#04121f;border:none;' +
-          'border-radius:12px;padding:12px 30px;font-size:16px;font-weight:800;cursor:pointer">רענון</button>' +
-          '</div>';
-      }
-    }, 9000);
+          '<div style="font-size:15px;opacity:.9">הטעינה נתקעה. נסו איפוס מלא:</div>' +
+          '<button onclick="window.__ugFullReset()" style="background:#38bdf8;color:#04121f;border:none;' +
+          'border-radius:12px;padding:13px 30px;font-size:16px;font-weight:800;cursor:pointer">איפוס מלא ופתיחה מחדש</button>' +
+          '<button onclick="location.reload(true)" style="background:transparent;color:#9aa6b5;border:1px solid #232a35;' +
+          'border-radius:12px;padding:9px 22px;font-size:14px;cursor:pointer">רענון רגיל</button>' +
+          '<pre style="margin-top:14px;max-width:92vw;overflow:auto;font-size:10px;line-height:1.5;color:#7dd3fc;' +
+          'background:#0f141c;border:1px solid #232a35;border-radius:10px;padding:10px;text-align:left;direction:ltr;white-space:pre-wrap">' +
+          diag.replace(/[<>&]/g, function (c) { return { "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]; }) +
+          '</pre></div>';
+      }, 8000);
+    })();
   </script>
 
   <div class="toast-wrap" id="toasts"></div>
@@ -65,15 +111,15 @@
   </div>
 
   <!-- הגדרות. defer שומר על סדר הריצה אבל לא חוסם parsing של ה-HTML. -->
-  <script src="config.js?v=125" defer></script>
+  <script src="config.js?v=126" defer></script>
   <!-- לוגיקה -->
-  <script src="assets/js/util.js?v=125" defer></script>
-  <script src="assets/js/store.js?v=125" defer></script>
-  <script src="assets/js/auth.js?v=125" defer></script>
-  <script src="assets/js/notify.js?v=125" defer></script>
-  <script src="assets/js/fcm.js?v=125" defer></script>
-  <script src="assets/js/email.js?v=125" defer></script>
-  <script src="assets/js/app.js?v=125" defer></script>
+  <script src="assets/js/util.js?v=126" defer></script>
+  <script src="assets/js/store.js?v=126" defer></script>
+  <script src="assets/js/auth.js?v=126" defer></script>
+  <script src="assets/js/notify.js?v=126" defer></script>
+  <script src="assets/js/fcm.js?v=126" defer></script>
+  <script src="assets/js/email.js?v=126" defer></script>
+  <script src="assets/js/app.js?v=126" defer></script>
   <!-- qrcode.js (~57KB) נטען רק כשצריך אותו — בעמוד "פרסום" של הבעלים. -->
   <script>
     (function(){

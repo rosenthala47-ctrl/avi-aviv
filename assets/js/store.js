@@ -303,14 +303,17 @@ UG.Store = (function () {
         const sc = document.createElement("script");
         sc.src = src; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc);
       });
+      const M = (m) => { try { if (window.__ugMark) window.__ugMark(m); } catch (e) {} };
+      M("sdk-load-start");
       const V = "10.12.2";
       let chain = load(`https://www.gstatic.com/firebasejs/${V}/firebase-app-compat.js`)
-        .then(() => load(`https://www.gstatic.com/firebasejs/${V}/firebase-${useRtdb ? "database" : "firestore"}-compat.js`));
+        .then(() => { M("sdk-app-ok"); return load(`https://www.gstatic.com/firebasejs/${V}/firebase-${useRtdb ? "database" : "firestore"}-compat.js`); });
       if (useRtdb) {
         // התחברות אנונימית — כדי שחוקי האבטחה יוכלו לדרוש משתמש מחובר
-        chain = chain.then(() => load(`https://www.gstatic.com/firebasejs/${V}/firebase-auth-compat.js`));
+        chain = chain.then(() => { M("sdk-db-ok"); return load(`https://www.gstatic.com/firebasejs/${V}/firebase-auth-compat.js`); });
       }
       chain.then(() => {
+        M("sdk-all-ok");
         firebase.initializeApp(cfg);
         if (useRtdb) {
           try {
@@ -377,12 +380,17 @@ UG.Store = (function () {
     if (s) { state = s; emit(); }
   }
 
+  const mark = (m) => { try { if (window.__ugMark) window.__ugMark(m); } catch (e) {} };
+
   async function init(id) {
     shopId = (id || "main");
     notFound = false;
+    mark("init");
     await connect();
+    mark("connected(" + (_conn ? _conn.kind : "local") + ")");
     backend = makeBackend(shopId);
     let s = await backend.read();
+    mark("read-done(" + (s ? "ok" : "null") + ")");
     if (!s) {
       if (shopId === "main") { s = defaultState(); await backend.write(s); } // תאימות לאחור / הדגמה
       else { state = null; notFound = true; emit(); return null; }
