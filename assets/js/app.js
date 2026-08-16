@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "123";
+  const APP_VERSION = "122";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -5956,12 +5956,6 @@
     initCookies();
 
     if (SHOP === "__new__") { view.onboarding = true; render(); wizFocus(); return; }  // שאלון פתיחת מספרה
-
-    // כניסה לניהול רק עם אישור מקומי — מיושם גם לפני הצביעה המהירה, שלא תבליח ניהול
-    if (view.route === "owner" && localStorage.getItem(AUTHKEY) !== "1") view.route = "client";
-    // צביעה מיידית מהמטמון של הפעם הקודמת — המסך מופיע מיד, והנתונים מתרעננים
-    // ברקע ברגע שהענן עונה. בפתיחה ראשונה (אין מטמון) נשאר מסך הטעינה עד שהרשת עונה.
-    try { if (Store.primeFromCache && Store.primeFromCache(SHOP)) render(); } catch (e) {}
 
     await Store.init(SHOP);
     if (Store.notFound) { view.notFound = true; render(); return; }        // מספרה לא קיימת
