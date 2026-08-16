@@ -5,7 +5,7 @@
 
     "shops": {
       "$shopId": {
-        ".read": "auth != null",
+        ".read": true,
         ".write": "auth != null && (!data.child('shop/ownerUid').exists() || data.child('shop/ownerUid').val() === auth.uid)",
         "bookings":  { ".write": "auth != null" },
         "waitlist":  { ".write": "auth != null" },
@@ -30,7 +30,7 @@
     },
 
     "subs": {
-      ".read": "auth != null",
+      ".read": true,
       "$shopId": {
         ".write": "auth != null && auth.token.email === 'rosenthala47@gmail.com' && auth.token.email_verified === true",
         "pending": { ".write": "auth != null" }
