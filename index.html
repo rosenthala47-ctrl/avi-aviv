@@ -30,12 +30,33 @@
         rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"></noscript>
   <script>try { document.documentElement.setAttribute("data-theme", localStorage.getItem("ug_theme") || "dark"); } catch (e) {}</script>
-  <link rel="stylesheet" href="assets/styles.css?v=124" />
+  <link rel="stylesheet" href="assets/styles.css?v=125" />
 </head>
 <body>
   <div class="app">
     <div id="root"></div>
   </div>
+
+  <!-- רשת ביטחון: אם אחרי 9 שניות המסך עדיין ריק (הטעינה נתקעה מסיבה כלשהי) —
+       מציגים כפתור רענון במקום מסך ריק/תקוע, כדי שאף אחד לא יישאר תקוע.
+       זה סקריפט עצמאי שאינו נוגע ברצף הטעינה של האפליקציה. renderNow מבטל
+       את הטיימר ברגע שמשהו מוצג בהצלחה. -->
+  <script>
+    window.__ugBootFail = setTimeout(function () {
+      var r = document.getElementById("root");
+      if (r && r.children.length === 0) {
+        r.innerHTML =
+          '<div style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;' +
+          'justify-content:center;gap:16px;font-family:Heebo,system-ui,sans-serif;color:#e8edf4;background:#0a0c10;' +
+          'padding:24px;text-align:center">' +
+          '<div style="font-size:34px">💈</div>' +
+          '<div style="font-size:15px;opacity:.85">הטעינה מתעכבת. נסו רענון.</div>' +
+          '<button onclick="location.reload(true)" style="background:#38bdf8;color:#04121f;border:none;' +
+          'border-radius:12px;padding:12px 30px;font-size:16px;font-weight:800;cursor:pointer">רענון</button>' +
+          '</div>';
+      }
+    }, 9000);
+  </script>
 
   <div class="toast-wrap" id="toasts"></div>
 
@@ -44,15 +65,15 @@
   </div>
 
   <!-- הגדרות. defer שומר על סדר הריצה אבל לא חוסם parsing של ה-HTML. -->
-  <script src="config.js?v=124" defer></script>
+  <script src="config.js?v=125" defer></script>
   <!-- לוגיקה -->
-  <script src="assets/js/util.js?v=124" defer></script>
-  <script src="assets/js/store.js?v=124" defer></script>
-  <script src="assets/js/auth.js?v=124" defer></script>
-  <script src="assets/js/notify.js?v=124" defer></script>
-  <script src="assets/js/fcm.js?v=124" defer></script>
-  <script src="assets/js/email.js?v=124" defer></script>
-  <script src="assets/js/app.js?v=124" defer></script>
+  <script src="assets/js/util.js?v=125" defer></script>
+  <script src="assets/js/store.js?v=125" defer></script>
+  <script src="assets/js/auth.js?v=125" defer></script>
+  <script src="assets/js/notify.js?v=125" defer></script>
+  <script src="assets/js/fcm.js?v=125" defer></script>
+  <script src="assets/js/email.js?v=125" defer></script>
+  <script src="assets/js/app.js?v=125" defer></script>
   <!-- qrcode.js (~57KB) נטען רק כשצריך אותו — בעמוד "פרסום" של הבעלים. -->
   <script>
     (function(){

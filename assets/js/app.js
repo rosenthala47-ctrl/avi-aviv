@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "124";
+  const APP_VERSION = "125";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -4324,6 +4324,7 @@
     requestAnimationFrame(() => { _renderScheduled = false; renderNow(); });
   }
   function renderNow() {
+    try { clearTimeout(window.__ugBootFail); } catch (e) {}   // הצגה הצליחה — לבטל את רשת הביטחון
     syncNav();   // הקלטת ניווט ל"אחורה" חכם (לפני הצגת המסך)
     if (view.onboarding) { document.title = "BarberTor — תורים לספרים"; $("#root").innerHTML = renderOnboarding(); return; }
     if (view.notFound) { document.title = "BarberTor"; $("#root").innerHTML = renderNotFound(); return; }
