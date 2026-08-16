@@ -373,10 +373,32 @@ UG.Store = (function () {
     return persist();
   }
 
+  /* מטמון מקומי של תמונת המספרה מהענן — לצביעה מיידית בפתיחה הבאה, לפני הרשת.
+     נשמר רק במצב ענן. מכיל בדיוק את מה שהמשתמש רשאי לקרוא (אחרי שלב 3 —
+     בלי פרטי לקוחות). */
+  const CCACHE = (id) => "ug_cloud_cache_v1__" + id;
+  function writeCloudCache(id, s) {
+    try { localStorage.setItem(CCACHE(id), JSON.stringify(s)); } catch (e) {}
+  }
+  // צביעה מוקדמת: טוען את המצב מהמטמון (לפני connect) כדי שהמסך יופיע מיד.
+  function primeFromCache(id) {
+    try {
+      const raw = localStorage.getItem(CCACHE(id || "main"));
+      if (!raw) return false;
+      shopId = id || "main";
+      state = normalize(JSON.parse(raw));
+      return !!state;
+    } catch (e) { return false; }
+  }
+
   async function reloadFromRemote(remoteData) {
-    if (remoteData) { state = normalize(remoteData); emit(); return; }
+    if (remoteData) {
+      state = normalize(remoteData); emit();
+      if (backend && backend.mode === "cloud") writeCloudCache(shopId, state);
+      return;
+    }
     const s = await backend.read();
-    if (s) { state = s; emit(); }
+    if (s) { state = s; emit(); if (backend.mode === "cloud") writeCloudCache(shopId, s); }
   }
 
   async function init(id) {
@@ -390,6 +412,7 @@ UG.Store = (function () {
       else { state = null; notFound = true; emit(); return null; }
     }
     state = s;
+    if (backend.mode === "cloud") writeCloudCache(shopId, s);   // רענון המטמון לצביעה מהירה בפעם הבאה
     backend.onRemote((remote) => reloadFromRemote(remote));
     if (backend.onGallery) backend.onGallery((list) => reloadGallery(list));
     // מנוי — קריאה ראשונית + מעקב בזמן אמת (אם אתה מפעיל את המספרה, זה יתעדכן מיד)
@@ -994,7 +1017,7 @@ UG.Store = (function () {
     subscribeGallery, getGallery, addPhoto, removePhoto,
     createShop, shopExists, peekShop, passcodeTaken, registerPasscodeIfFree,
     getSub, markPaymentPending, adminListShops, adminSetPaid,
-    exportData, importData, deleteShop, purgeClient, onWriteError,
+    exportData, importData, deleteShop, purgeClient, onWriteError, primeFromCache,
     get mode() { return backend ? backend.mode : "local"; },
     get shopId() { return shopId; },
     get notFound() { return notFound; },
