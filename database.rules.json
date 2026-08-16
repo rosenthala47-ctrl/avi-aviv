@@ -31,7 +31,10 @@
 
     "subs": {
       ".read": "auth != null",
-      ".write": "auth != null"
+      "$shopId": {
+        ".write": "auth != null && auth.token.email === 'rosenthala47@gmail.com' && auth.token.email_verified === true",
+        "pending": { ".write": "auth != null" }
+      }
     },
 
     "shopIndex": {

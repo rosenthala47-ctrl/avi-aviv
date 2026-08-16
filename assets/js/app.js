@@ -10,7 +10,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "120";
+  const APP_VERSION = "121";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1308,20 +1308,58 @@
     return !!sc.adminPasscode && v === String(sc.adminPasscode);
   }
 
+  // המייל שרשאי להפעיל מנויים (מוגדר ב-config, נאכף בחוקי האבטחה)
+  function adminEmail() { return String(((UG_CONFIG.subscription || {}).adminEmail) || "").toLowerCase(); }
+  // האם מחוברים כרגע עם חשבון האדמין (כדי שהפעלת מנוי תעבור את חוקי האבטחה)
+  function isAdminAuthed() {
+    const em = (UG.Auth && UG.Auth.currentEmail && UG.Auth.currentEmail()) || "";
+    return !!adminEmail() && em.toLowerCase() === adminEmail();
+  }
+
   let adminShops = [];
   async function openAdminPanel() {
     openModal(`
       <div class="m-title">🛠️ ניהול מנויים</div>
       <div class="m-sub">הפעל או חדש מנוי למספרות ששילמו</div>
-      <div id="adm-list" style="max-height:60vh;overflow-y:auto;margin-top:12px">טוען…</div>
+      <div id="adm-auth" style="margin-top:10px"></div>
+      <div id="adm-list" style="max-height:56vh;overflow-y:auto;margin-top:12px">טוען…</div>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:12px">סגירה</button>
     `);
+    renderAdminAuth();
     try {
       adminShops = await Store.adminListShops();
       renderAdminList();
     } catch (e) {
       const el = $("#adm-list"); if (el) el.textContent = "שגיאה בטעינת המספרות";
     }
+  }
+
+  // שורת מצב ההתחברות של האדמין בראש הפאנל
+  function renderAdminAuth() {
+    const el = $("#adm-auth"); if (!el) return;
+    if (!adminEmail() || !authAvail) { el.innerHTML = ""; return; }
+    if (isAdminAuthed()) {
+      el.innerHTML = `<div class="conn-line"><span class="conn-dot"></span> מחובר כאדמין: ${esc(UG.Auth.currentEmail())}</div>`;
+    } else {
+      el.innerHTML = `
+        <div class="info-note" style="margin:0 0 10px">
+          <b>🔒 נדרשת התחברות</b>
+          <p>כדי להפעיל מנויים התחברו עם חשבון האדמין (${esc(adminEmail())}). ההפעלה נכתבת למסד רק מחשבון זה.</p>
+        </div>
+        <button class="btn btn-google" data-act="adm-google">
+          <span class="g-ico">${googleIcoSvg()}</span>התחברות עם Google</button>`;
+    }
+  }
+
+  async function adminGoogleSignIn() {
+    try {
+      const user = await UG.Auth.signInWithGoogle();
+      if (user) {
+        if (isAdminAuthed()) { renderAdminAuth(); toast("מחובר כאדמין ✓", "good", "🔒"); }
+        else { toast("החשבון הזה אינו חשבון האדמין", "", "🔒"); await UG.Auth.signOut(); renderAdminAuth(); }
+      }
+      // אם בוצעה הפניה (redirect) — נחזור לפאנל אחרי טעינה מחדש
+    } catch (e) { toast(UG.Auth.humanError ? UG.Auth.humanError(e) : "ההתחברות נכשלה", "", "🔒"); }
   }
 
   function admShopStatus(s) {
@@ -1393,6 +1431,12 @@
   async function admExtend(sid, months) {
     const s = adminShops.find((x) => x.id === sid);
     if (!s) return;
+    // הפעלת מנוי נכתבת למסד רק מחשבון האדמין — אם לא מחוברים, מבקשים התחברות.
+    if (adminEmail() && authAvail && !isAdminAuthed()) {
+      toast("התחברו עם חשבון האדמין כדי להפעיל מנוי", "", "🔒");
+      renderAdminAuth();
+      return;
+    }
     const now = Date.now();
     let until = 0;
     if (months > 0) {
@@ -1401,7 +1445,14 @@
       d.setMonth(d.getMonth() + months);
       until = d.getTime();
     }
-    const ok = await Store.adminSetPaid(sid, until);
+    let ok = false;
+    try { ok = await Store.adminSetPaid(sid, until); }
+    catch (e) {
+      const denied = /permission[_ ]denied/i.test(String((e && (e.code || e.message)) || e));
+      toast(denied ? "אין הרשאה — התחברו עם חשבון האדמין" : "השמירה נכשלה", "", "🔒");
+      renderAdminAuth();
+      return;
+    }
     if (!ok) { toast("הפעולה זמינה רק במצב ענן", "", "⚠️"); return; }
     s.paidUntil = until;   // עדכון מקומי לתצוגה מיידית
     s.pending = null;
@@ -5333,6 +5384,7 @@
         // מנוי
         case "show-upgrade": handleUpgrade(); break;
         case "adm-extend": admExtend(t.dataset.sid, Number(t.dataset.m)); break;
+        case "adm-google": adminGoogleSignIn(); break;
         case "del-contact":
           await Store.removeContact(t.dataset.id);
           closeModal();  // הפעולה זמינה גם מתוך כרטיס הלקוח

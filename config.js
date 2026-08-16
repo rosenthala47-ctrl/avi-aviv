@@ -114,6 +114,12 @@ window.UG_CONFIG = {
          node -e 'console.log(require("crypto").createHash("sha256").update("הקוד-שלך").digest("hex"))'
        (אפשר עדיין להשתמש ב-adminPasscode כטקסט גלוי אם רוצים — אבל hash עדיף.) */
     adminPasscodeHash: "2c5d46fcd359fb0a9ffd0f74d4a6486da78546f7110d4dd208be4937238bb245",
+
+    /* חשבון הגוגל שלך — רק הוא רשאי להפעיל/לחדש מנויים. קוד-העל פותח את
+       הפאנל, אבל השינוי בפועל נכתב למסד רק כשאתה מחובר עם החשבון הזה,
+       וחוקי האבטחה (database.rules.json) אוכפים זאת. כך אף אחד אחר לא יכול
+       לתת לעצמו מנוי חינם. אם משנים כאן — לעדכן גם ב-database.rules.json. */
+    adminEmail: "rosenthala47@gmail.com",
   },
 
   /* המודל החדש מבוסס-חשבון: זיהוי חובה ללקוח (Google/טלפון) + אבטחת חשבון חובה
