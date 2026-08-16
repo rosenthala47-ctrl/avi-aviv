@@ -1,6 +1,6 @@
 /* Service Worker — BarberTor
    מטרות: התקנת PWA + הצגת התראות פוש (תזכורות / תור חדש).            */
-const CACHE = "ug-barber-v126";
+const CACHE = "ug-barber-v127";
 /* קליפת האפליקציה בלבד. קובצי ה-JS/CSS נטענים עם ‎?v=NN‎ (ראו tools/bump-version.sh)
    ולכן אין טעם לרשום אותם כאן — הם ייכנסו למטמון בטעינה הראשונה דרך ה-fetch,
    וכתובת חדשה בכל גרסה מבטיחה שלא יוגש קובץ ישן. */
@@ -51,7 +51,14 @@ self.addEventListener("fetch", (e) => {
         }
         return res;
       })
-      .catch(() => caches.match(req).then((r) => r || caches.match("./index.html")))
+      .catch(() => caches.match(req).then((r) => {
+        if (r) return r;
+        // לניווט (טעינת עמוד) — נופלים לקליפת האפליקציה. לסקריפטים/סגנונות —
+        // נכשלים ביושר במקום להגיש index.html כ-JS (מלכודת ששיתקה את האפליקציה
+        // בשקט: הדפדפן קיבל HTML במקום קוד). כשל אמיתי מפעיל את רשת ההתאוששות.
+        if (req.mode === "navigate") return caches.match("./index.html");
+        return Response.error();
+      }))
   );
 });
 

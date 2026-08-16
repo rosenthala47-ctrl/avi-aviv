@@ -30,7 +30,7 @@
         rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"></noscript>
   <script>try { document.documentElement.setAttribute("data-theme", localStorage.getItem("ug_theme") || "dark"); } catch (e) {}</script>
-  <link rel="stylesheet" href="assets/styles.css?v=126" />
+  <link rel="stylesheet" href="assets/styles.css?v=127" />
 </head>
 <body>
   <div class="app">
@@ -53,6 +53,16 @@
         try { var r = ev.reason; window.__ugErr.push("REJECT: " + ((r && (r.message || r.code)) || r || "")); } catch (e) {}
       });
 
+      // מעקב אחר טעינת כל קובץ סקריפט. onerror על תגית הסקריפט תופס כשל-רשת
+      // (בניגוד ל-window.onerror שלא תופס כשלי טעינת משאבים) — כך נדע בוודאות
+      // איזה קובץ לא נטען, וגם נדע מה לטעון מחדש בהתאוששות.
+      window.__ugLoadState = {};
+      window.__ugLoaded = function (n) { window.__ugLoadState[n] = "ok"; window.__ugMark("load:" + n); };
+      window.__ugFailed = function (n) {
+        window.__ugLoadState[n] = "fail"; window.__ugMark("FAIL:" + n);
+        try { window.__ugErr.push("LOAD-FAIL: " + n); } catch (e) {}
+      };
+
       function fullReset() {
         var done = function () { location.reload(true); };
         try {
@@ -73,6 +83,45 @@
       }
       window.__ugFullReset = fullReset;
 
+      // רשת התאוששות: אם האפליקציה לא עלתה תוך זמן קצר (למשל app.js לא נטען
+      // בגלל תקלת רשת חולפת), טוענים מחדש את הסקריפטים שנכשלו ומריצים אתחול.
+      // כל טעינה מחדש מוגנת מפני ריצה כפולה (ראו __ugAppInit ב-app.js).
+      window.__ugRecoverTries = 0;
+      var UG_FILES = [
+        ["config", "config.js"], ["util", "assets/js/util.js"], ["store", "assets/js/store.js"],
+        ["auth", "assets/js/auth.js"], ["notify", "assets/js/notify.js"], ["fcm", "assets/js/fcm.js"],
+        ["email", "assets/js/email.js"], ["app", "assets/js/app.js"]
+      ];
+      function ugRecover() {
+        if (window.__ugBooted) return;
+        var root = document.getElementById("root");
+        if (root && root.children.length > 0) return;
+        if (window.__ugRecoverTries >= 2) return;
+        window.__ugRecoverTries++;
+        window.__ugMark("recover#" + window.__ugRecoverTries);
+        // אם app.js כבר נטען אבל האתחול לא רץ — פשוט מריצים אותו
+        if (window.__ugBoot) { try { window.__ugBoot(); } catch (e) {} }
+        // טוענים מחדש (עם עקיפת מטמון) רק את הקבצים שלא סומנו כ"נטענו בהצלחה"
+        var chain = Promise.resolve();
+        UG_FILES.forEach(function (f) {
+          if (window.__ugLoadState[f[0]] === "ok") return;
+          chain = chain.then(function () {
+            return new Promise(function (res) {
+              var s = document.createElement("script");
+              s.src = f[1] + "?v=127&r=" + Date.now();
+              s.onload = function () { window.__ugLoaded(f[0]); res(); };
+              s.onerror = function () { window.__ugFailed(f[0]); res(); };
+              document.body.appendChild(s);
+            });
+          });
+        });
+        chain.then(function () {
+          if (window.__ugBoot && !window.__ugBooted) { try { window.__ugBoot(); } catch (e) {} }
+        });
+        setTimeout(ugRecover, 6000);
+      }
+      setTimeout(ugRecover, 6000);
+
       window.__ugBootFail = setTimeout(function () {
         var r = document.getElementById("root");
         if (!r || r.children.length > 0) return;
@@ -83,6 +132,8 @@
           "firebase=" + (typeof window.firebase),
           "online=" + (navigator.onLine),
           "sw=" + (navigator.serviceWorker && navigator.serviceWorker.controller ? "yes" : "no"),
+          "load=" + JSON.stringify(window.__ugLoadState || {}),
+          "recover=" + window.__ugRecoverTries,
           "trace=[" + (window.__ugTrace || []).join(" | ") + "]",
           "err=[" + (window.__ugErr || []).join(" ; ") + "]"
         ].join("\n");
@@ -100,7 +151,7 @@
           'background:#0f141c;border:1px solid #232a35;border-radius:10px;padding:10px;text-align:left;direction:ltr;white-space:pre-wrap">' +
           diag.replace(/[<>&]/g, function (c) { return { "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]; }) +
           '</pre></div>';
-      }, 8000);
+      }, 14000);   // אחרי שרשת ההתאוששות ניסתה פעמיים (6s, 12s)
     })();
   </script>
 
@@ -110,16 +161,17 @@
     <div class="modal" id="modal"></div>
   </div>
 
-  <!-- הגדרות. defer שומר על סדר הריצה אבל לא חוסם parsing של ה-HTML. -->
-  <script src="config.js?v=126" defer></script>
+  <!-- הגדרות. defer שומר על סדר הריצה אבל לא חוסם parsing של ה-HTML.
+       onload/onerror מסמנים לרשת ההתאוששות אילו קבצים נטענו ואילו נכשלו. -->
+  <script src="config.js?v=127" defer onload="__ugLoaded('config')" onerror="__ugFailed('config')"></script>
   <!-- לוגיקה -->
-  <script src="assets/js/util.js?v=126" defer></script>
-  <script src="assets/js/store.js?v=126" defer></script>
-  <script src="assets/js/auth.js?v=126" defer></script>
-  <script src="assets/js/notify.js?v=126" defer></script>
-  <script src="assets/js/fcm.js?v=126" defer></script>
-  <script src="assets/js/email.js?v=126" defer></script>
-  <script src="assets/js/app.js?v=126" defer></script>
+  <script src="assets/js/util.js?v=127" defer onload="__ugLoaded('util')" onerror="__ugFailed('util')"></script>
+  <script src="assets/js/store.js?v=127" defer onload="__ugLoaded('store')" onerror="__ugFailed('store')"></script>
+  <script src="assets/js/auth.js?v=127" defer onload="__ugLoaded('auth')" onerror="__ugFailed('auth')"></script>
+  <script src="assets/js/notify.js?v=127" defer onload="__ugLoaded('notify')" onerror="__ugFailed('notify')"></script>
+  <script src="assets/js/fcm.js?v=127" defer onload="__ugLoaded('fcm')" onerror="__ugFailed('fcm')"></script>
+  <script src="assets/js/email.js?v=127" defer onload="__ugLoaded('email')" onerror="__ugFailed('email')"></script>
+  <script src="assets/js/app.js?v=127" defer onload="__ugLoaded('app')" onerror="__ugFailed('app')"></script>
   <!-- qrcode.js (~57KB) נטען רק כשצריך אותו — בעמוד "פרסום" של הבעלים. -->
   <script>
     (function(){

@@ -2,6 +2,10 @@
    App — ניהול מסכים, תצוגה וחיווט אירועים
    =========================================================================*/
 (function () {
+  // הגנה מפני ריצה כפולה: רשת הביטחון ב-index.html עשויה לטעון מחדש את app.js
+  // אם הטעינה הראשונה נכשלה (תקלת רשת חולפת). כאן מוודאים שהקוד לא ירוץ פעמיים.
+  if (window.__ugAppInit) return;
+  window.__ugAppInit = true;
   const u = UG.util;
   const Store = UG.Store;
   const Notify = UG.Notify;
@@ -10,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "126";
+  const APP_VERSION = "127";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -5948,7 +5952,7 @@
      אתחול
      =======================================================================*/
   async function boot() {
-    try { if (window.__ugMark) window.__ugMark("boot"); } catch (e) {}
+    try { window.__ugBooted = true; if (window.__ugMark) window.__ugMark("boot"); } catch (e) {}
     setupBackGuard();   // מלכודת "אחורה" — להפעיל מיד, לפני טעינת הענן
     Notify.registerSW();
     wire();
@@ -6047,5 +6051,11 @@
     }
   }
 
-  document.addEventListener("DOMContentLoaded", boot);
+  // חשיפת boot לרשת הביטחון (index.html) כדי שתוכל להריץ אתחול אם משהו נתקע.
+  try { window.__ugBoot = boot; } catch (e) {}
+  try { if (window.__ugMark) window.__ugMark("app-ready"); } catch (e) {}
+  // רישום עמיד: עם defer הסקריפט רץ אחרי שה-DOM נותח (readyState="interactive"),
+  // ולכן אפשר להריץ boot ישירות. אם בכל זאת המסמך עדיין בטעינה — ממתינים לאירוע.
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
 })();
