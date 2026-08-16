@@ -304,12 +304,14 @@ UG.Store = (function () {
         sc.src = src; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc);
       });
       const V = "10.12.2";
-      let chain = load(`https://www.gstatic.com/firebasejs/${V}/firebase-app-compat.js`)
-        .then(() => load(`https://www.gstatic.com/firebasejs/${V}/firebase-${useRtdb ? "database" : "firestore"}-compat.js`));
-      if (useRtdb) {
-        // התחברות אנונימית — כדי שחוקי האבטחה יוכלו לדרוש משתמש מחובר
-        chain = chain.then(() => load(`https://www.gstatic.com/firebasejs/${V}/firebase-auth-compat.js`));
-      }
+      const dataSdk = useRtdb ? "database" : "firestore";
+      // טוענים קודם את app-compat, ואז את database+auth *במקביל* (שניהם תלויים רק
+      // ב-app-compat) — חוסך סבב רשת אחד לעומת טעינה בזה-אחר-זה.
+      const chain = load(`https://www.gstatic.com/firebasejs/${V}/firebase-app-compat.js`)
+        .then(() => Promise.all([
+          load(`https://www.gstatic.com/firebasejs/${V}/firebase-${dataSdk}-compat.js`),
+          useRtdb ? load(`https://www.gstatic.com/firebasejs/${V}/firebase-auth-compat.js`) : null,
+        ]));
       chain.then(() => {
         firebase.initializeApp(cfg);
         if (useRtdb) {
