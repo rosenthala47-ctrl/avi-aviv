@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "131";
+  const APP_VERSION = "132";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -83,6 +83,16 @@
   /* האם להציג מקטע בעמוד הלקוח. ברירת מחדל: מוצג. הספר יכול לכבות מקטעים
      מ״הגדרות → מה מוצג בעמוד הלקוח״ (נשמר כ-false על ה-shop). */
   function cShow(st, key) { return !(st && st.shop && st.shop[key] === false); }
+
+  /* רקע/לוגו — נטענים מצומת המדיה הנפרד (טעינה ברקע, לא חוסמת פתיחה). מעדיפים
+     את המדיה, ונופלים-לאחור לערך הישן שבתוך המספרה (עד למיגרציה) — כך תמונה
+     לעולם לא נעלמת, וגם מספרות ותיקות שעדיין לא הועברו מוצגות כרגיל. */
+  function shopMediaVal(st, kind) {
+    const m = (Store.getMedia && Store.getMedia()) || {};
+    return (m[kind] || (st && st.shop && st.shop[kind]) || "");
+  }
+  function shopCover(st) { return shopMediaVal(st, "cover"); }
+  function shopLogo(st) { return shopMediaVal(st, "logo"); }
 
   /* דף מנהל מסודר: רשימת שורות אחידה עם ניווט פנימי + סרגל לשוניות מצומצם.
      נבדק על "try" ומאוגוסט 2026 חל על כל המספרות. */
@@ -523,8 +533,8 @@
     return `
     <div class="topbar">
       <div class="brand">
-        <div class="logo-dot${st.shop.logo ? " has-img" : ""}" title="">${st.shop.logo
-          ? `<img class="logo-img" src="${esc(st.shop.logo)}" alt="">`
+        <div class="logo-dot${shopLogo(st) ? " has-img" : ""}" title="">${shopLogo(st)
+          ? `<img class="logo-img" src="${esc(shopLogo(st))}" alt="">`
           : esc((st.shop.name || "מ")[0])}</div>
         <div class="titles">
           <h1>${esc(st.shop.name)}</h1>
@@ -618,7 +628,7 @@
       <div class="screen active">
         ${topbar("כניסה", {})}
         <div class="content"><div class="auth-gate">
-          <div class="ag-logo">${st.shop.logo ? `<img src="${esc(st.shop.logo)}" alt="">` : esc((shopName || "מ")[0])}</div>
+          <div class="ag-logo">${shopLogo(st) ? `<img src="${esc(shopLogo(st))}" alt="">` : esc((shopName || "מ")[0])}</div>
           <h2>${esc(shopName)}</h2>
           <p>היכנסו כדי לקבוע תור ולעקוב אחרי התורים שלכם.</p>
           <button class="btn btn-google" data-act="ag-google"><span class="g-ico">${googleIcoSvg()}</span>המשך עם Google</button>
@@ -706,11 +716,11 @@
 
   /* ===== עמוד "בית" מצומצם — כפתור הזמנה בראש + כל התוכן בעמוד אחד ===== */
   function clientHome(st, services) {
-    const hasCover = !!st.shop.cover;
+    const hasCover = !!shopCover(st);
     // תמונת נושא רחבה בראש הדף, שנמזגת אל רקע העמוד; מעליה כותרת המספרה + כפתור הזמנה
     const hero = `
       <div class="home-hero ${hasCover ? "has-cover" : "no-cover"}">
-        ${hasCover ? `<img class="home-hero-img" src="${esc(st.shop.cover)}" alt="">` : ""}
+        ${hasCover ? `<img class="home-hero-img" src="${esc(shopCover(st))}" alt="">` : ""}
         <div class="home-hero-body">
           <div class="home-hero-title">${esc(st.shop.name || "")}</div>
           ${st.shop.tagline ? `<div class="home-hero-sub">${esc(st.shop.tagline)}</div>` : ""}
@@ -1571,7 +1581,7 @@
       : "בחרו שעה לתור";
 
     return `
-      ${condensedClient() ? `<button class="btn btn-ghost btn-sm home-back" data-tab="home">‹ חזרה לעמוד הבית</button>` : (st.shop.cover ? `<div class="client-cover"><img src="${esc(st.shop.cover)}" alt=""></div>` : "")}
+      ${condensedClient() ? `<button class="btn btn-ghost btn-sm home-back" data-tab="home">‹ חזרה לעמוד הבית</button>` : (shopCover(st) ? `<div class="client-cover"><img src="${esc(shopCover(st))}" alt=""></div>` : "")}
       ${rescheduleBanner(st)}
       ${alertBanner(st)}
       ${notifBanner()}
@@ -2211,7 +2221,7 @@
     toast("מעלה לוגו…", "sky", "⏳");
     try {
       const dataUrl = await compressLogo(file);
-      await Store.saveShop({ logo: dataUrl });
+      await Store.setShopMedia("logo", dataUrl);
       toast("הלוגו עודכן ✓ — כך יראו אותו הלקוחות", "good", "🎨");
       render();
     } catch (e) {
@@ -2224,7 +2234,7 @@
     toast("מעלה תמונת נושא…", "sky", "⏳");
     try {
       const dataUrl = await compressImage(file, 1200, 0.7);   // תמונה רחבה
-      await Store.saveShop({ cover: dataUrl });
+      await Store.setShopMedia("cover", dataUrl);
       toast("תמונת הנושא עודכנה ✓", "good", "🌄");
       render();
     } catch (e) {
@@ -3646,8 +3656,8 @@
       view.subPage = null;
       return `
         <div class="pub-hero">
-          <div class="pub-ico${st.shop.logo ? " has-img" : ""}">${st.shop.logo
-            ? `<img class="pub-logo" src="${esc(st.shop.logo)}" alt="">` : "📣"}</div>
+          <div class="pub-ico${shopLogo(st) ? " has-img" : ""}">${shopLogo(st)
+            ? `<img class="pub-logo" src="${esc(shopLogo(st))}" alt="">` : "📣"}</div>
           <h2>${owner ? esc(owner) + ", המספרה שלך מוכנה!" : "המספרה שלך מוכנה!"}</h2>
           <p>שלח/י את הקישור הזה ללקוחות — הם יזמינו תור לבד, ישירות מהטלפון.</p>
         </div>
@@ -3673,8 +3683,8 @@
 
     return `
       <div class="pub-hero">
-        <div class="pub-ico${st.shop.logo ? " has-img" : ""}">${st.shop.logo
-          ? `<img class="pub-logo" src="${esc(st.shop.logo)}" alt="">` : "📣"}</div>
+        <div class="pub-ico${shopLogo(st) ? " has-img" : ""}">${shopLogo(st)
+          ? `<img class="pub-logo" src="${esc(shopLogo(st))}" alt="">` : "📣"}</div>
         <h2>${owner ? esc(owner) + ", המספרה שלך מוכנה!" : "המספרה שלך מוכנה!"}</h2>
         <p>שלח/י את הקישור הזה ללקוחות — הם יזמינו תור לבד, ישירות מהטלפון.</p>
       </div>
@@ -3756,8 +3766,8 @@
   }
 
   function ownerSettings(st) {
-    const logo = st.shop.logo || "";
-    const cover = st.shop.cover || "";
+    const logo = shopLogo(st) || "";
+    const cover = shopCover(st) || "";
     const cLogo = `
       <div class="section-title">🖼️ לוגו המספרה</div>
       <div class="card">
@@ -4016,8 +4026,8 @@
               "תור שנשאר פנוי כשנותר פחות מהזמן הזה ייעלם ממסך הלקוחות. אצלכם ביומן הוא ממשיך להופיע, ותוכלו לרשום אליו לקוח מזדמן.") },
         ],
         brand: [
-          { id: "logo", ico: "🖼️", color: "#0ea5e9", label: "לוגו המספרה", val: st.shop.logo ? "הועלה" : "—", card: cLogo },
-          { id: "cover", ico: "🌄", color: "#22c55e", label: "תמונת נושא", val: st.shop.cover ? "הועלתה" : "—", card: cCover },
+          { id: "logo", ico: "🖼️", color: "#0ea5e9", label: "לוגו המספרה", val: shopLogo(st) ? "הועלה" : "—", card: cLogo },
+          { id: "cover", ico: "🌄", color: "#22c55e", label: "תמונת נושא", val: shopCover(st) ? "הועלתה" : "—", card: cCover },
           { id: "style", ico: "🎨", color: "#ec4899", label: "סגנון העיצוב", val: styleName, card: cStyle },
         ],
         client: [
@@ -5189,11 +5199,11 @@
         case "qr-download": downloadQr(); break;
         case "logo-pick": { const inp = $("[data-logofile]"); if (inp) inp.click(); break; }
         case "logo-remove":
-          await Store.saveShop({ logo: "" });
+          await Store.setShopMedia("logo", "");
           toast("הלוגו הוסר", "", "🗑️"); render(); break;
         case "cover-pick": { const inp = $("[data-coverfile]"); if (inp) inp.click(); break; }
         case "cover-remove":
-          await Store.saveShop({ cover: "" });
+          await Store.setShopMedia("cover", "");
           toast("תמונת הנושא הוסרה", "", "🗑️"); render(); break;
         case "share-app": shareApp(); break;
         case "share-wa": {
@@ -6034,6 +6044,8 @@
         (view.route === "owner" && view.ownerTab === "settings");
       if (onGalleryView && !isEditingRoot()) render();
     });
+    // מדיה (רקע/לוגו) הגיעה מהצומת הנפרד — מרעננים כדי שהתמונות יופיעו (טעינה מתקדמת)
+    if (Store.subscribeMedia) Store.subscribeMedia(() => { if (!isEditingRoot()) render(); });
     const bootShop = (Store.get() && Store.get().shop) || {};
     const secured = !!bootShop.ownerUid;   // מספרה מאובטחת בחשבון אישי (Firebase Auth)
     // כלל יחיד וברור: נכנסים לניהול רק אם יש אישור מקומי כבעלים (התחברות עם הסיסמה/קוד).

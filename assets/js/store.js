@@ -11,6 +11,7 @@ UG.Store = (function () {
   const u = UG.util;
   const KEY = (id) => "ug_barber_state_v1__" + id;   // מפתח מקומי לכל מספרה
   const GKEY = (id) => "ug_gallery_v1__" + id;
+  const MKEY = (id) => "ug_media_v1__" + id;         // רקע/לוגו — צומת נפרד
 
   let shopId = "main";
   let state = null;
@@ -20,6 +21,8 @@ UG.Store = (function () {
   const subs = new Set();
   let galleryCache = [];
   const gallerySubs = new Set();
+  let mediaCache = {};   // רקע/לוגו של המספרה הפעילה (shopMedia/<id>) — נטען ברקע
+  const mediaSubs = new Set();
 
   /* ---------- מצב ברירת מחדל ---------- */
   function defaultState() {
@@ -108,24 +111,27 @@ UG.Store = (function () {
      Backend מקומי
      =======================================================================*/
   function LocalBackend(id) {
-    const skey = KEY(id), gkey = GKEY(id);
+    const skey = KEY(id), gkey = GKEY(id), mkey = MKEY(id);
     let bc = null;
     try { bc = new BroadcastChannel("ug_barber_" + id); } catch (e) {}
-    const listeners = { state: [], gallery: [] };
+    const listeners = { state: [], gallery: [], media: [] };
     if (bc) bc.onmessage = (ev) => {
       const t = ev && ev.data && ev.data.t;
       if (t === "gallery") listeners.gallery.forEach((fn) => fn());
+      else if (t === "media") listeners.media.forEach((fn) => fn(readM()));
       else listeners.state.forEach((fn) => fn());
     };
     window.addEventListener("storage", (e) => {
       if (e.key === skey) listeners.state.forEach((fn) => fn());
       if (e.key === gkey) listeners.gallery.forEach((fn) => fn());
+      if (e.key === mkey) listeners.media.forEach((fn) => fn(readM()));
     });
     function readG() { try { return JSON.parse(localStorage.getItem(gkey) || "[]"); } catch (e) { return []; } }
     function writeG(list) {
       try { localStorage.setItem(gkey, JSON.stringify(list)); } catch (e) {}
       try { if (bc) bc.postMessage({ t: "gallery" }); } catch (e) {}
     }
+    function readM() { try { return JSON.parse(localStorage.getItem(mkey) || "{}"); } catch (e) { return {}; } }
     return {
       mode: "local",
       read() {
@@ -146,6 +152,15 @@ UG.Store = (function () {
       onGallery(cb) { listeners.gallery.push(cb); },
       addPhoto(p) { const l = readG(); l.unshift(Object.assign({ id: u.uid() }, p)); writeG(l); return Promise.resolve(); },
       removePhoto(pid) { writeG(readG().filter((x) => x.id !== pid)); return Promise.resolve(); },
+      // מדיה (רקע/לוגו) — צומת נפרד כדי שלא יחסום את טעינת המספרה
+      onMedia(cb) { listeners.media.push(cb); cb(readM()); },
+      saveMedia(patch) {
+        const m = Object.assign(readM(), patch);
+        try { localStorage.setItem(mkey, JSON.stringify(m)); } catch (e) {}
+        try { if (bc) bc.postMessage({ t: "media" }); } catch (e) {}
+        listeners.media.forEach((fn) => fn(m));
+        return Promise.resolve();
+      },
       exists() { return Promise.resolve(localStorage.getItem(skey) != null); },
     };
   }
@@ -223,9 +238,13 @@ UG.Store = (function () {
   function RtdbBackend(db, id) {
     const ref = db.ref("shops/" + id);
     const galRef = db.ref("gallery/" + id);
+    const mediaRef = db.ref("shopMedia/" + id);   // רקע/לוגו — צומת נפרד, נטען ברקע
     return {
       mode: "cloud",
       _db: db, _ref: ref,
+      // מדיה (רקע/לוגו) — צומת נפרד כדי שלא יחסום את טעינת המספרה. נטען ומאזין ברקע.
+      onMedia(cb) { mediaRef.on("value", (snap) => cb(snap.val() || {})); },
+      saveMedia(patch) { return mediaRef.update(clone(patch)); },
       read() {
         return ref.once("value").then((snap) => (snap.exists() ? normalize(snap.val()) : null));
       },
@@ -398,6 +417,9 @@ UG.Store = (function () {
     state = s;
     backend.onRemote((remote) => reloadFromRemote(remote));
     if (backend.onGallery) backend.onGallery((list) => reloadGallery(list));
+    // מדיה (רקע/לוגו) — נטענת ברקע ואינה חוסמת את הרינדור הראשון של המספרה.
+    // כשהיא מגיעה, מרעננים כדי שהתמונות יופיעו (טעינה מתקדמת).
+    if (backend.onMedia) backend.onMedia((m) => { mediaCache = m || {}; emitMedia(); });
     // מנוי — קריאה ראשונית + מעקב בזמן אמת (אם אתה מפעיל את המספרה, זה יתעדכן מיד)
     if (backend.readSub) {
       try { subState = await backend.readSub(); } catch (e) { subState = null; }
@@ -587,7 +609,7 @@ UG.Store = (function () {
     s.shop.tiktok = (data && data.tiktok) || "";
     s.shop.facebook = (data && data.facebook) || "";
     s.shop.youtube = (data && data.youtube) || "";
-    s.shop.logo = (data && data.logo) || "";
+    // הלוגו נשמר בצומת המדיה הנפרד (shopMedia), לא בתוך המספרה — ראו saveMedia למטה.
     s.shop.heardFrom = (data && data.heardFrom) || "";   // מאיפה הספר הגיע אלינו
     s.shop.style = (data && data.style) || "sky";
     // שמות הספרים (אם המספרה בחרה כמה ספרים בשאלון)
@@ -606,6 +628,8 @@ UG.Store = (function () {
         }));
     }
     await b.write(s);
+    // לוגו למספרה חדשה — נכתב לצומת המדיה הנפרד (לא לתוך המספרה)
+    if (data && data.logo && b.saveMedia) { try { await b.saveMedia({ logo: data.logo }); } catch (e) {} }
     if (passHash) await registerPasscode(passHash, id);   // שריון הקוד למניעת כפילות
     return { ok: true, id: id };
   }
@@ -639,6 +663,27 @@ UG.Store = (function () {
   }
   function subscribeGallery(fn) { gallerySubs.add(fn); fn(galleryCache); return () => gallerySubs.delete(fn); }
   function getGallery() { return galleryCache; }
+
+  /* ---------- מדיה: רקע (cover) ולוגו (logo) ----------
+     נשמרים בצומת נפרד (shopMedia/<id>) כדי שלא יחסמו את טעינת המספרה. התצוגה
+     מעדיפה את המדיה, ונופלת-לאחור לערך הישן שבתוך המספרה (עד למיגרציה). */
+  function emitMedia() { mediaSubs.forEach((fn) => { try { fn(mediaCache); } catch (e) {} }); }
+  function subscribeMedia(fn) { mediaSubs.add(fn); fn(mediaCache); return () => mediaSubs.delete(fn); }
+  function getMedia() { return mediaCache || {}; }
+  // קביעת רקע/לוגו: kind = "cover" | "logo". dataUrl ריק ("") = הסרה.
+  async function setShopMedia(kind, dataUrl) {
+    if (kind !== "cover" && kind !== "logo") return;
+    mediaCache = Object.assign({}, mediaCache, { [kind]: dataUrl || "" });
+    emitMedia();   // עדכון מיידי בתצוגה
+    if (backend && backend.saveMedia) { try { await backend.saveMedia({ [kind]: dataUrl || "" }); } catch (e) { throw reportWriteError(e); } }
+    // ניקוי הערך הישן מצומת המספרה (אם היה שם) — כדי שהצומת יישאר קטן ומהיר
+    try {
+      if (state && state.shop && state.shop[kind] !== undefined && state.shop[kind] !== "") {
+        delete state.shop[kind];
+        if (backend && backend.updateChildren) await backend.updateChildren({ ["shop/" + kind]: null });
+      }
+    } catch (e) { /* best-effort */ }
+  }
   async function addPhoto(dataUrl, caption) {
     if (backend.addPhoto) { await backend.addPhoto({ dataUrl: dataUrl, caption: caption || "", createdAt: Date.now() }); reloadGallery(); }
   }
@@ -1016,6 +1061,7 @@ UG.Store = (function () {
     createBooking, setBookingStatus, deleteBooking,
     joinWaitlist, leaveWaitlist, consumeAlert, addReview, savePushToken,
     subscribeGallery, getGallery, addPhoto, removePhoto,
+    subscribeMedia, getMedia, setShopMedia,
     createShop, shopExists, peekShop, passcodeTaken, registerPasscodeIfFree, setOwnerPassHash,
     getSub, markPaymentPending, adminListShops, adminSetPaid,
     exportData, importData, deleteShop, purgeClient, onWriteError,
