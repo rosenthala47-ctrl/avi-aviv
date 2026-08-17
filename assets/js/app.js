@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "130";
+  const APP_VERSION = "131";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1316,6 +1316,18 @@
       return !!h && h === String(sc.adminPasscodeHash).toLowerCase();
     }
     return !!sc.adminPasscode && v === String(sc.adminPasscode);
+  }
+
+  /* קודי הכניסה של המספרה הראשית (config) — נשמרים כ-hash. משווים ע״י הצפנת הקלט.
+     תאימות לאחור: אם עדיין מוגדרים קודים בטקסט גלוי (config ישן), גם הם עובדים. */
+  async function ownerConfigCodeMatches(v) {
+    if (!v) return false;
+    const plain = [UG_CONFIG.ownerPasscode].concat(UG_CONFIG.ownerPasscodesExtra || []).filter(Boolean).map(String);
+    if (plain.includes(v)) return true;
+    const hashes = (UG_CONFIG.ownerPasscodeHashes || []).map((h) => String(h).toLowerCase());
+    if (!hashes.length) return false;
+    const h = await sha256Hex(v);
+    return !!h && hashes.includes(h);
   }
 
   // המייל שרשאי להפעיל מנויים (מוגדר ב-config, נאכף בחוקי האבטחה)
@@ -4929,12 +4941,11 @@
       try { data = await Store.peekShop(handle); } catch (e) {}
       if (btn) { btn.disabled = false; btn.textContent = "כניסה לניהול"; }
       if (!data || !data.shop) { err("לא נמצאה מערכת בכתובת הזו"); return; }
-      const configCodes = [UG_CONFIG.ownerPasscode].concat(UG_CONFIG.ownerPasscodesExtra || []).map(String);
       const pHash = await ownerHash(handle, pass);
       const okHash = !!(data.shop.ownerPassHash && pHash && pHash === data.shop.ownerPassHash);
       const okLegacy = !!(data.shop.ownerPass && pass === String(data.shop.ownerPass));   // מספרה ותיקה
-      const ok = okHash || okLegacy ||
-        (handle === "main" && configCodes.includes(pass));   // סיסמאות אורי (config) עובדות למספרה הראשית
+      const okConfig = (handle === "main") && await ownerConfigCodeMatches(pass);   // קודי אורי (config) — למספרה הראשית
+      const ok = okHash || okLegacy || okConfig;
       if (!ok) { err("סיסמה שגויה"); haptic(40); return; }
       // מיגרציה שקטה: מספרה ותיקה עם סיסמה גלויה → שומר hash מלוחלח ומוחק את הגלויה
       if ((okHash || okLegacy) && (!data.shop.ownerPassHash || data.shop.ownerPass)) {
@@ -5695,11 +5706,11 @@
       // הקוד נשמר כ-hash מוצפן; משווים לפי טביעת אצבע (או טקסט גלוי לתאימות לאחור).
       const sc = UG_CONFIG.subscription || {};
       if (await adminCodeMatches(v, sc)) { closeModal(); openAdminPanel(); return; }
-      const configCodes = [UG_CONFIG.ownerPasscode].concat(UG_CONFIG.ownerPasscodesExtra || []).map(String);
       const vHash = await ownerHash(SHOP, v);
       const okHash = !!(shop.ownerPassHash && vHash && vHash === shop.ownerPassHash);
       const okLegacy = !!(shop.ownerPass && v === String(shop.ownerPass));   // מספרה ותיקה
-      if (okHash || okLegacy || (SHOP === "main" && configCodes.includes(v))) {   // config — רק למספרה הראשית
+      const okConfig = (SHOP === "main") && await ownerConfigCodeMatches(v);   // config — רק למספרה הראשית
+      if (okHash || okLegacy || okConfig) {
         // מיגרציה שקטה: סיסמה גלויה ישנה → hash מלוחלח, ומחיקת הגלויה
         if ((okHash || okLegacy) && (!shop.ownerPassHash || shop.ownerPass)) {
           try { await Store.setOwnerPassHash(SHOP, vHash); } catch (e) {}
