@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "127";
+  const APP_VERSION = "128";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -5952,7 +5952,9 @@
      אתחול
      =======================================================================*/
   async function boot() {
-    try { window.__ugBooted = true; if (window.__ugMark) window.__ugMark("boot"); } catch (e) {}
+    if (window.__ugBooted) return;              // אתחול פעם אחת בלבד (רשת ההתאוששות עשויה לקרוא ל-boot)
+    window.__ugBooted = true;
+    try { if (window.__ugMark) window.__ugMark("boot"); } catch (e) {}
     setupBackGuard();   // מלכודת "אחורה" — להפעיל מיד, לפני טעינת הענן
     Notify.registerSW();
     wire();

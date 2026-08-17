@@ -30,7 +30,7 @@
         rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"></noscript>
   <script>try { document.documentElement.setAttribute("data-theme", localStorage.getItem("ug_theme") || "dark"); } catch (e) {}</script>
-  <link rel="stylesheet" href="assets/styles.css?v=127" />
+  <link rel="stylesheet" href="assets/styles.css?v=128" />
 </head>
 <body>
   <div class="app">
@@ -57,10 +57,17 @@
       // (בניגוד ל-window.onerror שלא תופס כשלי טעינת משאבים) — כך נדע בוודאות
       // איזה קובץ לא נטען, וגם נדע מה לטעון מחדש בהתאוששות.
       window.__ugLoadState = {};
-      window.__ugLoaded = function (n) { window.__ugLoadState[n] = "ok"; window.__ugMark("load:" + n); };
+      window.__ugLoaded = function (n) {
+        window.__ugLoadState[n] = "ok"; window.__ugMark("load:" + n);
+        // app.js "נטען" אבל האתחול לא רץ תוך רגע? (למשל SW ישן שהגיש HTML במקום
+        // קוד) — מפעילים התאוששות מהר, בלי לחכות לטיימר.
+        if (n === "app") setTimeout(function () { if (!window.__ugBooted) ugRecover(); }, 250);
+      };
       window.__ugFailed = function (n) {
         window.__ugLoadState[n] = "fail"; window.__ugMark("FAIL:" + n);
         try { window.__ugErr.push("LOAD-FAIL: " + n); } catch (e) {}
+        // app.js נכשל בהורדה — מתחילים התאוששות מיד (במקום להמתין 6 שניות).
+        if (n === "app") ugRecover();
       };
 
       function fullReset() {
@@ -87,40 +94,52 @@
       // בגלל תקלת רשת חולפת), טוענים מחדש את הסקריפטים שנכשלו ומריצים אתחול.
       // כל טעינה מחדש מוגנת מפני ריצה כפולה (ראו __ugAppInit ב-app.js).
       window.__ugRecoverTries = 0;
+      window.__ugRecovering = false;
       var UG_FILES = [
         ["config", "config.js"], ["util", "assets/js/util.js"], ["store", "assets/js/store.js"],
         ["auth", "assets/js/auth.js"], ["notify", "assets/js/notify.js"], ["fcm", "assets/js/fcm.js"],
         ["email", "assets/js/email.js"], ["app", "assets/js/app.js"]
       ];
+      // הגרסה נלקחת מתגית app.js עצמה — כדי שהטעינה החוזרת תמיד תבקש את הגרסה הנוכחית.
+      function ugVer() {
+        try { var s = document.querySelector('script[src*="app.js?v="]'); var m = s && s.src.match(/[?&]v=(\d+)/); return m ? m[1] : ""; }
+        catch (e) { return ""; }
+      }
       function ugRecover() {
-        if (window.__ugBooted) return;
-        var root = document.getElementById("root");
-        if (root && root.children.length > 0) return;
-        if (window.__ugRecoverTries >= 2) return;
+        if (window.__ugBooted || window.__ugRecovering) return;
+        if (window.__ugRecoverTries >= 3) return;
+        window.__ugRecovering = true;
         window.__ugRecoverTries++;
         window.__ugMark("recover#" + window.__ugRecoverTries);
-        // אם app.js כבר נטען אבל האתחול לא רץ — פשוט מריצים אותו
-        if (window.__ugBoot) { try { window.__ugBoot(); } catch (e) {} }
-        // טוענים מחדש (עם עקיפת מטמון) רק את הקבצים שלא סומנו כ"נטענו בהצלחה"
+        var v = ugVer();
+        // טוענים מחדש (עם עקיפת מטמון) את הקבצים שלא נטענו — ותמיד את app.js, כי
+        // אם עדיין לא אותחל סימן שהוא לא רץ (גם אם "נטען" — למשל SW ישן שהגיש HTML).
         var chain = Promise.resolve();
         UG_FILES.forEach(function (f) {
-          if (window.__ugLoadState[f[0]] === "ok") return;
+          if (f[0] !== "app" && window.__ugLoadState[f[0]] === "ok") return;
           chain = chain.then(function () {
+            if (window.__ugBooted) return;
             return new Promise(function (res) {
               var s = document.createElement("script");
-              s.src = f[1] + "?v=127&r=" + Date.now();
-              s.onload = function () { window.__ugLoaded(f[0]); res(); };
-              s.onerror = function () { window.__ugFailed(f[0]); res(); };
+              s.src = f[1] + "?v=" + v + "&r=" + Date.now();   // עוקף מטמון ו-SW ישן
+              s.onload = function () { window.__ugLoadState[f[0]] = "ok"; window.__ugMark("re:" + f[0]); res(); };
+              s.onerror = function () { window.__ugLoadState[f[0]] = "fail"; window.__ugMark("reFAIL:" + f[0]); res(); };
               document.body.appendChild(s);
             });
           });
         });
         chain.then(function () {
           if (window.__ugBoot && !window.__ugBooted) { try { window.__ugBoot(); } catch (e) {} }
+          window.__ugRecovering = false;
+          if (!window.__ugBooted) setTimeout(ugRecover, 4000);   // ניסיון נוסף אם עדיין לא עלה
         });
-        setTimeout(ugRecover, 6000);
       }
-      setTimeout(ugRecover, 6000);
+      // הפעלות מהירות: מיד כשמשהו נכשל (דרך __ugFailed), וגם קצת אחרי שה-DOM מוכן
+      // (מכסה מצב שבו app.js "נטען" אך לא אותחל), ורשת ביטחון מוחלטת אחרי 3.5 שניות.
+      document.addEventListener("DOMContentLoaded", function () {
+        setTimeout(function () { if (!window.__ugBooted) ugRecover(); }, 500);
+      });
+      setTimeout(function () { if (!window.__ugBooted) ugRecover(); }, 3500);
 
       window.__ugBootFail = setTimeout(function () {
         var r = document.getElementById("root");
@@ -163,15 +182,15 @@
 
   <!-- הגדרות. defer שומר על סדר הריצה אבל לא חוסם parsing של ה-HTML.
        onload/onerror מסמנים לרשת ההתאוששות אילו קבצים נטענו ואילו נכשלו. -->
-  <script src="config.js?v=127" defer onload="__ugLoaded('config')" onerror="__ugFailed('config')"></script>
+  <script src="config.js?v=128" defer onload="__ugLoaded('config')" onerror="__ugFailed('config')"></script>
   <!-- לוגיקה -->
-  <script src="assets/js/util.js?v=127" defer onload="__ugLoaded('util')" onerror="__ugFailed('util')"></script>
-  <script src="assets/js/store.js?v=127" defer onload="__ugLoaded('store')" onerror="__ugFailed('store')"></script>
-  <script src="assets/js/auth.js?v=127" defer onload="__ugLoaded('auth')" onerror="__ugFailed('auth')"></script>
-  <script src="assets/js/notify.js?v=127" defer onload="__ugLoaded('notify')" onerror="__ugFailed('notify')"></script>
-  <script src="assets/js/fcm.js?v=127" defer onload="__ugLoaded('fcm')" onerror="__ugFailed('fcm')"></script>
-  <script src="assets/js/email.js?v=127" defer onload="__ugLoaded('email')" onerror="__ugFailed('email')"></script>
-  <script src="assets/js/app.js?v=127" defer onload="__ugLoaded('app')" onerror="__ugFailed('app')"></script>
+  <script src="assets/js/util.js?v=128" defer onload="__ugLoaded('util')" onerror="__ugFailed('util')"></script>
+  <script src="assets/js/store.js?v=128" defer onload="__ugLoaded('store')" onerror="__ugFailed('store')"></script>
+  <script src="assets/js/auth.js?v=128" defer onload="__ugLoaded('auth')" onerror="__ugFailed('auth')"></script>
+  <script src="assets/js/notify.js?v=128" defer onload="__ugLoaded('notify')" onerror="__ugFailed('notify')"></script>
+  <script src="assets/js/fcm.js?v=128" defer onload="__ugLoaded('fcm')" onerror="__ugFailed('fcm')"></script>
+  <script src="assets/js/email.js?v=128" defer onload="__ugLoaded('email')" onerror="__ugFailed('email')"></script>
+  <script src="assets/js/app.js?v=128" defer onload="__ugLoaded('app')" onerror="__ugFailed('app')"></script>
   <!-- qrcode.js (~57KB) נטען רק כשצריך אותו — בעמוד "פרסום" של הבעלים. -->
   <script>
     (function(){
