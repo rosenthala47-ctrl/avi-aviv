@@ -576,7 +576,9 @@ UG.Store = (function () {
     s.shop.createdAt = Date.now();   // תחילת תקופת הניסיון של המנוי
     s.shop.name = (data && data.name) || s.shop.name;
     s.shop.tagline = (data && data.tagline) || "מספרה";
-    s.shop.ownerPass = String((data && data.ownerPass) || "");
+    // סיסמת הניהול נשמרת רק כ-hash מלוחלח (ownerPassHash) — לעולם לא כטקסט גלוי,
+    // כדי שלא ניתן יהיה לקרוא אותה מנתוני המספרה.
+    s.shop.ownerPassHash = String((data && data.ownerPassHash) || "");
     s.shop.phone = (data && data.phone) || "";
     s.shop.address = (data && data.address) || "";
     s.shop.ownerName = (data && data.ownerName) || "";
@@ -606,6 +608,22 @@ UG.Store = (function () {
     await b.write(s);
     if (passHash) await registerPasscode(passHash, id);   // שריון הקוד למניעת כפילות
     return { ok: true, id: id };
+  }
+  /* מיגרציה בטוחה של סיסמת ניהול: קובע hash מלוחלח ומוחק את הסיסמה הגלויה הישנה.
+     נקרא אחרי התחברות מוצלחת של הבעלים. best-effort — אם הכתיבה נחסמת (מספרה
+     מאובטחת שאינה בבעלות המשתמש), לא קורה כלום וההשוואה הישנה עדיין עובדת. */
+  async function setOwnerPassHash(handle, hash) {
+    if (!handle || !hash) return;
+    await connect();
+    const b = makeBackend(handle);
+    try {
+      if (b.updateChildren) {
+        await b.updateChildren({ "shop/ownerPassHash": String(hash), "shop/ownerPass": null });
+      } else if (b.read && b.write) {
+        const s = b.read();
+        if (s && s.shop) { s.shop.ownerPassHash = String(hash); delete s.shop.ownerPass; await b.write(s); }
+      }
+    } catch (e) { /* best-effort — לא חוסם התחברות */ }
   }
   async function shopExists(id) { await connect(); return makeBackend(id).exists(); }
   // קריאת נתוני מספרה לפי כתובת (לאימות סיסמה בהתחברות) — בלי לשנות את המספרה הפעילה
@@ -998,7 +1016,7 @@ UG.Store = (function () {
     createBooking, setBookingStatus, deleteBooking,
     joinWaitlist, leaveWaitlist, consumeAlert, addReview, savePushToken,
     subscribeGallery, getGallery, addPhoto, removePhoto,
-    createShop, shopExists, peekShop, passcodeTaken, registerPasscodeIfFree,
+    createShop, shopExists, peekShop, passcodeTaken, registerPasscodeIfFree, setOwnerPassHash,
     getSub, markPaymentPending, adminListShops, adminSetPaid,
     exportData, importData, deleteShop, purgeClient, onWriteError,
     get mode() { return backend ? backend.mode : "local"; },

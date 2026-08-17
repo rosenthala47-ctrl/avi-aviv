@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "129";
+  const APP_VERSION = "130";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1302,6 +1302,12 @@
       const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
       return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
     } catch (e) { return ""; }
+  }
+  /* hash מלוחלח של סיסמת הניהול — מחליף את השמירה הגלויה. הלכלוח (הכתובת) מונע
+     טבלאות-מוכנות (rainbow) וקישור בין מספרות. אותו קלט → אותו hash, כך שאפשר
+     להשוות בהתחברות בלי לשמור את הסיסמה עצמה. */
+  async function ownerHash(handle, pass) {
+    return sha256Hex("btpass1|" + String(handle || "") + "|" + String(pass == null ? "" : pass));
   }
   async function adminCodeMatches(v, sc) {
     if (!v) return false;
@@ -4870,8 +4876,9 @@
     const d = wiz.data;
     let passHash = "";
     try { passHash = await sha256Hex(d.pass); } catch (e) {}
+    const ownerPassHash = await ownerHash(d.handle, d.pass);   // hash מלוחלח (במקום סיסמה גלויה)
     const res = await Store.createShop(d.handle, {
-      name: d.name, ownerPass: d.pass, phone: d.phone, address: d.address, ownerName: d.owner,
+      name: d.name, ownerPassHash: ownerPassHash, phone: d.phone, address: d.address, ownerName: d.owner,
       style: d.style, services: d.services, staff: d.multiStaff ? d.staff : [],
       about: d.about, instagram: d.instagram, tiktok: d.tiktok, facebook: d.facebook, youtube: d.youtube,
       logo: d.logo, heardFrom: d.heardFrom,
@@ -4923,11 +4930,18 @@
       if (btn) { btn.disabled = false; btn.textContent = "כניסה לניהול"; }
       if (!data || !data.shop) { err("לא נמצאה מערכת בכתובת הזו"); return; }
       const configCodes = [UG_CONFIG.ownerPasscode].concat(UG_CONFIG.ownerPasscodesExtra || []).map(String);
-      const ok = (data.shop.ownerPass && pass === String(data.shop.ownerPass)) ||
+      const pHash = await ownerHash(handle, pass);
+      const okHash = !!(data.shop.ownerPassHash && pHash && pHash === data.shop.ownerPassHash);
+      const okLegacy = !!(data.shop.ownerPass && pass === String(data.shop.ownerPass));   // מספרה ותיקה
+      const ok = okHash || okLegacy ||
         (handle === "main" && configCodes.includes(pass));   // סיסמאות אורי (config) עובדות למספרה הראשית
       if (!ok) { err("סיסמה שגויה"); haptic(40); return; }
+      // מיגרציה שקטה: מספרה ותיקה עם סיסמה גלויה → שומר hash מלוחלח ומוחק את הגלויה
+      if ((okHash || okLegacy) && (!data.shop.ownerPassHash || data.shop.ownerPass)) {
+        try { await Store.setOwnerPassHash(handle, pHash); } catch (e) {}
+      }
       // כניסה מוצלחת — ישר לניהול. משריינים את קוד הכניסה של המספרה הוותיקה
-      // (backfill) כדי שמספרה חדשה לא תוכל להשתמש בו.
+      // (backfill) כדי שמספרה חדשה לא תוכל להשתמש בו — כל עוד הסיסמה הגלויה עדיין קיימת.
       if (data.shop.ownerPass) { sha256Hex(String(data.shop.ownerPass)).then((h) => Store.registerPasscodeIfFree(h)).catch(() => {}); }
       localStorage.setItem("ug_owner_auth__" + handle, "1");
       localStorage.setItem("ug_route__" + handle, "owner");
@@ -4967,7 +4981,8 @@
     const btn = $("[data-act='create-shop']"); if (btn) { btn.disabled = true; btn.textContent = "יוצר…"; }
     let passHash = "";
     try { passHash = await sha256Hex(pass); } catch (e) {}
-    const res = await Store.createShop(handle, { name: name, ownerPass: pass }, passHash);
+    const ownerPassHash = await ownerHash(handle, pass);   // hash מלוחלח לאימות (במקום סיסמה גלויה)
+    const res = await Store.createShop(handle, { name: name, ownerPassHash: ownerPassHash }, passHash);
     if (!res.ok) {
       toast(res.reason || "שגיאה ביצירת המספרה", "", "⚠️");
       if (btn) { btn.disabled = false; btn.textContent = "יצירת המספרה"; }
@@ -5681,10 +5696,16 @@
       const sc = UG_CONFIG.subscription || {};
       if (await adminCodeMatches(v, sc)) { closeModal(); openAdminPanel(); return; }
       const configCodes = [UG_CONFIG.ownerPasscode].concat(UG_CONFIG.ownerPasscodesExtra || []).map(String);
-      const ok = (shop.ownerPass && v === String(shop.ownerPass)) ||
-        (SHOP === "main" && configCodes.includes(v));   // סיסמאות ה-config עובדות רק למספרה הראשית
-      if (ok) { closeModal(); go("owner"); }
-      else { toast("סיסמה שגויה", "", "🔒"); }
+      const vHash = await ownerHash(SHOP, v);
+      const okHash = !!(shop.ownerPassHash && vHash && vHash === shop.ownerPassHash);
+      const okLegacy = !!(shop.ownerPass && v === String(shop.ownerPass));   // מספרה ותיקה
+      if (okHash || okLegacy || (SHOP === "main" && configCodes.includes(v))) {   // config — רק למספרה הראשית
+        // מיגרציה שקטה: סיסמה גלויה ישנה → hash מלוחלח, ומחיקת הגלויה
+        if ((okHash || okLegacy) && (!shop.ownerPassHash || shop.ownerPass)) {
+          try { await Store.setOwnerPassHash(SHOP, vHash); } catch (e) {}
+        }
+        closeModal(); go("owner");
+      } else { toast("סיסמה שגויה", "", "🔒"); }
     };
     $("[data-act2='check-code']").addEventListener("click", check);
     $("#own-code").addEventListener("keydown", (e) => { if (e.key === "Enter") check(); });
