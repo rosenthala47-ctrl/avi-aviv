@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "132";
+  const APP_VERSION = "133";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -3483,13 +3483,18 @@
     }
     if (shop.ownerUid) {
       const email = (UG.Auth.currentEmail && UG.Auth.currentEmail()) || "";
+      const isOwnerAuthed = !!(UG.Auth.currentUid && UG.Auth.currentUid() === shop.ownerUid);
       return `
         <div class="section-title">🔒 אבטחה</div>
         <div class="card">
           <div class="conn-line" style="margin-bottom:10px"><span class="conn-dot"></span>
             המספרה מאובטחת בחשבון אישי${email ? ` · ${esc(email)}` : ""}</div>
-          <p class="hint" style="margin-top:0">מעכשיו הכניסה לניהול היא עם החשבון הזה. (בשלב הבא נבטל את הקוד הישן ונחזק את חוקי מסד הנתונים.)</p>
-          <button class="btn btn-sm btn-danger" data-act="auth-signout" style="margin-top:10px">התנתקות מהחשבון</button>
+          <p class="hint" style="margin-top:0">הכניסה לניהול היא עם החשבון הזה בלבד.</p>
+          <div class="btn-row btn-row-wrap" style="margin-top:10px;gap:8px">
+            <button class="btn btn-sm" data-act="auth-signout">התנתקות מהחשבון</button>
+            <button class="btn btn-sm btn-danger" data-act="release-security">שחרור ההגנה / העברה לספר אחר</button>
+          </div>
+          <p class="hint" style="margin-top:8px">שחרור ההגנה מחזיר את הכניסה לקוד, כדי שספר אחר יוכל לאבטח את המספרה עם החשבון שלו.${isOwnerAuthed ? "" : " לשחרור יש להתחבר קודם עם חשבון הבעלים הנוכחי."}</p>
         </div>`;
     }
     return `
@@ -3512,6 +3517,40 @@
     if (!shop.ownerUid) await Store.saveShop({ ownerUid: uid });
     closeModal(); toast("המספרה מאובטחת בחשבון שלך 🔒", "good", "🔒"); render();
     return true;
+  }
+
+  /* שחרור ההגנה מהמספרה — מנקה את ownerUid כדי שאפשר יהיה להיכנס עם הקוד ולאבטח
+     מחדש עם חשבון אחר (למשל העברת המספרה לספר). מותנה בכך שמחוברים כרגע עם חשבון
+     הבעלים הנוכחי — אחרת חוקי האבטחה יחסמו את הכתיבה ואין למי לשחרר. */
+  function releaseSecurity() {
+    const shop = (Store.get() && Store.get().shop) || {};
+    if (!shop.ownerUid) { toast("המספרה כבר אינה מאובטחת בחשבון", "", "🔓"); return; }
+    const authedAsOwner = !!(UG.Auth && UG.Auth.currentUid && UG.Auth.currentUid() === shop.ownerUid);
+    if (!authedAsOwner) {
+      toast("כדי לשחרר את ההגנה יש להתחבר קודם עם חשבון הבעלים הנוכחי", "", "🔒");
+      if (UG.Auth && authAvail) promptOwnerLogin(shop.ownerUid);
+      return;
+    }
+    openModal(`
+      ${authHeader()}
+      <div class="m-sub" style="text-align:center;margin-bottom:8px">שחרור ההגנה מהמספרה</div>
+      <p class="hint" style="margin-top:0">אחרי השחרור, הכניסה לניהול חוזרת לקוד הרגיל, והספר יוכל לאבטח את המספרה מחדש עם החשבון שלו. אפשר תמיד לאבטח שוב.</p>
+      <button class="btn btn-danger" data-act2="do-release-security">כן, שחרר את ההגנה</button>
+      <button class="btn btn-ghost btn-sm" data-act="close-modal" style="margin-top:8px;width:100%">ביטול</button>
+    `);
+    const btn = $("[data-act2='do-release-security']");
+    if (btn) btn.addEventListener("click", async () => {
+      btn.disabled = true; btn.textContent = "משחרר…";
+      try {
+        await Store.saveShop({ ownerUid: null });   // הסרת ownerUid → מספרה לא-מאובטחת
+        closeModal();
+        toast("ההגנה שוחררה 🔓 — עכשיו אפשר להיכנס עם הקוד ולאבטח מחדש", "good", "🔓");
+        render();
+      } catch (e) {
+        btn.disabled = false; btn.textContent = "כן, שחרר את ההגנה";
+        toast("השחרור נכשל — ודאו שאתם מחוברים עם חשבון הבעלים", "", "⚠️");
+      }
+    });
   }
 
   function openSecureShop() {
@@ -5187,6 +5226,7 @@
         }
         case "client-detail": clientDetail(t.dataset.key); break;
         case "secure-shop": openSecureShop(); break;
+        case "release-security": releaseSecurity(); break;
         case "auth-signout":
           if (UG.Auth) UG.Auth.signOut().finally(() => { toast("התנתקת מהחשבון", "", "🔓"); render(); });
           break;
