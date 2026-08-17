@@ -12,6 +12,29 @@
 process.env.TZ = "Asia/Jerusalem";
 
 const admin = require("firebase-admin");
+const crypto = require("crypto");
+
+/* ניקוי חד-פעמי של סיסמאות ניהול גלויות: ממיר shop.ownerPass (טקסט גלוי) ל-hash
+   מלוחלח (shop.ownerPassHash) ומוחק את הגלויה. הלקוח מחשב את אותו hash בדיוק
+   (ownerHash: sha256("btpass1|"+כתובת+"|"+סיסמה)), כך שההתחברות ממשיכה לעבוד.
+   רץ על כל המספרות בכל הפעלה; אחרי שכולן נוקו — no-op. best-effort לחלוטין. */
+function ownerHashNode(handle, pass) {
+  return crypto.createHash("sha256").update("btpass1|" + String(handle) + "|" + String(pass)).digest("hex");
+}
+async function migratePasswords(db, shopsVal) {
+  let migrated = 0;
+  for (const sid of Object.keys(shopsVal || {})) {
+    const shop = shopsVal[sid];
+    const pass = shop && shop.shop && shop.shop.ownerPass;
+    if (pass == null || pass === "") continue;   // אין סיסמה גלויה — כבר נקי
+    try {
+      await db.ref("shops/" + sid + "/shop/ownerPassHash").set(ownerHashNode(sid, pass));
+      await db.ref("shops/" + sid + "/shop/ownerPass").remove();
+      migrated++;
+    } catch (e) { /* best-effort — לא חוסם את הקרון */ }
+  }
+  return migrated;
+}
 
 const DB_URL = process.env.DATABASE_URL ||
   "https://barbertor-default-rtdb.europe-west1.firebasedatabase.app";
@@ -218,6 +241,12 @@ function apptTs(date, start) {
 
   await stateRef.set({ shops: perShop, updatedAt: now });
   if (pruned) console.log(`נוקו ${pruned} רשומות של מספרות שנמחקו.`);
+
+  // ניקוי סיסמאות ניהול גלויות — מבודד לחלוטין: כישלון כאן לא פוגע בהתראות.
+  try {
+    const migrated = await migratePasswords(db, shopsVal);
+    if (migrated) console.log(`ניקוי סיסמאות: ${migrated} מספרות עברו ל-hash (הוסרה סיסמה גלויה).`);
+  } catch (e) { console.warn("ניקוי סיסמאות נכשל:", (e && e.message) || e); }
   if (firstRun) console.log("ריצה ראשונה — סימון מצב קיים בלבד, ללא שליחה.");
   else console.log(`הושלם. מספרות=${shopIds.length}, alerts חדשים=${totalNewA}, bookings חדשים=${totalNewB}, פושים שנשלחו=${sent}`);
 })().catch((e) => { console.error(e); process.exitCode = 1; })
