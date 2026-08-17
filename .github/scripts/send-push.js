@@ -36,6 +36,31 @@ async function migratePasswords(db, shopsVal) {
   return migrated;
 }
 
+/* ניקוי חד-פעמי של תמונות (רקע/לוגו): מעביר shop.cover/shop.logo מתוך רשומת
+   המספרה לצומת הנפרד shopMedia/<id> ומסיר אותן מהמספרה — כדי שרשומת המספרה
+   תישאר קטנה ולא תחסום את טעינת האפליקציה. הלקוח (v132+) קורא מ-shopMedia עם
+   נפילה-לאחור, לכן הפעולה שקופה. אידמפוטנטי ו-best-effort לחלוטין. */
+async function migrateMedia(db, shopsVal) {
+  let migrated = 0;
+  for (const sid of Object.keys(shopsVal || {})) {
+    const s = shopsVal[sid] && shopsVal[sid].shop;
+    if (!s) continue;
+    const patch = {};
+    if (typeof s.cover === "string" && s.cover) patch.cover = s.cover;
+    if (typeof s.logo === "string" && s.logo) patch.logo = s.logo;
+    if (!Object.keys(patch).length) continue;   // אין תמונות בתוך המספרה — כבר נקי
+    try {
+      await db.ref("shopMedia/" + sid).update(patch);   // קודם כותבים למדיה
+      const rm = {};
+      if (patch.cover) rm["shops/" + sid + "/shop/cover"] = null;
+      if (patch.logo) rm["shops/" + sid + "/shop/logo"] = null;
+      await db.ref().update(rm);                         // ואז מסירים מהמספרה
+      migrated++;
+    } catch (e) { /* best-effort — לא חוסם את הקרון */ }
+  }
+  return migrated;
+}
+
 const DB_URL = process.env.DATABASE_URL ||
   "https://barbertor-default-rtdb.europe-west1.firebasedatabase.app";
 
@@ -247,6 +272,12 @@ function apptTs(date, start) {
     const migrated = await migratePasswords(db, shopsVal);
     if (migrated) console.log(`ניקוי סיסמאות: ${migrated} מספרות עברו ל-hash (הוסרה סיסמה גלויה).`);
   } catch (e) { console.warn("ניקוי סיסמאות נכשל:", (e && e.message) || e); }
+
+  // העברת תמונות (רקע/לוגו) לצומת נפרד — גם כן מבודד, לא פוגע בהתראות.
+  try {
+    const movedMedia = await migrateMedia(db, shopsVal);
+    if (movedMedia) console.log(`העברת תמונות: ${movedMedia} מספרות — רקע/לוגו הועברו ל-shopMedia.`);
+  } catch (e) { console.warn("העברת תמונות נכשלה:", (e && e.message) || e); }
   if (firstRun) console.log("ריצה ראשונה — סימון מצב קיים בלבד, ללא שליחה.");
   else console.log(`הושלם. מספרות=${shopIds.length}, alerts חדשים=${totalNewA}, bookings חדשים=${totalNewB}, פושים שנשלחו=${sent}`);
 })().catch((e) => { console.error(e); process.exitCode = 1; })
