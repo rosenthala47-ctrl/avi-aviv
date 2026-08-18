@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "133";
+  const APP_VERSION = "134";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -421,8 +421,11 @@
     return Math.max(0, Number((st && st.shop && st.shop.hideFreeBeforeMin) || 0));
   }
 
-  // רשת השעות שהלקוח רואה: שעות הפעילות (פחות חסומות) + שעות שנפתחו ידנית
-  function gridSlots(dateKey) {
+  /* רשת השעות שהלקוח רואה: שעות הפעילות (פחות חסומות) + שעות שנפתחו ידנית.
+     dur = משך השירות שנבחר (דקות). כשמעבירים אותו, החפיפה מול תורים קיימים
+     ובדיקת שעת הסגירה נעשות לאורך כל משך התור — כך שירות ארוך (למשל 90 דק׳)
+     לא יוצג כפנוי במקום שאין בו באמת מקום. בלי dur — התנהגות ברירת המחדל (צעד). */
+  function gridSlots(dateKey, dur) {
     const st = Store.get();
     if ((st.closedDates || []).includes(dateKey)) return [];   // יום חופשה/סגירה
     const dow = u.parseKey(dateKey).getDay();
@@ -432,15 +435,19 @@
     if (!active && !opened.length) return [];
     const open = active ? u.toMin(sched.open) : 0, close = active ? u.toMin(sched.close) : 0;
     const step = st.shop.slotStep || 45;
+    const span = Math.max(step, Number(dur) || step);   // אורך התור בפועל — לפחות צעד אחד
     const now = new Date();
     const isToday = u.isSameDay(u.parseKey(dateKey), now);
     const nowMin = now.getHours() * 60 + now.getMinutes();
     const blocks = new Set(st.blocks || []);
+    const blockMins = [...blocks].filter((k) => k.indexOf(dateKey + "|") === 0).map((k) => u.toMin(k.split("|")[1]));
     const dayBookings = st.bookings.filter((b) => b.status !== "cancelled" && b.date === dateKey);
+    // חפיפה מול תורים קיימים לאורך כל משך השירות (span), לא רק צעד אחד
     const bookingAt = (t) => dayBookings.find((b) => {
       const bs = u.toMin(b.start), be = u.toMin(b.end);
-      return t < be && (t + step) > bs;
+      return t < be && (t + span) > bs;
     }) || null;
+    const blockedSpan = (t) => blockMins.some((bm) => bm >= t && bm < t + span);   // חסימה כלשהי בתוך המשך
     /* משבצת פנויה שנותרו לה פחות מ-cutoff דקות — מוסתרת מהלקוח. מחשבים לפי
        חותמת זמן מלאה (ולא דקות ביום) כדי שזה יעבוד גם כשהחלון חוצה חצות. */
     const cutoffMs = hideFreeCutoffMin(st) * 60000;
@@ -450,20 +457,21 @@
       const lead = u.dateTime(dateKey, start).getTime() - nowTs;
       return lead > 0 && lead < cutoffMs;
     };
-    const mk = (start, t, blocked) => {
+    // fits = השירות מסתיים עד שעת הסגירה (רלוונטי לשעות פעילות; שעה שנפתחה ידנית פטורה)
+    const mk = (start, t, blocked, fits) => {
       const booking = bookingAt(t);
-      return { start, booking, blocked, past: isToday && t <= nowMin, hidden: hiddenAt(start, booking) };
+      return { start, booking, blocked: blocked || blockedSpan(t), fits: fits, past: isToday && t <= nowMin, hidden: hiddenAt(start, booking) };
     };
     const byStart = new Map();
     // שעות בתוך הפעילות
     if (active) for (let t = open; t + step <= close; t += step) {
       const start = u.toHHMM(t);
-      byStart.set(start, mk(start, t, blocks.has(dateKey + "|" + start)));
+      byStart.set(start, mk(start, t, blocks.has(dateKey + "|" + start), t + span <= close));
     }
-    // שעות שנפתחו ידנית מחוץ לפעילות
+    // שעות שנפתחו ידנית מחוץ לפעילות — פטורות מבדיקת שעת הסגירה (הבעלים פתח אותן במפורש)
     opened.forEach((start) => {
       if (byStart.has(start)) return;
-      byStart.set(start, mk(start, u.toMin(start), false));
+      byStart.set(start, mk(start, u.toMin(start), false, true));
     });
     return [...byStart.values()].sort((a, z) => u.toMin(a.start) - u.toMin(z.start));
   }
@@ -1555,9 +1563,13 @@
       </button>`;
     }).join("");
 
-    // שעות — רשת אחידה; מסתירים משבצות שעברו/חסומות, מסמנים תפוסות
+    // שעות — רשת אחידה לפי משך השירות שנבחר; מסתירים שעברו/חסומות/שלא מתאימות
+    // למשך התור (חופפות לתור אחר או חורגות משעת הסגירה), מסמנים תפוסות.
     let slotsHtml;
-    const allSlots = gridSlots(view.selDate).filter((s) => !s.past && !s.blocked && !s.hidden);
+    const dur = (service && service.durationMin) || (st.shop.slotStep || 45);
+    const allSlots = gridSlots(view.selDate, dur).filter((s) => !s.past && !s.blocked && !s.hidden && (s.booking || s.fits));
+    // אם המשבצת שנבחרה כבר לא מתאימה לשירות הנוכחי (החלפת שירות לארוך יותר) — לנקות
+    if (view.selSlot && !allSlots.some((s) => s.start === view.selSlot && !s.booking)) view.selSlot = null;
     const hasFree = allSlots.some((s) => !s.booking);
     if (closed.has(view.selDate)) {
       slotsHtml = emptyState("🌴", "המספרה בחופשה ביום זה", "בחרו יום אחר מהיומן");

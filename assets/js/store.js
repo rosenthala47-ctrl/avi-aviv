@@ -887,6 +887,18 @@ UG.Store = (function () {
       if (cutoffMin && lead < cutoffMin * 60000) {
         return { ok: false, reason: "ההרשמה לתור הזה נסגרה — בחרו מועד אחר" };
       }
+      /* תור בתוך שעות הפעילות חייב להסתיים עד שעת הסגירה — כדי ששירות ארוך
+         (למשל 90 דק׳ סמוך לסגירה) לא ייקבע ויגלוש אחרי הסגירה. שעה שהבעלים
+         פתח ידנית (opens) פטורה — היא פתיחה מפורשת מחוץ לשעות. */
+      const dow = u.parseKey(data.date).getDay();
+      const sched = cur.schedule && cur.schedule[dow];
+      const isOpened = (cur.opens || []).includes(data.date + "|" + data.start);
+      if (sched && sched.active && !isOpened) {
+        const openMin = u.toMin(sched.open), closeMin = u.toMin(sched.close);
+        if (startMin >= openMin && startMin < closeMin && endMin > closeMin) {
+          return { ok: false, reason: "התור חורג משעת הסגירה — בחרו מועד מוקדם יותר" };
+        }
+      }
     }
 
     // כמה פעמים הלקוח הזה כבר לא הגיע בעבר (לפי מזהה או טלפון) — כדי להתריע למנהל
