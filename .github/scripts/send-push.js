@@ -279,18 +279,6 @@ function apptTs(date, start) {
     if (movedMedia) console.log(`העברת תמונות: ${movedMedia} מספרות — רקע/לוגו הועברו ל-shopMedia.`);
   } catch (e) { console.warn("העברת תמונות נכשלה:", (e && e.message) || e); }
 
-  // שחרור חד-פעמי של בעלות מספרת main (ownerUid נשמר בטעות לחשבון שאין אליו גישה,
-  // ולכן אי אפשר לשחרר מהאפליקציה). מוגן בדגל: רץ פעם אחת בלבד — אחרי שאורי יאבטח
-  // מחדש עם החשבון שלו, הדגל מונע כל נגיעה נוספת. מבודד לחלוטין מההתראות.
-  try {
-    const relRef = db.ref("system/mainOwnerReleaseV1");
-    const already = (await relRef.once("value")).val();
-    if (!already) {
-      await db.ref("shops/main/shop/ownerUid").remove();
-      await relRef.set({ at: now });
-      console.log("שחרור חד-פעמי: הוסר ownerUid ממספרת main (העברה לאורי).");
-    }
-  } catch (e) { console.warn("שחרור main נכשל:", (e && e.message) || e); }
   if (firstRun) console.log("ריצה ראשונה — סימון מצב קיים בלבד, ללא שליחה.");
   else console.log(`הושלם. מספרות=${shopIds.length}, alerts חדשים=${totalNewA}, bookings חדשים=${totalNewB}, פושים שנשלחו=${sent}`);
 })().catch((e) => { console.error(e); process.exitCode = 1; })
