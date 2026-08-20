@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "135";
+  const APP_VERSION = "134";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -93,15 +93,6 @@
   }
   function shopCover(st) { return shopMediaVal(st, "cover"); }
   function shopLogo(st) { return shopMediaVal(st, "logo"); }
-
-  /* פרטי הלקוח של תור (שם/טלפון/מייל). במספרה מאובטחת הם נשמרים בצומת פרטי שרק
-     הבעלים קורא; כאן מעדיפים אותם, ונופלים-לאחור לערך הישן שבתוך התור (מספרות
-     שאינן מאובטחות, ותורים ישנים). כך הבעלים תמיד רואה את השם, והצומת הציבורי
-     נשאר בלי פרטים מזהים. עבור לא-בעלים (או לקוח) הצומת הפרטי ריק → מוחזר ריק. */
-  function bkPriv(b) { return (b && Store.getBookingPriv && Store.getBookingPriv(b.id)) || null; }
-  function bkName(b) { const p = bkPriv(b); return (p && p.name) || (b && b.userName) || ""; }
-  function bkPhone(b) { const p = bkPriv(b); return (p && p.phone) || (b && b.phone) || ""; }
-  function bkEmail(b) { const p = bkPriv(b); return (p && p.email) || (b && b.email) || ""; }
 
   /* דף מנהל מסודר: רשימת שורות אחידה עם ניווט פנימי + סרגל לשוניות מצומצם.
      נבדק על "try" ומאוגוסט 2026 חל על כל המספרות. */
@@ -1097,8 +1088,8 @@
     if (!spamBookings.length) return "";
     var users = {};
     spamBookings.forEach(function (b) {
-      var key = bkPhone(b) || b.userId || bkName(b);
-      if (!users[key]) users[key] = { name: bkName(b), count: 0 };
+      var key = b.phone || b.userId || b.userName;
+      if (!users[key]) users[key] = { name: b.userName, count: 0 };
       users[key].count++;
     });
     var names = Object.keys(users).map(function (k) { return users[k]; });
@@ -2153,9 +2144,7 @@
     view.selSlot = null;
     view.clientTab = "mine";
     toast(reschedId ? "המועד עודכן ✓" : "התור נקבע בהצלחה!", "good", reschedId ? "🔄" : "🎉");
-    // מייל אישור ללקוח. במספרה מאובטחת השם/המייל אינם בתור הציבורי, לכן משלימים
-    // אותם מהפרטים המקומיים שהלקוח מילא זה עתה.
-    sendBookingEmail(Object.assign({}, res.booking, { userName: contact.name, email: contact.email }));
+    sendBookingEmail(res.booking);   // מייל אישור ללקוח (אם מוגדר והוזן אימייל)
     // אם ההזמנה הגיעה מהתראת "התפנה תור" — נקה את ההתראה
     const stale = (Store.get().alerts || [])
       .filter((a) => a.userId === identity.userId && a.date === bookedDate && a.start === bookedStart)
@@ -2567,7 +2556,7 @@
         <div class="slot-line booked${s.booking.spam ? " spam-slot" : ""}">
           <span class="sl-time">${s.start}</span>
           <div class="sl-mid">
-            <span class="sl-name">${esc(bkName(s.booking) || "לקוח")}${s.booking.spam ? " 🛡️" : ""}</span>
+            <span class="sl-name">${esc(s.booking.userName || "לקוח")}${s.booking.spam ? " 🛡️" : ""}</span>
             <span class="sl-sub">${esc(s.booking.serviceName)}</span>
           </div>
           <span class="status-tag status-booked">תפוס</span>
@@ -2865,8 +2854,8 @@
           <div class="bt-d">${esc(u.relativeDay(b.date))}</div>
         </div>
         <div class="bk-body">
-          <div class="bk-title">${esc(bkName(b) || "לקוח")}</div>
-          <div class="bk-sub">${esc(b.serviceName)} · ${bkPhone(b) ? `<a href="tel:${esc(bkPhone(b))}">${esc(bkPhone(b))}</a>` : "ללא טלפון"}</div>
+          <div class="bk-title">${esc(b.userName || "לקוח")}</div>
+          <div class="bk-sub">${esc(b.serviceName)} · ${b.phone ? `<a href="tel:${esc(b.phone)}">${esc(b.phone)}</a>` : "ללא טלפון"}</div>
           <div class="bk-sub">${esc(u.longDate(b.date))}${b.staff ? ` · <span class="staff-req">🧑‍🔧 ביקש: ${esc(b.staff)}</span>` : ""}</div>
           ${b.priorNoShow ? `<div class="noshow-warn">⚠️ הלקוח לא הגיע בעבר${b.priorNoShow > 1 ? ` (${b.priorNoShow} פעמים)` : ""}</div>` : ""}
           ${b.spam ? `<div class="spam-warn">🛡️ ${b.spam.reason === "multi" ? "ללקוח " + b.spam.count + " תורים פעילים — כדאי לוודא שזה לגיטימי" : b.spam.reason === "burst" ? b.spam.count + " הזמנות ברצף קצר מאותו לקוח" : "הוזמנו " + b.spam.count + " תורים בזמן קצר"}</div>` : ""}
@@ -2953,7 +2942,7 @@
     } else {
       slotsHtml = `<div class="slots-grid">` + slots.map((s) => {
         if (s.booking) {
-          return `<button class="slot taken" disabled>${s.start}<span class="slot-tag">${esc(bkName(s.booking) || "תפוס")}</span></button>`;
+          return `<button class="slot taken" disabled>${s.start}<span class="slot-tag">${esc(s.booking.userName || "תפוס")}</span></button>`;
         }
         const tag = s.blocked ? `<span class="slot-tag show">חסום</span>` : (s.past ? `<span class="slot-tag show">עבר</span>` : "");
         return `<button class="slot ${(!a.custom && a.start === s.start) ? "selected" : ""} ${s.past ? "slot-past" : ""}" data-abslot="${s.start}">${s.start}${tag}</button>`;
@@ -3062,14 +3051,13 @@
     if (past) await Store.setBookingStatus(res.booking.id, "confirmed", "owner");
     closeModal();
     toast(past ? "התור נוסף ונספר בהכנסות ✓" : "התור נוסף ✓", "good", "➕");
-    // מייל אישור ללקוח — משלימים שם/מייל מקומית (במספרה מאובטחת הם אינם בתור הציבורי)
-    sendBookingEmail(Object.assign({}, res.booking, { userName: name, email: email }));
+    sendBookingEmail(res.booking);   // מייל אישור ללקוח (אם מוגדר והוזן אימייל)
     addBk = null;
     render();
   }
 
   /* ---------- רשימת לקוחות (CRM) ---------- */
-  function clientKey(b) { const ph = bkPhone(b); return (ph && u.normalizePhone(ph)) || b.userId || bkName(b) || "לקוח"; }
+  function clientKey(b) { return (b.phone && u.normalizePhone(b.phone)) || b.userId || b.userName || "לקוח"; }
 
   /* ---------- חסימת לקוח בעייתי ---------- */
   function blockedList() { return (Store.get() || {}).blockedClients || []; }
@@ -3087,7 +3075,7 @@
     const st = Store.get();
     const b = (st.bookings || []).filter((x) => x.status !== "cancelled")
       .reverse().find((x) => clientKey(x) === key);
-    if (b) return { name: bkName(b) || "לקוח", phone: bkPhone(b) || "", userId: b.userId || "" };
+    if (b) return { name: b.userName || "לקוח", phone: b.phone || "", userId: b.userId || "" };
     const c = (st.contacts || []).find((x) => ((x.phone && u.normalizePhone(x.phone)) || x.name) === key);
     return c ? { name: c.name || "לקוח", phone: c.phone || "", userId: "" } : null;
   }
@@ -3127,11 +3115,10 @@
     });
     st.bookings.filter((b) => b.status !== "cancelled").forEach((b) => {
       const key = clientKey(b);
-      const nm = bkName(b), ph = bkPhone(b);
       let c = map.get(key);
-      if (!c) { c = { key, name: nm || "לקוח", phone: ph || "", visits: 0, spent: 0, lastTs: 0, lastDate: b.date }; map.set(key, c); }
-      if (nm) c.name = nm;
-      if (ph) c.phone = ph;
+      if (!c) { c = { key, name: b.userName || "לקוח", phone: b.phone || "", visits: 0, spent: 0, lastTs: 0, lastDate: b.date }; map.set(key, c); }
+      if (b.userName) c.name = b.userName;
+      if (b.phone) c.phone = b.phone;
       if (b.status === "confirmed") { c.visits++; c.spent += Number(b.price || 0); }
       if (b.status === "noshow") c.noShows = (c.noShows || 0) + 1;
       const ts = u.dateTime(b.date, b.start).getTime();
@@ -3331,12 +3318,11 @@
       if (p && !map.has(p)) map.set(p, { name: c.name || "לקוח", phone: p });
     });
     (st.bookings || []).filter((b) => b.status !== "cancelled").forEach((b) => {
-      const p = u.normalizePhone(bkPhone(b) || "");
+      const p = u.normalizePhone(b.phone || "");
       if (!p) return;
-      const nm = bkName(b);
       const cur = map.get(p);
-      if (cur) { if (nm) cur.name = nm; }
-      else map.set(p, { name: nm || "לקוח", phone: p });
+      if (cur) { if (b.userName) cur.name = b.userName; }
+      else map.set(p, { name: b.userName || "לקוח", phone: p });
     });
     return [...map.values()]
       .filter((c) => waIntl(c.phone))
@@ -3441,7 +3427,7 @@
             ${rows.map((x) => `
             <tr>
               <td class="st-date">${Number(x.b.date.slice(8, 10))}.${Number(x.b.date.slice(5, 7))} · ${esc(x.b.start)}</td>
-              <td class="st-name">${esc(bkName(x.b) || "לקוח")}</td>
+              <td class="st-name">${esc(x.b.userName || "לקוח")}</td>
               <td>${esc(x.b.serviceName)}</td>
               <td class="money">${u.fmtPrice(x.b.price)}</td>
               <td><button class="row-del" data-act="del-report" data-id="${x.b.id}" aria-label="מחיקה">✕</button></td>
@@ -3699,7 +3685,7 @@
     if (!b) return;
     openModal(`
       <div class="m-title">מחיקת רשומה מהדוח</div>
-      <div class="m-sub">${esc(bkName(b) || "לקוח")} · ${esc(b.serviceName)} · ${esc(u.longDate(b.date))}</div>
+      <div class="m-sub">${esc(b.userName || "לקוח")} · ${esc(b.serviceName)} · ${esc(u.longDate(b.date))}</div>
       <p style="font-size:14px;color:var(--muted);margin:6px 0 20px">הרשומה תוסר מהדוח לצמיתות ולא ניתן יהיה לשחזר אותה.</p>
       <button class="btn btn-danger" data-act="do-del-report" data-id="${id}">מחיקה</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
@@ -4285,7 +4271,7 @@
     rows.forEach((b) => {
       total += Number(b.price || 0);
       lines.push([
-        b.date, b.start, bkName(b) || "לקוח", bkPhone(b) || "", b.serviceName || "",
+        b.date, b.start, b.userName || "לקוח", b.phone || "", b.serviceName || "",
         b.staff || "", Number(b.price || 0),
       ].map(csvCell).join(","));
     });
@@ -6006,9 +5992,8 @@
         fresh.forEach((b) => {
           ownerSeen.add(b.id);
           const warn = b.priorNoShow ? " · ⚠️ לא הגיע בעבר" : "";
-          const nm = bkName(b) || "לקוח";
-          toast(`תור חדש: ${nm} · ${b.serviceName} ${u.relativeDay(b.date)} ${b.start}${warn}`, "sky", "🎉");
-          Notify.show("📅 תור חדש נקבע", `${nm} — ${b.serviceName}\n${u.longDate(b.date)} בשעה ${b.start}${b.priorNoShow ? "\n⚠️ הלקוח לא הגיע בפעם הקודמת" : ""}`, { tag: "newbook-" + b.id });
+          toast(`תור חדש: ${b.userName} · ${b.serviceName} ${u.relativeDay(b.date)} ${b.start}${warn}`, "sky", "🎉");
+          Notify.show("📅 תור חדש נקבע", `${b.userName} — ${b.serviceName}\n${u.longDate(b.date)} בשעה ${b.start}${b.priorNoShow ? "\n⚠️ הלקוח לא הגיע בפעם הקודמת" : ""}`, { tag: "newbook-" + b.id });
         });
       }
       // ביטול ע״י לקוח — התראה מיידית לספר (כשהאפליקציה פתוחה)
@@ -6021,9 +6006,8 @@
           if (ownerCancelSeen.has(b.id)) return;
           ownerCancelSeen.add(b.id);
           if (u.dateTime(b.date, b.start).getTime() <= now2) return;   // רק תורים עתידיים
-          const cnm = bkName(b) || "לקוח";
-          toast(`${cnm} ביטל תור · ${u.relativeDay(b.date)} ${b.start}`, "", "❌");
-          Notify.show("❌ לקוח ביטל תור", `${cnm} — ${b.serviceName}\n${u.longDate(b.date)} בשעה ${b.start}`, { tag: "ccancel-" + b.id });
+          toast(`${b.userName || "לקוח"} ביטל תור · ${u.relativeDay(b.date)} ${b.start}`, "", "❌");
+          Notify.show("❌ לקוח ביטל תור", `${b.userName || "לקוח"} — ${b.serviceName}\n${u.longDate(b.date)} בשעה ${b.start}`, { tag: "ccancel-" + b.id });
         });
       }
     } else if (ownerSeen) {
