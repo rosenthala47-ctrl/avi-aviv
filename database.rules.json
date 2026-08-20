@@ -29,6 +29,17 @@
       }
     },
 
+    "private": {
+      "$shopId": {
+        ".read": "auth != null && root.child('shops/'+$shopId+'/shop/ownerUid').val() === auth.uid",
+        "bk": {
+          "$bkId": {
+            ".write": "auth != null && (!data.exists() || root.child('shops/'+$shopId+'/shop/ownerUid').val() === auth.uid)"
+          }
+        }
+      }
+    },
+
     "pushTokens": {
       "$uid": {
         ".read": "auth != null",
