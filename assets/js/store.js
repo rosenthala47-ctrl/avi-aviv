@@ -924,18 +924,43 @@ UG.Store = (function () {
     return { ok: true, booking };
   }
 
+  /* מרוץ מול פסק-זמן — כדי שקריאה לשרת שנתקעת (חיבור סלולרי חלש) לא תשאיר את
+     כפתור "קובע תור…" תקוע לנצח. אחרי הזמן הזה מחזירים כשל, והלקוח יכול לנסות שוב. */
+  function withTimeout(promise, ms) {
+    return Promise.race([
+      promise,
+      new Promise((_, rej) => setTimeout(() => rej(new Error("__timeout__")), ms)),
+    ]);
+  }
+  /* הודעת שגיאה ידידותית ללקוח לפי סוג הכשל (וגם רמז טכני לאבחון). */
+  function bookingErrText(e) {
+    const msg = String((e && (e.code || e.message)) || "");
+    if (msg === "__timeout__") return "החיבור איטי מדי והתור לא נקבע — בדקו את האינטרנט ונסו שוב.";
+    if (/permission|denied/i.test(msg)) return "אין כרגע הרשאה לקבוע תור. רעננו את הדף ונסו שוב. (permission-denied)";
+    if (/network|unavailable|offline|timeout/i.test(msg)) return "אין חיבור יציב לשרת. בדקו את האינטרנט ונסו שוב.";
+    return "לא הצלחנו לקבוע את התור — נסו שוב. (" + (msg || "שגיאה") + ")";
+  }
+
   async function createBooking(data) {
     if (backend.transactBooking) {
-      const res = await backend.transactBooking((cur) => buildBooking(cur, data));
-      // Firestore יעדכן דרך onSnapshot; נטען מיידית ליתר ביטחון
-      await reloadFromRemote();
+      // חשוב: לא לתת לשגיאת רשת/הרשאה "לזרוק" החוצה — אחרת כפתור ההזמנה נתקע.
+      // תמיד מחזירים אובייקט תוצאה ({ok:false, reason}) שהמסך יודע לטפל בו.
+      let res;
+      try {
+        res = await withTimeout(backend.transactBooking((cur) => buildBooking(cur, data)), 22000);
+      } catch (e) {
+        console.warn("[UG] createBooking נכשל:", (e && (e.code || e.message)) || e);
+        return { ok: false, reason: bookingErrText(e) };
+      }
+      // Firestore יעדכן דרך onSnapshot; נטען מיידית ליתר ביטחון (לא חוסם — התור כבר נקבע)
+      try { await withTimeout(reloadFromRemote(), 8000); } catch (e) { /* רענון בלבד */ }
       return res;
     }
     // מקומי: קרא מחדש את המצב העדכני לפני כתיבה כדי לצמצם התנגשויות
     const latest = backend.read();
     if (latest) state = latest;
     const res = buildBooking(state, data);
-    if (res.ok) await persist();
+    if (res.ok) { try { await persist(); } catch (e) { return { ok: false, reason: bookingErrText(e) }; } }
     return res;
   }
 

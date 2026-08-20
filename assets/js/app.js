@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "134";
+  const APP_VERSION = "136";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -2125,15 +2125,23 @@
     const staff = staffEl ? staffEl.value : (view.selStaff || "");
     view.selStaff = staff;
     const btn = $("[data-act='do-book']"); if (btn) { btn.disabled = true; btn.textContent = reschedId ? "מעדכן…" : "קובע תור…"; }
-    const res = await Store.createBooking({
-      serviceId: view.selService, date: bookedDate, start: bookedStart,
-      userId: identity.userId, userName: contact.name, phone: contact.phone, email: contact.email,
-      staff: staff,
-      excludeBookingId: reschedId || undefined,   // אל תתנגש עם התור המקורי בעת שינוי מועד
-    });
-    if (!res.ok) {
+    // רשת ביטחון: כל כשל בלתי צפוי (רשת/הרשאה) לא ישאיר את הכפתור תקוע על
+    // "קובע תור…" — נסגור, נודיע, ונאפשר ניסיון חוזר.
+    let res;
+    try {
+      res = await Store.createBooking({
+        serviceId: view.selService, date: bookedDate, start: bookedStart,
+        userId: identity.userId, userName: contact.name, phone: contact.phone, email: contact.email,
+        staff: staff,
+        excludeBookingId: reschedId || undefined,   // אל תתנגש עם התור המקורי בעת שינוי מועד
+      });
+    } catch (e) {
+      res = { ok: false, reason: "לא הצלחנו לקבוע את התור — נסו שוב." };
+    }
+    if (btn) { btn.disabled = false; btn.textContent = reschedId ? "אישור המועד החדש" : "אישור וקביעת התור"; }
+    if (!res || !res.ok) {
       closeModal();
-      toast(res.reason || "לא ניתן לקבוע את התור", "", "⚠️");
+      toast((res && res.reason) || "לא ניתן לקבוע את התור", "", "⚠️");
       view.selSlot = null;
       render();   // התור המקורי נשמר — אפשר לבחור מועד אחר
       return;
