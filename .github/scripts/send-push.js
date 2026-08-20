@@ -130,6 +130,14 @@ function apptTs(date, start) {
   const now = Date.now();
   const shopsVal = (await db.ref("shops").once("value")).val() || {};
   const shopIds = Object.keys(shopsVal);
+  // פרטי לקוח של תורים במספרות מאובטחות נשמרים בצומת פרטי (private/<id>/bk).
+  // הקרון (service account) קורא הכול, ומשתמש בשם משם להתראות. מספרות שאינן
+  // מאובטחות אינן מופיעות כאן — עבורן נופלים-לאחור ל-b.userName שבתוך התור.
+  const privVal = (await db.ref("private").once("value")).val() || {};
+  const bkNameOf = (sid, b) => {
+    const p = privVal[sid] && privVal[sid].bk && privVal[sid].bk[b.id];
+    return (p && p.name) || b.userName || "לקוח";
+  };
   let sent = 0, totalNewA = 0, totalNewB = 0;
 
   for (const sid of shopIds) {
@@ -194,7 +202,7 @@ function apptTs(date, start) {
            b.spam.count + " תורים הוזמנו בזמן קצר") : "";
         sent += await sendToUid("owner_" + sid,
           b.spam ? "🛡️ תור חדש — פעילות חריגה" : "📅 תור חדש נקבע",
-          `${b.userName} — ${b.serviceName}, ${relDay(b.date)} בשעה ${b.start}${warn}${spamWarn}`, "newbook-" + b.id);
+          `${bkNameOf(sid, b)} — ${b.serviceName}, ${relDay(b.date)} בשעה ${b.start}${warn}${spamWarn}`, "newbook-" + b.id);
       }
       for (const b of newCancels) {
         sent += await sendToUid(b.userId, "❌ התור שלך בוטל",
@@ -202,7 +210,7 @@ function apptTs(date, start) {
       }
       for (const b of newClientCancels) {
         sent += await sendToUid("owner_" + sid, "❌ לקוח ביטל תור",
-          `${b.userName || "לקוח"} — ${b.serviceName}, ${relDay(b.date)} בשעה ${b.start}`, "ccancel-" + b.id);
+          `${bkNameOf(sid, b)} — ${b.serviceName}, ${relDay(b.date)} בשעה ${b.start}`, "ccancel-" + b.id);
         doneCcancels.add(b.id);
       }
       // תזכורת יום לפני — מגיעה כיממה מראש, כדי שיהיה זמן לבטל אם צריך
