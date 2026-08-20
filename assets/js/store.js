@@ -297,7 +297,8 @@ UG.Store = (function () {
             const cur = Object.assign({}, base, { bookings: asArray(curBookings) });
             out = build(cur);
             if (!out.ok) return;           // undefined = ביטול הטרנזקציה ללא כתיבה
-            return cur.bookings;
+            // clone → מסיר ערכי undefined (RTDB דוחה אותם ומפיל את כל ההזמנה)
+            return clone(cur.bookings);
           }, undefined, false).then((r) => {
             if (out && !out.ok) return out;
             if (!r || !r.committed) return { ok: false, reason: "התור נתפס הרגע — נסו שעה אחרת" };
@@ -914,12 +915,14 @@ UG.Store = (function () {
       id: u.uid(),
       serviceId: svc.id, serviceName: svc.name, price: svc.price, durationMin: svc.durationMin,
       date: data.date, start: data.start, end: u.toHHMM(endMin),
-      userId: data.userId, userName: data.userName, phone: data.phone || "", email: data.email || "",
+      userId: data.userId, userName: data.userName || "", phone: data.phone || "", email: data.email || "",
       staff: data.staff || "",
       priorNoShow: priorNoShow,
-      spam: spam || undefined,
       status: "booked", createdAt: Date.now(),
     };
+    // חשוב: לא לשים undefined בשום שדה — טרנזקציית RTDB דוחה נתונים עם undefined
+    // ("Data returned contains undefined ...") וההזמנה נכשלת. לכן spam נוסף רק אם יש.
+    if (spam) booking.spam = spam;
     cur.bookings.push(booking);
     return { ok: true, booking };
   }
