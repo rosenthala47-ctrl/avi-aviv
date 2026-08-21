@@ -61,6 +61,43 @@ async function migrateMedia(db, shopsVal) {
   return migrated;
 }
 
+/* העברת פרטי הלקוח (שם/טלפון/מייל) של תורים קיימים אל הצומת הפרטי (private/<id>/bk)
+   והסרתם מהצומת הציבורי — רק במספרות מאובטחות בחשבון (ownerUid), בהתאמה ל-piiPrivate
+   שבלקוח. כך גם התורים הישנים (שנוצרו לפני ההסתרה) מפסיקים לחשוף פרטים לכל מי שקורא
+   את המספרה. פועל פר-שדה (מסיר רק userName/phone/email של אותו תור לפי המפתח שלו),
+   כדי לא לדרוס מערך תורים שלם ולא להתנגש בכתיבת לקוח באותו רגע. אידמפוטנטי ו-best-effort. */
+async function migrateBookingPii(db, shopsVal) {
+  let moved = 0;
+  for (const sid of Object.keys(shopsVal || {})) {
+    const shop = shopsVal[sid];
+    if (!shop || !shop.shop || !shop.shop.ownerUid) continue;   // רק מספרות מאובטחות
+    const bk = shop.bookings;
+    if (!bk || typeof bk !== "object") continue;
+    // Object.keys עובד גם על מערך (מפתחות "0","1"...) וגם על אובייקט — המפתח משמש בנתיב.
+    for (const k of Object.keys(bk)) {
+      const b = bk[k];
+      if (!b || !b.id) continue;
+      const name = typeof b.userName === "string" ? b.userName : "";
+      const phone = typeof b.phone === "string" ? b.phone : "";
+      const email = typeof b.email === "string" ? b.email : "";
+      if (!name && !phone && !email) continue;   // אין פרטים בצומת הציבורי — כבר נקי
+      try {
+        // קודם כותבים לכספת (רק אם עוד אין שם — לא לדרוס), ואז מסירים מהצומת הציבורי
+        const privRef = db.ref("private/" + sid + "/bk/" + b.id);
+        const snap = await privRef.once("value");
+        if (!snap.exists()) await privRef.set({ name: name, phone: phone, email: email });
+        await db.ref().update({
+          ["shops/" + sid + "/bookings/" + k + "/userName"]: null,
+          ["shops/" + sid + "/bookings/" + k + "/phone"]: null,
+          ["shops/" + sid + "/bookings/" + k + "/email"]: null,
+        });
+        moved++;
+      } catch (e) { /* best-effort — לא חוסם את הקרון */ }
+    }
+  }
+  return moved;
+}
+
 const DB_URL = process.env.DATABASE_URL ||
   "https://barbertor-default-rtdb.europe-west1.firebasedatabase.app";
 
@@ -286,6 +323,12 @@ function apptTs(date, start) {
     const movedMedia = await migrateMedia(db, shopsVal);
     if (movedMedia) console.log(`העברת תמונות: ${movedMedia} מספרות — רקע/לוגו הועברו ל-shopMedia.`);
   } catch (e) { console.warn("העברת תמונות נכשלה:", (e && e.message) || e); }
+
+  // העברת פרטי לקוח של תורים קיימים לכספת (private) — מבודד, לא פוגע בהתראות.
+  try {
+    const movedPii = await migrateBookingPii(db, shopsVal);
+    if (movedPii) console.log(`הסתרת פרטי לקוח: ${movedPii} תורים הועברו לצומת הפרטי (הוסרו מהצומת הציבורי).`);
+  } catch (e) { console.warn("הסתרת פרטי לקוח נכשלה:", (e && e.message) || e); }
 
   if (firstRun) console.log("ריצה ראשונה — סימון מצב קיים בלבד, ללא שליחה.");
   else console.log(`הושלם. מספרות=${shopIds.length}, alerts חדשים=${totalNewA}, bookings חדשים=${totalNewB}, פושים שנשלחו=${sent}`);
