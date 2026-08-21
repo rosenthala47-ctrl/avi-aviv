@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "141";
+  const APP_VERSION = "142";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -2375,10 +2375,15 @@
       render(); openConfirm();
       return;
     }
-    await Store.joinWaitlist({
-      date: dateKey, start,
-      userId: identity.userId, userName: contact.name, phone: contact.phone,
-    });
+    try {
+      await Store.joinWaitlist({
+        date: dateKey, start,
+        userId: identity.userId, userName: contact.name, phone: contact.phone,
+      });
+    } catch (e) {
+      toast("לא הצלחנו להצטרף לרשימת ההמתנה — נסו שוב.", "", "⚠️");
+      return;   // החלון נשאר פתוח כדי לנסות שוב
+    }
     closeModal();
     toast("נכנסת לרשימת ההמתנה — נודיע אם יתפנה 🔔", "sky", "✅");
     // ודא הרשאת התראות כדי שההודעה באמת תגיע (גם כשהאפליקציה סגורה)
@@ -5145,6 +5150,10 @@
       const act = t.dataset.act;
       if (!act) return;
 
+      // רשת ביטחון מרכזית: פעולה שכותבת לשרת (ביטול/ביקורת/המתנה/הגדרות…) ונכשלת
+      // (רשת/הרשאה) לא תישאר בשקט — נודיע ללקוח כדי שידע לנסות שוב. איננו סוגרים
+      // חלונות/מרעננים כאן, כדי לא לשבש זרימות אחרות (למשל בקשת התחברות-מחדש לבעלים).
+      try {
       switch (act) {
         case "close-modal": closeModal(); break;
 
@@ -5602,6 +5611,10 @@
         case "save-staff": saveStaff(); break;
 
         case "save-settings": saveSettings(); break;
+      }
+      } catch (err) {
+        console.warn("[UG] פעולה נכשלה:", (err && (err.code || err.message)) || err);
+        toast("הפעולה לא הושלמה — נסו שוב.", "", "⚠️");
       }
     });
 
