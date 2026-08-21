@@ -28,6 +28,11 @@ UG.Store = (function () {
   // עם זמינות בלבד (תאריך/שעה), בלי פרטים מזהים. ראו piiPrivate למטה.
   let privCache = {};    // { bookingId: { name, phone, email } } — ריק ללא-בעלים
   const PKEY = (id) => "ug_priv_v1__" + id;   // מפתח מקומי לצומת הפרטי
+  // ספר הלקוחות (contacts) — מידע של הבעלים בלבד. במספרה מאובטחת הוא יוצא מהצומת
+  // הציבורי ונשמר בצומת פרטי (private/<id>/contacts) שרק הבעלים קורא/כותב.
+  let contactsCache = [];
+  const contactsSubs = new Set();
+  const CKEY = (id) => "ug_contacts_v1__" + id;   // מפתח מקומי לספר הלקוחות
 
   /* ---------- מצב ברירת מחדל ---------- */
   function defaultState() {
@@ -116,15 +121,16 @@ UG.Store = (function () {
      Backend מקומי
      =======================================================================*/
   function LocalBackend(id) {
-    const skey = KEY(id), gkey = GKEY(id), mkey = MKEY(id), pkey = PKEY(id);
+    const skey = KEY(id), gkey = GKEY(id), mkey = MKEY(id), pkey = PKEY(id), ckey = CKEY(id);
     let bc = null;
     try { bc = new BroadcastChannel("ug_barber_" + id); } catch (e) {}
-    const listeners = { state: [], gallery: [], media: [], priv: [] };
+    const listeners = { state: [], gallery: [], media: [], priv: [], contacts: [] };
     if (bc) bc.onmessage = (ev) => {
       const t = ev && ev.data && ev.data.t;
       if (t === "gallery") listeners.gallery.forEach((fn) => fn());
       else if (t === "media") listeners.media.forEach((fn) => fn(readM()));
       else if (t === "priv") listeners.priv.forEach((fn) => fn(readP()));
+      else if (t === "contacts") listeners.contacts.forEach((fn) => fn(readC()));
       else listeners.state.forEach((fn) => fn());
     };
     window.addEventListener("storage", (e) => {
@@ -132,7 +138,9 @@ UG.Store = (function () {
       if (e.key === gkey) listeners.gallery.forEach((fn) => fn());
       if (e.key === mkey) listeners.media.forEach((fn) => fn(readM()));
       if (e.key === pkey) listeners.priv.forEach((fn) => fn(readP()));
+      if (e.key === ckey) listeners.contacts.forEach((fn) => fn(readC()));
     });
+    function readC() { try { return JSON.parse(localStorage.getItem(ckey) || "[]"); } catch (e) { return []; } }
     function readG() { try { return JSON.parse(localStorage.getItem(gkey) || "[]"); } catch (e) { return []; } }
     function writeG(list) {
       try { localStorage.setItem(gkey, JSON.stringify(list)); } catch (e) {}
@@ -178,6 +186,14 @@ UG.Store = (function () {
       onBookingPriv(cb) { listeners.priv.push(cb); cb(readP()); },
       savePrivate(bkId, priv) { const m = readP(); m[bkId] = priv; writeP(m); return Promise.resolve(); },
       removePrivate(bkId) { const m = readP(); delete m[bkId]; writeP(m); return Promise.resolve(); },
+      // ספר הלקוחות (צומת פרטי, מוגן לבעלים בענן; מקומית — אחסון נפרד)
+      onContacts(cb) { listeners.contacts.push(cb); cb(readC()); },
+      saveContacts(arr) {
+        try { localStorage.setItem(ckey, JSON.stringify(arr || [])); } catch (e) {}
+        try { if (bc) bc.postMessage({ t: "contacts" }); } catch (e) {}
+        listeners.contacts.forEach((fn) => fn(arr || []));
+        return Promise.resolve();
+      },
       exists() { return Promise.resolve(localStorage.getItem(skey) != null); },
     };
   }
@@ -257,6 +273,7 @@ UG.Store = (function () {
     const galRef = db.ref("gallery/" + id);
     const mediaRef = db.ref("shopMedia/" + id);   // רקע/לוגו — צומת נפרד, נטען ברקע
     const privRef = db.ref("private/" + id + "/bk");   // פרטי לקוח — צומת מוגן לבעלים
+    const contactsRef = db.ref("private/" + id + "/contacts");   // ספר הלקוחות — מוגן לבעלים
     return {
       mode: "cloud",
       _db: db, _ref: ref,
@@ -272,6 +289,14 @@ UG.Store = (function () {
       },
       savePrivate(bkId, priv) { return privRef.child(bkId).set(clone(priv)); },
       removePrivate(bkId) { return privRef.child(bkId).remove(); },
+      // ספר הלקוחות — צומת מוגן לבעלים בלבד (קריאה+כתיבה לפי ownerUid). ללקוח
+      // הקריאה נחסמת → מטמון ריק (ממילא רק הבעלים משתמש בספר הלקוחות).
+      onContacts(cb) {
+        contactsRef.on("value", (snap) => {
+          const v = snap.val(); cb(Array.isArray(v) ? v : (v ? Object.keys(v).map((k) => v[k]) : []));
+        }, () => { /* לא-בעלים — נחסם */ });
+      },
+      saveContacts(arr) { return contactsRef.set(clone(arr || [])); },
       read() {
         return ref.once("value").then((snap) => (snap.exists() ? normalize(snap.val()) : null));
       },
@@ -451,6 +476,8 @@ UG.Store = (function () {
     // פרטי לקוח של תורים — נטענים לבעלים בלבד (הקריאה נחסמת ללקוח). כשהם מגיעים,
     // מרעננים כדי שהשמות/הטלפונים יופיעו אצל הבעלים.
     if (backend.onBookingPriv) backend.onBookingPriv((m) => { privCache = m || {}; emit(); });
+    // ספר הלקוחות — נטען לבעלים בלבד (הקריאה נחסמת ללקוח). כשהוא מגיע, מרעננים.
+    if (backend.onContacts) backend.onContacts((arr) => { contactsCache = Array.isArray(arr) ? arr : []; emitContacts(); emit(); });
     // מנוי — קריאה ראשונית + מעקב בזמן אמת (אם אתה מפעיל את המספרה, זה יתעדכן מיד)
     if (backend.readSub) {
       try { subState = await backend.readSub(); } catch (e) { subState = null; }
@@ -519,12 +546,15 @@ UG.Store = (function () {
      מייצא את כל נתוני המספרה לקובץ JSON יחיד (כולל גלריה), כדי שהספר
      יוכל לשמור עותק אצלו. השחזור דורס את המצב הנוכחי לחלוטין. */
   function exportData(withGallery) {
+    const snap = JSON.parse(JSON.stringify(state || {}));
+    // במספרה מאובטחת ספר הלקוחות נמצא בצומת הפרטי — משלימים אותו לגיבוי כדי שלא יאבד
+    if (extraPrivate() && (contactsCache || []).length) snap.contacts = JSON.parse(JSON.stringify(contactsCache));
     return {
       format: "barbertor-backup",
       version: 1,
       shopId: shopId,
       exportedAt: Date.now(),
-      state: JSON.parse(JSON.stringify(state || {})),
+      state: snap,
       // הגלריה כוללת תמונות מלאות (data URLs) ומנפחת מאוד את הקובץ — לפי בחירה
       gallery: withGallery ? JSON.parse(JSON.stringify(galleryCache || [])) : [],
     };
@@ -541,6 +571,12 @@ UG.Store = (function () {
       ownerUid: keep.ownerUid || incoming.shop.ownerUid || "",
       createdAt: keep.createdAt || incoming.shop.createdAt || Date.now(),
     });
+    // במספרה מאובטחת — ספר הלקוחות עובר לצומת הפרטי (ולא לצומת הציבורי)
+    if (extraPrivate() && Array.isArray(incoming.contacts) && backend.saveContacts) {
+      contactsCache = incoming.contacts.slice();
+      incoming.contacts = [];
+      try { await backend.saveContacts(contactsCache); emitContacts(); } catch (e) {}
+    }
     state = incoming;
     await persist();
     // תמונות גלריה — מתווספות לקיימות (לא דורסות), כי אין מחיקה קבוצתית
@@ -582,6 +618,7 @@ UG.Store = (function () {
       "shopIndex/" + shopId,
       "subs/" + shopId,
       "gallery/" + shopId,
+      "private/" + shopId,        // כספת: פרטי לקוח + ספר הלקוחות
       "pushTokens/owner_" + shopId,
     ];
     if (passHash) rest.push("passHashes/" + passHash);
@@ -703,6 +740,10 @@ UG.Store = (function () {
   function getMedia() { return mediaCache || {}; }
   // פרטי הלקוח (שם/טלפון/מייל) של תור לפי מזההו — זמין לבעלים בלבד (אחרת ריק).
   function getBookingPriv(id) { return (privCache && privCache[id]) || null; }
+  // ספר הלקוחות. במספרה מאובטחת (extraPrivate) — מהצומת הפרטי; אחרת מתוך המספרה.
+  function emitContacts() { contactsSubs.forEach((fn) => { try { fn(getContacts()); } catch (e) {} }); }
+  function subscribeContacts(fn) { contactsSubs.add(fn); fn(getContacts()); return () => contactsSubs.delete(fn); }
+  function getContacts() { return extraPrivate() ? (contactsCache || []) : ((state && state.contacts) || []); }
   // קביעת רקע/לוגו: kind = "cover" | "logo". dataUrl ריק ("") = הסרה.
   async function setShopMedia(kind, dataUrl) {
     if (kind !== "cover" && kind !== "logo") return;
@@ -770,10 +811,12 @@ UG.Store = (function () {
 
   /* ---------- ספר לקוחות (ייבוא) ---------- */
   // מוסיף רשימת אנשי קשר {name, phone}; מדלג על כפילויות. מחזיר כמה נוספו בפועל.
+  // במספרה מאובטחת (extraPrivate) הספר נשמר בצומת הפרטי; אחרת בתוך המספרה.
   function addContacts(list) {
-    state.contacts = state.contacts || [];
+    const priv = extraPrivate();
+    const base = priv ? (contactsCache || []).slice() : (state.contacts = state.contacts || []);
     const key = (n, p) => (String(p || "").replace(/\D/g, "")) + "|" + String(n || "").trim();
-    const seen = new Set(state.contacts.map((c) => key(c.name, c.phone)));
+    const seen = new Set(base.map((c) => key(c.name, c.phone)));
     let added = 0;
     (list || []).forEach((c) => {
       const name = String((c && c.name) || "").trim();
@@ -782,12 +825,18 @@ UG.Store = (function () {
       const k = key(name, phone);
       if (seen.has(k)) return;
       seen.add(k);
-      state.contacts.push({ id: u.uid(), name, phone });
+      base.push({ id: u.uid(), name, phone });
       added++;
     });
+    if (priv) { contactsCache = base; emitContacts(); return backend.saveContacts(base).then(emit).then(() => added); }
     return persist().then(() => added);
   }
   function removeContact(id) {
+    if (extraPrivate()) {
+      contactsCache = (contactsCache || []).filter((c) => c.id !== id);
+      emitContacts();
+      return backend.saveContacts(contactsCache).then(emit);
+    }
     state.contacts = (state.contacts || []).filter((c) => c.id !== id);
     return persist();
   }
@@ -881,6 +930,13 @@ UG.Store = (function () {
   function piiPrivate(cur) {
     const st = cur || state;
     return !!(st && st.shop && st.shop.ownerUid);
+  }
+
+  /* שער נפרד ל"שלב 4" — ספר הלקוחות ורשימת ההמתנה. כרגע מופעל למספרת "try" בלבד
+     לבדיקה; אחרי אימות יורחב לכל המספרות המאובטחות (הסרת התנאי על shopId). */
+  function extraPrivate(cur) {
+    const st = cur || state;
+    return shopId === "try" && !!(st && st.shop && st.shop.ownerUid);
   }
 
   /* ---------- הזמנת תור (עם הגנה מפני כפילויות) ---------- */
@@ -1054,7 +1110,7 @@ UG.Store = (function () {
       if (w.date !== booking.date) return;
       if (isSlotFree(cur, w.date, w.start)) {
         created.push({
-          id: u.uid(), userId: w.userId, userName: w.userName,
+          id: u.uid(), userId: w.userId, userName: w.userName || "",
           date: w.date, start: w.start, createdAt: Date.now(),
         });
       }
@@ -1092,11 +1148,11 @@ UG.Store = (function () {
     const dup = state.waitlist.some((w) =>
       w.userId === data.userId && w.date === data.date && w.start === data.start);
     if (!dup) {
-      state.waitlist.push({
-        id: u.uid(), date: data.date, start: data.start,
-        userId: data.userId, userName: data.userName, phone: data.phone || "",
-        createdAt: Date.now(),
-      });
+      const entry = { id: u.uid(), date: data.date, start: data.start, userId: data.userId, createdAt: Date.now() };
+      // במספרה מאובטחת לא שומרים שם/טלפון ברשימת ההמתנה — הם אינם מוצגים בשום מקום
+      // (ההודעה על התפנות מגיעה לפי userId), ולכן אין סיבה לחשוף אותם בצומת הציבורי.
+      if (!extraPrivate()) { entry.userName = data.userName || ""; entry.phone = data.phone || ""; }
+      state.waitlist.push(entry);
       await persistChildren(["waitlist"]);
     }
   }
@@ -1164,7 +1220,7 @@ UG.Store = (function () {
     createBooking, setBookingStatus, deleteBooking,
     joinWaitlist, leaveWaitlist, consumeAlert, addReview, savePushToken,
     subscribeGallery, getGallery, addPhoto, removePhoto,
-    subscribeMedia, getMedia, setShopMedia, getBookingPriv,
+    subscribeMedia, getMedia, setShopMedia, getBookingPriv, getContacts, subscribeContacts,
     createShop, shopExists, peekShop, passcodeTaken, registerPasscodeIfFree, setOwnerPassHash,
     getSub, markPaymentPending, adminListShops, adminSetPaid,
     exportData, importData, deleteShop, purgeClient, onWriteError,

@@ -98,6 +98,55 @@ async function migrateBookingPii(db, shopsVal) {
   return moved;
 }
 
+/* שלב 4 — הסתרת ספר הלקוחות ורשימת ההמתנה. תואם ל-extraPrivate בלקוח: כרגע
+   למספרת "try" בלבד (יורחב בהמשך לכל המספרות המאובטחות). מעביר את ספר הלקוחות
+   לצומת הפרטי (עם איחוד ומניעת כפילות), ומסיר שם/טלפון מרשומות רשימת ההמתנה
+   וההתראות בצומת הציבורי (הם אינם מוצגים בשום מקום). אידמפוטנטי ו-best-effort. */
+const asArr = (x) => Array.isArray(x) ? x : (x && typeof x === "object" ? Object.keys(x).map((k) => x[k]) : []);
+async function migrateExtraPii(db, shopsVal) {
+  let moved = 0;
+  for (const sid of Object.keys(shopsVal || {})) {
+    if (sid !== "try") continue;   // כרגע רק "try" (כמו extraPrivate בלקוח)
+    const shop = shopsVal[sid];
+    if (!shop || !shop.shop || !shop.shop.ownerUid) continue;
+    // ספר הלקוחות → כספת (איחוד עם הקיים, מניעת כפילות), ואז הסרה מהצומת הציבורי
+    const pub = asArr(shop.contacts).filter((c) => c && (c.name || c.phone));
+    if (pub.length) {
+      try {
+        const cRef = db.ref("private/" + sid + "/contacts");
+        const priv = asArr((await cRef.once("value")).val());
+        const key = (c) => (String((c && c.phone) || "").replace(/\D/g, "")) + "|" + String((c && c.name) || "").trim();
+        const seen = new Set(priv.map(key));
+        const merged = priv.slice();
+        for (const c of pub) { const k = key(c); if (seen.has(k)) continue; seen.add(k); merged.push(c); }
+        await cRef.set(merged);
+        await db.ref("shops/" + sid + "/contacts").remove();
+        moved++;
+      } catch (e) { /* best-effort */ }
+    }
+    // רשימת המתנה + התראות → הסרת שם/טלפון (לא מוצגים; ההודעה לפי userId)
+    for (const node of ["waitlist", "alerts"]) {
+      const arr = shop[node];
+      if (!arr || typeof arr !== "object") continue;
+      for (const k of Object.keys(arr)) {
+        const w = arr[k];
+        if (!w) continue;
+        const hasName = typeof w.userName === "string" && w.userName !== "";
+        const hasPhone = typeof w.phone === "string" && w.phone !== "";
+        if (!hasName && !hasPhone) continue;
+        try {
+          const patch = {};
+          if (hasName) patch["shops/" + sid + "/" + node + "/" + k + "/userName"] = null;
+          if (hasPhone) patch["shops/" + sid + "/" + node + "/" + k + "/phone"] = null;
+          await db.ref().update(patch);
+          moved++;
+        } catch (e) { /* best-effort */ }
+      }
+    }
+  }
+  return moved;
+}
+
 const DB_URL = process.env.DATABASE_URL ||
   "https://barbertor-default-rtdb.europe-west1.firebasedatabase.app";
 
@@ -329,6 +378,12 @@ function apptTs(date, start) {
     const movedPii = await migrateBookingPii(db, shopsVal);
     if (movedPii) console.log(`הסתרת פרטי לקוח: ${movedPii} תורים הועברו לצומת הפרטי (הוסרו מהצומת הציבורי).`);
   } catch (e) { console.warn("הסתרת פרטי לקוח נכשלה:", (e && e.message) || e); }
+
+  // שלב 4 — ספר לקוחות + רשימת המתנה (כרגע "try" בלבד). מבודד, לא פוגע בהתראות.
+  try {
+    const movedExtra = await migrateExtraPii(db, shopsVal);
+    if (movedExtra) console.log(`הסתרת ספר לקוחות/המתנה: ${movedExtra} פריטים טופלו.`);
+  } catch (e) { console.warn("הסתרת ספר לקוחות/המתנה נכשלה:", (e && e.message) || e); }
 
   if (firstRun) console.log("ריצה ראשונה — סימון מצב קיים בלבד, ללא שליחה.");
   else console.log(`הושלם. מספרות=${shopIds.length}, alerts חדשים=${totalNewA}, bookings חדשים=${totalNewB}, פושים שנשלחו=${sent}`);

@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "139";
+  const APP_VERSION = "140";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -2972,7 +2972,7 @@
       `<option value="${s.id}" ${a.svcId === s.id ? "selected" : ""}>${esc(s.name)} · ${u.fmtDuration(s.durationMin)}</option>`).join("");
     const hourOptions = Array.from({ length: 24 }, (_, h) => { const v = String(h).padStart(2, "0"); return `<option value="${v}" ${a.hour === v ? "selected" : ""}>${v}</option>`; }).join("");
     const minOptions = ["00", "15", "30", "45"].map((m) => `<option value="${m}" ${a.min === m ? "selected" : ""}>${m}</option>`).join("");
-    const contacts = (st.contacts || []).slice().sort((x, y) => (x.name || "").localeCompare(y.name || "", "he"));
+    const contacts = (Store.getContacts()).slice().sort((x, y) => (x.name || "").localeCompare(y.name || "", "he"));
     const staff = st.shop.staff || [];
     const chosen = a.custom ? (a.hour + ":" + a.min) : a.start;
 
@@ -3096,7 +3096,7 @@
     const b = (st.bookings || []).filter((x) => x.status !== "cancelled")
       .reverse().find((x) => clientKey(x) === key);
     if (b) return { name: bkName(b) || "לקוח", phone: bkPhone(b) || "", userId: b.userId || "" };
-    const c = (st.contacts || []).find((x) => ((x.phone && u.normalizePhone(x.phone)) || x.name) === key);
+    const c = (Store.getContacts()).find((x) => ((x.phone && u.normalizePhone(x.phone)) || x.name) === key);
     return c ? { name: c.name || "לקוח", phone: c.phone || "", userId: "" } : null;
   }
 
@@ -3126,7 +3126,7 @@
   function clientsAgg(st) {
     const map = new Map();
     // אנשי הקשר שיובאו — מופיעים גם אם עדיין לא הזמינו תור
-    (st.contacts || []).forEach((c) => {
+    (Store.getContacts()).forEach((c) => {
       const key = (c.phone && u.normalizePhone(c.phone)) || c.name || c.id;
       if (!map.has(key)) map.set(key, {
         key, name: c.name || "לקוח", phone: c.phone || "", visits: 0, spent: 0,
@@ -3334,7 +3334,7 @@
   function clientsWithPhone() {
     const st = Store.get();
     const map = new Map();
-    (st.contacts || []).forEach((c) => {
+    (Store.getContacts()).forEach((c) => {
       const p = u.normalizePhone(c.phone || "");
       if (p && !map.has(p)) map.set(p, { name: c.name || "לקוח", phone: p });
     });
@@ -4355,7 +4355,7 @@
   function confirmDeleteShop() {
     const st = Store.get();
     const bk = (st.bookings || []).filter((b) => b.status !== "cancelled").length;
-    const cl = (st.contacts || []).length;
+    const cl = (Store.getContacts()).length;
     openModal(`
       <div class="m-title" style="color:var(--bad)">🗑️ מחיקת המספרה</div>
       <div class="m-sub">${esc(st.shop.name || SHOP)} · ${esc(SHOP)}</div>
