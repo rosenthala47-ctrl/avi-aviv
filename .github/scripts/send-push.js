@@ -98,17 +98,16 @@ async function migrateBookingPii(db, shopsVal) {
   return moved;
 }
 
-/* שלב 4 — הסתרת ספר הלקוחות ורשימת ההמתנה. תואם ל-extraPrivate בלקוח: כרגע
-   למספרת "try" בלבד (יורחב בהמשך לכל המספרות המאובטחות). מעביר את ספר הלקוחות
-   לצומת הפרטי (עם איחוד ומניעת כפילות), ומסיר שם/טלפון מרשומות רשימת ההמתנה
-   וההתראות בצומת הציבורי (הם אינם מוצגים בשום מקום). אידמפוטנטי ו-best-effort. */
+/* שלב 4 — הסתרת ספר הלקוחות ורשימת ההמתנה. תואם ל-extraPrivate בלקוח: כל מספרה
+   מאובטחת בחשבון (ownerUid). מעביר את ספר הלקוחות לצומת הפרטי (עם איחוד ומניעת
+   כפילות), ומסיר שם/טלפון מרשומות רשימת ההמתנה וההתראות בצומת הציבורי (הם אינם
+   מוצגים בשום מקום). אידמפוטנטי ו-best-effort. */
 const asArr = (x) => Array.isArray(x) ? x : (x && typeof x === "object" ? Object.keys(x).map((k) => x[k]) : []);
 async function migrateExtraPii(db, shopsVal) {
   let moved = 0;
   for (const sid of Object.keys(shopsVal || {})) {
-    if (sid !== "try") continue;   // כרגע רק "try" (כמו extraPrivate בלקוח)
     const shop = shopsVal[sid];
-    if (!shop || !shop.shop || !shop.shop.ownerUid) continue;
+    if (!shop || !shop.shop || !shop.shop.ownerUid) continue;   // רק מספרות מאובטחות
     // ספר הלקוחות → כספת (איחוד עם הקיים, מניעת כפילות), ואז הסרה מהצומת הציבורי
     const pub = asArr(shop.contacts).filter((c) => c && (c.name || c.phone));
     if (pub.length) {

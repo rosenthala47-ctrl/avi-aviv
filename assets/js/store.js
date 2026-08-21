@@ -932,11 +932,11 @@ UG.Store = (function () {
     return !!(st && st.shop && st.shop.ownerUid);
   }
 
-  /* שער נפרד ל"שלב 4" — ספר הלקוחות ורשימת ההמתנה. כרגע מופעל למספרת "try" בלבד
-     לבדיקה; אחרי אימות יורחב לכל המספרות המאובטחות (הסרת התנאי על shopId). */
+  /* שער "שלב 4" — ספר הלקוחות ורשימת ההמתנה. חל על כל מספרה מאובטחת בחשבון
+     (ownerUid). מספרה שאינה מאובטחת בחשבון — הנתונים נשארים כרגיל עד לאבטחתה. */
   function extraPrivate(cur) {
     const st = cur || state;
-    return shopId === "try" && !!(st && st.shop && st.shop.ownerUid);
+    return !!(st && st.shop && st.shop.ownerUid);
   }
 
   /* ---------- הזמנת תור (עם הגנה מפני כפילויות) ---------- */
