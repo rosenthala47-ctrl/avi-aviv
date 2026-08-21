@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "142";
+  const APP_VERSION = "143";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1127,8 +1127,15 @@
     const sub = (Store.getSub && Store.getSub()) || null;
     const paidUntil = (sub && Number(sub.paidUntil)) || 0;
     if (paidUntil > now) return { state: "active", until: paidUntil, daysLeft: Math.ceil((paidUntil - now) / 86400000) };
-    const created = Number(st.shop.createdAt) || 0;
-    if (!created) return { state: "grandfathered" };   // מספרות ותיקות — לא ננעלות
+    // מספרה ותיקה שסומנה בשרת כפטורה (grandfathered) — לא ננעלת לעולם.
+    if (sub && sub.grandfathered) return { state: "grandfathered" };
+    /* תחילת הניסיון נלקחת מהשרת (subs/<id>/trialStart) — צומת שהבעלים אינו יכול
+       לכתוב אליו (רק המנהל/הקרון), ולכן אי אפשר "למתוח" את הניסיון ע״י עריכת
+       createdAt של המספרה. עד שהקרון חותם את הערך (בדקות הראשונות של מספרה חדשה)
+       נופלים-לאחור ל-createdAt — הקרון מקבע אותו מיד וממילא חוסם עתידֿ-תיארוך. */
+    const serverStart = (sub && Number(sub.trialStart)) || 0;
+    const created = serverStart || Number(st.shop.createdAt) || 0;
+    if (!created) return { state: "grandfathered" };   // מספרה ותיקה מאוד — עד שהקרון יסמן
     const trialEnd = created + (Number(cfg.trialDays) || 30) * 86400000;
     if (now < trialEnd) return { state: "trial", until: trialEnd, daysLeft: Math.ceil((trialEnd - now) / 86400000) };
     return { state: "expired" };

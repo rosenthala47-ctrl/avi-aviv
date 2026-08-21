@@ -146,6 +146,37 @@ async function migrateExtraPii(db, shopsVal) {
   return moved;
 }
 
+/* הגנה על תקופת הניסיון: מקבע את תחילת הניסיון בצומת subs/<id> (שהבעלים אינו יכול
+   לכתוב אליו — רק המנהל/הקרון), כדי שלא ניתן למתוח את הניסיון ע״י עריכת createdAt.
+   - מספרה עם createdAt תקין → trialStart = min(createdAt, now) (חוסם עתיד-תיארוך).
+   - מספרה ותיקה (בלי createdAt) שקיימת כבר בהרצת-הבסיס הראשונה → grandfathered=true.
+   - מספרה חדשה (אחרי הבסיס) בלי createdAt → trialStart = now (ניסיון רגיל, לא פטור).
+   נקבע פעם אחת לכל מספרה; אם כבר נקבע — מדלגים. אידמפוטנטי ו-best-effort. */
+async function stampTrials(db, shopsVal, now) {
+  let stamped = 0;
+  const subsVal = (await db.ref("subs").once("value")).val() || {};
+  const backfillDone = !!(await db.ref("system/trialBackfillV1").once("value")).val();
+  for (const sid of Object.keys(shopsVal || {})) {
+    const shop = shopsVal[sid];
+    if (!shop || shop.type === "photo") continue;
+    const sub = subsVal[sid] || {};
+    if (sub.trialStart != null || sub.grandfathered) continue;   // כבר נקבע — נעול
+    const createdAt = Number(shop.shop && shop.shop.createdAt);
+    try {
+      if (createdAt > 0) {
+        await db.ref("subs/" + sid + "/trialStart").set(Math.min(createdAt, now));
+      } else if (!backfillDone) {
+        await db.ref("subs/" + sid + "/grandfathered").set(true);   // מספרה ותיקה אמיתית
+      } else {
+        await db.ref("subs/" + sid + "/trialStart").set(now);       // חדשה בלי createdAt → ניסיון
+      }
+      stamped++;
+    } catch (e) { /* best-effort */ }
+  }
+  if (!backfillDone) { try { await db.ref("system/trialBackfillV1").set(now); } catch (e) {} }
+  return stamped;
+}
+
 const DB_URL = process.env.DATABASE_URL ||
   "https://barbertor-default-rtdb.europe-west1.firebasedatabase.app";
 
@@ -383,6 +414,12 @@ function apptTs(date, start) {
     const movedExtra = await migrateExtraPii(db, shopsVal);
     if (movedExtra) console.log(`הסתרת ספר לקוחות/המתנה: ${movedExtra} פריטים טופלו.`);
   } catch (e) { console.warn("הסתרת ספר לקוחות/המתנה נכשלה:", (e && e.message) || e); }
+
+  // קיבוע תחילת הניסיון בצומת המוגן (subs) — הגנה מפני מתיחת הניסיון. מבודד.
+  try {
+    const stampedTrials = await stampTrials(db, shopsVal, now);
+    if (stampedTrials) console.log(`קיבוע ניסיון: ${stampedTrials} מספרות סומנו (trialStart/grandfathered).`);
+  } catch (e) { console.warn("קיבוע ניסיון נכשל:", (e && e.message) || e); }
 
   if (firstRun) console.log("ריצה ראשונה — סימון מצב קיים בלבד, ללא שליחה.");
   else console.log(`הושלם. מספרות=${shopIds.length}, alerts חדשים=${totalNewA}, bookings חדשים=${totalNewB}, פושים שנשלחו=${sent}`);
