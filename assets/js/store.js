@@ -153,6 +153,15 @@ UG.Store = (function () {
       try { if (bc) bc.postMessage({ t: "priv" }); } catch (e) {}
       listeners.priv.forEach((fn) => fn(m));
     }
+    // מצב גולמי (בלי normalize) — לפעולות פר-תור, כדי לגעת רק בתור הרלוונטי
+    function readRaw() { try { return JSON.parse(localStorage.getItem(skey) || "null"); } catch (e) { return null; } }
+    function bookingsArr(s) { const b = s && s.bookings; return Array.isArray(b) ? b : (b && typeof b === "object" ? Object.keys(b).map((k) => b[k]) : []); }
+    function writeRawState(s) {
+      s.updatedAt = Date.now();
+      try { localStorage.setItem(skey, JSON.stringify(s)); } catch (e) {}
+      try { if (bc) bc.postMessage({ t: "sync", at: s.updatedAt }); } catch (e) {}
+      return Promise.resolve();
+    }
     return {
       mode: "local",
       read() {
@@ -186,6 +195,10 @@ UG.Store = (function () {
       onBookingPriv(cb) { listeners.priv.push(cb); cb(readP()); },
       savePrivate(bkId, priv) { const m = readP(); m[bkId] = priv; writeP(m); return Promise.resolve(); },
       removePrivate(bkId) { const m = readP(); delete m[bkId]; writeP(m); return Promise.resolve(); },
+      // תורים מחמירים — פר-תור (מקומית: קריאה/עדכון של התור לפי מזהה במערך)
+      setBooking(bkId, obj) { const s = readRaw() || {}; const arr = bookingsArr(s); const i = arr.findIndex((x) => x && x.id === bkId); if (i >= 0) arr[i] = obj; else arr.push(obj); s.bookings = arr; return writeRawState(s); },
+      updateBookingFields(bkId, patch) { const s = readRaw() || {}; const arr = bookingsArr(s); const b = arr.find((x) => x && x.id === bkId); if (b) Object.assign(b, patch); s.bookings = arr; return writeRawState(s); },
+      removeBooking(bkId) { const s = readRaw() || {}; s.bookings = bookingsArr(s).filter((x) => x && x.id !== bkId); return writeRawState(s); },
       // ספר הלקוחות (צומת פרטי, מוגן לבעלים בענן; מקומית — אחסון נפרד)
       onContacts(cb) { listeners.contacts.push(cb); cb(readC()); },
       saveContacts(arr) {
@@ -289,6 +302,10 @@ UG.Store = (function () {
       },
       savePrivate(bkId, priv) { return privRef.child(bkId).set(clone(priv)); },
       removePrivate(bkId) { return privRef.child(bkId).remove(); },
+      // תורים מחמירים — כתיבה פר-תור (במקום צומת שלם). המפתח = מזהה התור.
+      setBooking(bkId, obj) { return ref.child("bookings/" + bkId).set(clone(obj)); },
+      updateBookingFields(bkId, patch) { return ref.child("bookings/" + bkId).update(clone(patch)); },
+      removeBooking(bkId) { return ref.child("bookings/" + bkId).remove(); },
       // ספר הלקוחות — צומת מוגן לבעלים בלבד (קריאה+כתיבה לפי ownerUid). ללקוח
       // הקריאה נחסמת → מטמון ריק (ממילא רק הבעלים משתמש בספר הלקוחות).
       onContacts(cb) {
@@ -429,6 +446,15 @@ UG.Store = (function () {
   }
 
   function persist() {
+    // מספרה מחמירה בענן — לא כותבים את צומת התורים כחלק מכתיבת ההגדרות, כי הוא
+    // מנוהל פר-תור (לפי מזהה). כתיבה מלאה הייתה הופכת אותו בחזרה למערך ושוברת זאת.
+    if (strictBookings() && backend.updateChildren) {
+      const patch = {};
+      Object.keys(state).forEach((k) => { if (k !== "bookings" && k !== "updatedAt") patch[k] = state[k] === undefined ? null : state[k]; });
+      state.updatedAt = Date.now();
+      patch.updatedAt = state.updatedAt;
+      return backend.updateChildren(patch).then(emit, (err) => { throw reportWriteError(err); });
+    }
     return backend.write(state).then(emit, (err) => { throw reportWriteError(err); });
   }
 
@@ -579,6 +605,12 @@ UG.Store = (function () {
     }
     state = incoming;
     await persist();
+    // מספרה מחמירה — persist אינו כותב את צומת התורים; משחזרים אותם פר-תור
+    if (strictBookings() && backend.setBooking) {
+      for (const b of (incoming.bookings || [])) {
+        if (b && b.id) { try { await backend.setBooking(b.id, b); } catch (e) {} }
+      }
+    }
     // תמונות גלריה — מתווספות לקיימות (לא דורסות), כי אין מחיקה קבוצתית
     if (Array.isArray(dump.gallery) && dump.gallery.length && backend.addPhoto) {
       const have = new Set((galleryCache || []).map((p) => p.dataUrl));
@@ -939,6 +971,15 @@ UG.Store = (function () {
     return !!(st && st.shop && st.shop.ownerUid);
   }
 
+  /* שער "תורים מחמירים" — מונע מחיקה/שכתוב המוני של התורים. במספרה מסומנת
+     (shop.strictBookings) התורים נכתבים פר-תור (לא כצומת שלם), וחוקי האבטחה
+     מתירים ללקוח רק להוסיף תור חדש ולבטל את הסטטוס — לא למחוק/לשנות של אחרים.
+     כרגע מופעל למספרת "try" בלבד; יורחב בהמשך לכל המספרות המאובטחות. */
+  function strictBookings(cur) {
+    const st = cur || state;
+    return !!(st && st.shop && st.shop.strictBookings);
+  }
+
   /* ---------- הזמנת תור (עם הגנה מפני כפילויות) ---------- */
   function buildBooking(cur, data) {
     const svc = cur.services.find((s) => s.id === data.serviceId);
@@ -1057,7 +1098,38 @@ UG.Store = (function () {
     try { await backend.savePrivate(booking.id, priv); } catch (e) { /* התור כבר נקבע */ }
   }
 
+  /* הזמנה במספרה מחמירה: כותבים רק את התור החדש (פר-תור, write-once) במקום את כל
+     הצומת — כך לקוח לא יכול למחוק/לשכתב תורים של אחרים. אין טרנזקציה על כל הצומת,
+     ולכן מוסיפים "התאמה" קצרה: אם במקביל נכתב תור חופף שנוצר לפניי — מבטלים את שלי. */
+  async function createBookingStrict(data) {
+    try { await withTimeout(reloadFromRemote(), 8000); } catch (e) { /* עובדים עם המצב הקיים */ }
+    const res = buildBooking(state, data);
+    if (!res.ok) return res;
+    try {
+      await withTimeout(backend.setBooking(res.booking.id, res.booking), 22000);
+    } catch (e) {
+      console.warn("[UG] createBooking(strict) נכשל:", (e && (e.code || e.message)) || e);
+      return { ok: false, reason: bookingErrText(e) };
+    }
+    await savePriv(res.booking, res.priv);
+    // התאמה מפני מרוץ: אם נכתב במקביל תור חופף שנוצר לפניי — מבטלים את שלי
+    try {
+      await withTimeout(reloadFromRemote(), 8000);
+      const mine = res.booking, ms = u.toMin(mine.start), me = u.toMin(mine.end);
+      const lost = (state.bookings || []).some((b) => b && b.id !== mine.id && b.status !== "cancelled" && b.date === mine.date &&
+        u.toMin(b.start) < me && ms < u.toMin(b.end) &&
+        (((b.createdAt || 0) < (mine.createdAt || 0)) || ((b.createdAt || 0) === (mine.createdAt || 0) && String(b.id) < String(mine.id))));
+      if (lost) {
+        try { await backend.updateBookingFields(mine.id, { status: "cancelled", cancelledBy: "system" }); } catch (e) {}
+        try { await reloadFromRemote(); } catch (e) {}
+        return { ok: false, reason: "התור נתפס הרגע — נסו שעה אחרת" };
+      }
+    } catch (e) { /* ההתאמה best-effort */ }
+    return res;
+  }
+
   async function createBooking(data) {
+    if (strictBookings()) return createBookingStrict(data);
     if (backend.transactBooking) {
       // חשוב: לא לתת לשגיאת רשת/הרשאה "לזרוק" החוצה — אחרת כפתור ההזמנה נתקע.
       // תמיד מחזירים אובייקט תוצאה ({ok:false, reason}) שהמסך יודע לטפל בו.
@@ -1135,8 +1207,18 @@ UG.Store = (function () {
         if (by) b.cancelledBy = by;
         processFreed(state, b);   // מעדכן גם waitlist ו-alerts
       }
-      // לקוח מבטל את התור שלו — כותב רק את הצמתים שהשתנו (מותר גם במספרה נעולה)
-      await persistChildren(["bookings", "waitlist", "alerts"]);
+      if (strictBookings()) {
+        // מספרה מחמירה — כותבים רק את שדות התור שהשתנה (לא את כל הצומת), ובנפרד
+        // את רשימת ההמתנה/ההתראות שהושפעו מהביטול.
+        const patch = { status: status };
+        if (status === "cancelled" && by) patch.cancelledBy = by;
+        try { await backend.updateBookingFields(id, patch); } catch (e) { throw reportWriteError(e); }
+        if (status === "cancelled") { try { await persistChildren(["waitlist", "alerts"]); } catch (e) {} }
+        emit();
+      } else {
+        // לקוח מבטל את התור שלו — כותב רק את הצמתים שהשתנו (מותר גם במספרה נעולה)
+        await persistChildren(["bookings", "waitlist", "alerts"]);
+      }
     }
     return b;
   }
@@ -1191,7 +1273,13 @@ UG.Store = (function () {
   async function deleteBooking(id) {
     refreshLocal();
     state.bookings = state.bookings.filter((b) => b.id !== id);
-    await persist();
+    if (strictBookings()) {
+      // מספרה מחמירה — מוחקים רק את התור הבודד (פר-תור), לא את כל הצומת
+      try { await backend.removeBooking(id); } catch (e) { throw reportWriteError(e); }
+      emit();
+    } else {
+      await persist();
+    }
     // ניקוי פרטי הלקוח הפרטיים של אותו תור (אם היו) — best-effort
     if (backend.removePrivate) { try { await backend.removePrivate(id); } catch (e) {} }
   }

@@ -146,6 +146,29 @@ async function migrateExtraPii(db, shopsVal) {
   return moved;
 }
 
+/* באג מחיקת התורים: מפעיל "תורים מחמירים" למספרה — ממפתח מחדש את התורים לפי מזהה
+   (כדי שפעולות פר-תור יעבדו) ואז מסמן shop.strictBookings=true. מרגע זה חוקי
+   האבטחה מונעים מחיקה/שכתוב המוני של התורים. כרגע "try" בלבד (כמו strictBookings
+   בלקוח); יורחב בהמשך. פעם אחת לכל מספרה, best-effort. */
+async function migrateStrictBookings(db, shopsVal) {
+  let done = 0;
+  for (const sid of Object.keys(shopsVal || {})) {
+    if (sid !== "try") continue;
+    const shop = shopsVal[sid];
+    if (!shop || !shop.shop || !shop.shop.ownerUid) continue;   // דורש מספרה מאובטחת
+    if (shop.shop.strictBookings) continue;                     // כבר מופעל
+    try {
+      const fresh = (await db.ref("shops/" + sid + "/bookings").once("value")).val();
+      const map = {};
+      asArr(fresh).forEach((b) => { if (b && b.id) map[b.id] = b; });   // מפתח = מזהה התור
+      await db.ref("shops/" + sid + "/bookings").set(map);
+      await db.ref("shops/" + sid + "/shop/strictBookings").set(true);
+      done++;
+    } catch (e) { /* best-effort */ }
+  }
+  return done;
+}
+
 /* הגנה על תקופת הניסיון: מקבע את תחילת הניסיון בצומת subs/<id> (שהבעלים אינו יכול
    לכתוב אליו — רק המנהל/הקרון), כדי שלא ניתן למתוח את הניסיון ע״י עריכת createdAt.
    - מספרה עם createdAt תקין → trialStart = min(createdAt, now) (חוסם עתיד-תיארוך).
@@ -420,6 +443,12 @@ function apptTs(date, start) {
     const stampedTrials = await stampTrials(db, shopsVal, now);
     if (stampedTrials) console.log(`קיבוע ניסיון: ${stampedTrials} מספרות סומנו (trialStart/grandfathered).`);
   } catch (e) { console.warn("קיבוע ניסיון נכשל:", (e && e.message) || e); }
+
+  // הפעלת "תורים מחמירים" (כרגע "try" בלבד) — מניעת מחיקת תורים המונית. מבודד.
+  try {
+    const strict = await migrateStrictBookings(db, shopsVal);
+    if (strict) console.log(`תורים מחמירים: הופעל ל-${strict} מספרות.`);
+  } catch (e) { console.warn("הפעלת תורים מחמירים נכשלה:", (e && e.message) || e); }
 
   if (firstRun) console.log("ריצה ראשונה — סימון מצב קיים בלבד, ללא שליחה.");
   else console.log(`הושלם. מספרות=${shopIds.length}, alerts חדשים=${totalNewA}, bookings חדשים=${totalNewB}, פושים שנשלחו=${sent}`);
