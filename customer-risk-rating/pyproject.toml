@@ -1,0 +1,48 @@
+[project]
+name = "crr"
+version = "0.1.0"
+description = "Hybrid ML + LLM customer risk rating engine"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+]
+
+[project.optional-dependencies]
+# Phase 1 only needs numpy/pandas. These arrive with the phases that use them.
+model = ["scikit-learn>=1.4", "lightgbm>=4.3", "shap>=0.45", "pyarrow>=15.0"]
+api = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "pydantic>=2.6", "pydantic-settings>=2.2"]
+db = ["sqlalchemy>=2.0", "alembic>=1.13", "psycopg[binary]>=3.1", "redis>=5.0"]
+dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.4", "mypy>=1.9"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.ruff]
+# 140 rather than 120: this codebase is dense with numeric expressions and
+# structural-equation coefficients that read worse split across lines.
+line-length = 140
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Pure data tables. The phrase banks (including RTL Hebrew, where character count
+# and visual width diverge) and the column dictionary are more readable as one
+# entry per line than wrapped to fit a column limit.
+"src/crr/data/narratives.py" = ["E501"]
+"src/crr/data/dictionary.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true

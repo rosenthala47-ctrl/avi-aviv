@@ -1,0 +1,33 @@
+# Generated data — reproducible from the seed in manifest.json, so never committed.
+data/raw/
+data/interim/
+data/processed/
+!data/**/README.md
+
+# Models and experiment output
+models/
+mlruns/
+*.pkl
+*.joblib
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets — never commit real credentials
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/

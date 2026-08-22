@@ -1,0 +1,42 @@
+# Synthetic data generation profiles.
+#
+# The CLI takes flags; this file documents the profiles we actually use so a run
+# can be reproduced from a name rather than from shell history. Every field maps
+# 1:1 onto crr.data.synthetic.GeneratorConfig.
+
+profiles:
+
+  # Fast loop for unit tests and CI. Clean data, no PII, no events.
+  smoke:
+    n_customers: 1000
+    seed: 42
+    inject_missingness: false
+    inject_categorical_noise: false
+    duplicate_rate: 0.0
+    include_pii: false
+    generate_events: false
+
+  # Default training set for the alpha model.
+  alpha:
+    n_customers: 50000
+    seed: 42
+    as_of: 2026-01-01
+    cohort_months: 12
+    outcome_horizon_months: 12
+    target_default_rate: 0.055
+    target_financial_crime_rate: 0.015
+    language: mixed
+    hebrew_share: 0.35
+    events_per_customer: 12.0
+
+  # Stress profile: thinner signal, more missingness, higher imbalance. Used to
+  # check that the pipeline degrades gracefully rather than silently.
+  adversarial:
+    n_customers: 50000
+    seed: 1337
+    target_default_rate: 0.018
+    target_financial_crime_rate: 0.004
+    credit_signal_strength: 0.85
+    crime_signal_strength: 0.90
+    categorical_noise_rate: 0.08
+    duplicate_rate: 0.02
