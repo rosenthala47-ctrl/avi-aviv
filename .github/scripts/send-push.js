@@ -283,8 +283,9 @@ function apptTs(date, start) {
     const shop = shopsVal[sid] || {};
     if (shop.type === "photo") continue;   // דלג על רשומות ישנות
     const shopName = (shop.shop && shop.shop.name) || "המספרה";
-    const alerts = Array.isArray(shop.alerts) ? shop.alerts : [];
-    const bookings = Array.isArray(shop.bookings) ? shop.bookings : [];
+    // תורים/התראות עשויים לחזור כאובייקט (מספרה מחמירה שומרת תורים פר-מזהה) — asArr
+    const alerts = asArr(shop.alerts);
+    const bookings = asArr(shop.bookings);
     const broadcasts = Array.isArray(shop.broadcasts) ? shop.broadcasts : [];
 
     const st = perShop[sid] || { alertIds: [], bookingIds: [], cancelIds: [], bcIds: [], remIds: [] };

@@ -88,15 +88,18 @@ UG.Store = (function () {
     if (!s.schedule) s.schedule = base.schedule;
     for (let i = 0; i < 7; i++) s.schedule[i] = Object.assign({}, base.schedule[i], s.schedule[i]);
     if (!Array.isArray(s.services)) s.services = base.services;
-    if (!Array.isArray(s.bookings)) s.bookings = [];
+    // תורים/המתנה/התראות עשויים לחזור כאובייקט (במספרה מחמירה התורים נשמרים
+    // פר-מזהה, ו-RTDB מחזיר מערך "עם חורים" כאובייקט) — asArray הופך לחזרה למערך
+    // אמיתי במקום למחוק אותם.
+    s.bookings = asArray(s.bookings);
+    s.waitlist = asArray(s.waitlist);
+    s.alerts = asArray(s.alerts);
     if (!Array.isArray(s.products)) s.products = [];
     if (!Array.isArray(s.contacts)) s.contacts = [];
     if (!Array.isArray(s.closedDates)) s.closedDates = [];
     if (!Array.isArray(s.blockedClients)) s.blockedClients = [];
     if (!Array.isArray(s.blocks)) s.blocks = [];
     if (!Array.isArray(s.opens)) s.opens = [];
-    if (!Array.isArray(s.waitlist)) s.waitlist = [];
-    if (!Array.isArray(s.alerts)) s.alerts = [];
     if (!Array.isArray(s.reviews)) s.reviews = [];
     if (!Array.isArray(s.shop.staff)) s.shop.staff = [];
     if (!s.shop.address) s.shop.address = base.shop.address;
@@ -1112,7 +1115,9 @@ UG.Store = (function () {
       return { ok: false, reason: bookingErrText(e) };
     }
     await savePriv(res.booking, res.priv);
-    // התאמה מפני מרוץ: אם נכתב במקביל תור חופף שנוצר לפניי — מבטלים את שלי
+    // התאמה מפני מרוץ: אם נכתב במקביל תור חופף שנוצר לפניי — מבטלים את שלי.
+    // הבעלים פטור (הוא רשאי לקבוע גם על שעה תפוסה — למשל תיעוד לקוח מזדמן).
+    if (String(data.userId || "").indexOf("owner:") === 0) return res;
     try {
       await withTimeout(reloadFromRemote(), 8000);
       const mine = res.booking, ms = u.toMin(mine.start), me = u.toMin(mine.end);
