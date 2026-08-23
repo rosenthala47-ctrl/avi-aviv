@@ -38,6 +38,10 @@ class EventPayload(BaseModel):
     amount: float
     counterparty_country: str = "IL"
     channel: str = "online"
+    # Accepted for request-shape compatibility but not read: crr.features.events
+    # derives this itself from event_type and recency, since a caller has no
+    # reliable way to know the rule and trusting it as input would reintroduce
+    # exactly the training/serving skew this module exists to prevent.
     is_trigger_event: int = Field(default=0, ge=0, le=1)
 
 
@@ -234,6 +238,23 @@ class ExplanationResponse(BaseModel):
     model_version: str
     policy_version: int
     scored_at: dt.datetime
+
+
+class EventIngestResponse(BaseModel):
+    """What happened when one event was pushed to a customer's stream.
+
+    ``result`` is only populated when ``rescored`` is true — a debounced or
+    non-trigger event still gets a 200 (the event was stored either way) but
+    carries no new score, since none was computed.
+    """
+
+    customer_id: str
+    reason: Literal["triggered", "debounced", "no_trigger", "not_yet_scored", "stale"]
+    rescored: bool
+    notified: bool
+    band_changed: bool
+    triggered_by: str
+    result: ScoreResult | None = None
 
 
 class HealthResponse(BaseModel):

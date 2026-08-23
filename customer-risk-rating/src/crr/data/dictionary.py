@@ -123,7 +123,11 @@ COLUMNS: dict[str, ColumnDoc] = {
     "amount": ColumnDoc("event", "Signed amount; negative is money out."),
     "counterparty_country": ColumnDoc("event", "Counterparty jurisdiction."),
     "channel": ColumnDoc("event", "card / atm / branch / online / swift."),
-    "is_trigger_event": ColumnDoc("event", "Event should force an immediate re-score under the current policy."),
+    "is_trigger_event": ColumnDoc(
+        "event",
+        "1 if event_type is a tracked trigger type and happened within 30 days of the "
+        "snapshot. Derived (crr.features.events), not caller input.",
+    ),
     # --- outcomes ---------------------------------------------------------
     "outcome_observation_date": ColumnDoc("outcome", "End of the performance window: snapshot_date + horizon."),
     "default_12m": ColumnDoc("outcome", "TARGET. 90+ days past due within the performance window."),

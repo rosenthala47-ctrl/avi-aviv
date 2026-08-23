@@ -5,12 +5,13 @@ structured financial data, an LLM branch over unstructured text (support calls,
 underwriter notes, KYC documents), SHAP explanations, and a policy layer a risk
 manager can retune without a deploy.
 
-**Status: phases 1-5 of 8 complete.** The synthetic data foundation, the
+**Status: phases 1-6 of 8 complete.** The synthetic data foundation, the
 point-in-time feature pipeline, a calibrated LightGBM baseline, a SHAP
 explainability layer, a FastAPI serving layer with the three endpoints,
-persistence and audit, and a safe, versioned, no-code rule engine are built,
-tested and measured. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan
-and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design.
+persistence and audit, a safe, versioned, no-code rule engine, and event-driven
+real-time re-scoring are built, tested and measured. See
+[`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan and
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design.
 
 ## Quickstart
 
@@ -36,6 +37,9 @@ python scripts/benchmark_api.py --requests 500
 # verify the rule engine's exit criteria, then try a proposed policy change
 python scripts/verify_rule_engine.py
 python scripts/simulate_policy.py --proposed config/risk_policy_proposed.example.yaml
+
+# verify real-time re-scoring: trigger-to-score p95 vs the 5s exit criterion
+python scripts/verify_rescoring.py
 
 pytest
 ```
@@ -118,18 +122,19 @@ customer-risk-rating/
 │   ├── verify_rule_engine.py    measures the phase 5 exit criteria, judges PASS/FAIL
 │   ├── simulate_policy.py       what would change if a proposed policy went live
 │   ├── manage_policy.py         list / show / diff / rollback policy versions
+│   ├── verify_rescoring.py      measures the phase 6 exit criteria, judges PASS/FAIL
 │   └── render_data_dictionary.py
 ├── src/crr/
 │   ├── data/                    ✅ phase 1 — synthetic generator, taxonomy, narratives
 │   ├── features/                ✅ phase 2 — point-in-time pipeline, feature contract
 │   ├── models/                  ✅ phase 2 — LightGBM core, calibration, metrics
 │   ├── explain/                 ✅ phase 3 — TreeSHAP → reason codes, two audiences
-│   ├── api/                     ✅ phase 4 — FastAPI, scoring service, persistence
-│   ├── db/                      ✅ phase 4 — SQLAlchemy models (Postgres / SQLite)
-│   ├── policy.py                ✅ phase 4/5 — loader, versioning, archive, rollback
+│   ├── api/                     ✅ phase 4/6 — FastAPI, scoring service, persistence, events
+│   ├── db/                      ✅ phase 4/6 — SQLAlchemy models (Postgres / SQLite)
+│   ├── policy.py                ✅ phase 4/5/6 — loader, versioning, archive, rollback, triggers
 │   ├── rules/                   ✅ phase 5 — safe expressions, engine, simulation
 │   ├── security/                ◻ phase 4 — anonymisation, crypto
-│   └── pipelines/               ◻ phase 6 — real-time re-scoring
+│   └── pipelines/               ✅ phase 6 — real-time re-scoring, notifications
 └── tests/
 ```
 
@@ -286,6 +291,44 @@ would have made `DEFAULT_ARCHIVE_DIR` unoverridable anywhere), and a
 against the real SQLAlchemy backend — invisible against the in-memory
 repository, caught only because the SQLite-backed path is tested too. Both
 are written up in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+## What phase 6 produced
+
+A `RescoringEngine` that consumes one event at a time and re-scores a customer
+without the caller resending their ~65-field profile — it rebuilds the input
+from the last stored snapshot plus the full event log — debounced per
+`(customer, event_type)`, and a notification only when the published band
+actually moves.
+
+- **`POST /api/v1/events/{customer_id}`** — push one event, get back whether it
+  triggered a re-score and, if so, the new result. Always 200: a non-trigger
+  or debounced event is a stored fact, not an error.
+- **A staleness sweep** — `rescoring.max_score_age_days` catches customers whose
+  accumulated non-trigger events should still eventually move the score even
+  though none of them individually crossed a trigger.
+- **Notification behind an interface**, same reason as everywhere else here:
+  in-memory for tests, a structured JSON log line as the zero-infrastructure
+  production default.
+
+### Exit criterion (measured by `scripts/verify_rescoring.py`)
+
+| criterion | measured |
+|---|---|
+| trigger-to-updated-score p95 < 5s | **126 ms** (p50 113ms, max 129ms, n=33) |
+| false-alert rate, measured | 97.0% of 33 triggered re-scores did not cross a band boundary (1 did) — every one measurably moved the underlying score (mean \|Δ\| 1.91 on a 0-100 scale), and nearly all not far enough to cross a 25-point band. See `docs/ROADMAP.md` for why that is a real, explained finding rather than a broken engine. |
+
+Three real bugs surfaced along the way, the first genuinely serious: the
+engine re-scored using the stored snapshot's **stale** `snapshot_date`
+unchanged, so the leakage guard treated every event dated after it — i.e.
+every event that could ever realistically trigger a re-score — as being in
+the future and silently dropped it. The recompute ran, returned
+`rescored=True`, and produced the exact same score every time. Fixed by
+advancing `snapshot_date` to `now` before re-scoring (verified safe: it is
+dropped before modelling and used nowhere except to anchor the event window).
+The other two — a model feature (`is_trigger_event`) that was trusted from
+untrustable caller input instead of derived, and a timezone-aware timestamp
+that crashed feature building — are both written up in full, with how each
+was caught, in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Two things to know before phase 7
 

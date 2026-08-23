@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from crr.api.app import create_app
 from crr.api.repository import (
+    InMemoryEventRepository,
     InMemoryJobRepository,
     InMemoryScoreRepository,
     SqlAlchemyScoreRepository,
@@ -23,6 +24,7 @@ from crr.api.repository import (
 from crr.api.scoring import ModelBundle, ScoringService
 from crr.api.settings import Settings
 from crr.data.synthetic import GeneratorConfig, generate
+from crr.pipelines.notifications import InMemoryNotificationSink
 
 REPO_ROOT = pytest.importorskip("pathlib").Path(__file__).resolve().parents[1]
 PII = ["full_name", "national_id", "email", "phone", "address_line", "split"]
@@ -60,14 +62,20 @@ def customers():
 def client(bundle):
     scores = InMemoryScoreRepository()
     jobs = InMemoryJobRepository()
+    events_repo = InMemoryEventRepository()
+    notifications = InMemoryNotificationSink()
     app = create_app(
         settings=Settings(),
         service=ScoringService(bundle),
         scores=scores,
         jobs=jobs,
+        events_repo=events_repo,
+        notifications=notifications,
     )
     with TestClient(app) as test_client:
         test_client.scores = scores  # type: ignore[attr-defined]
+        test_client.events_repo = events_repo  # type: ignore[attr-defined]
+        test_client.notifications = notifications  # type: ignore[attr-defined]
         yield test_client
 
 
@@ -367,6 +375,77 @@ def test_batch_status_404_for_unknown_job(client):
 
 def test_empty_batch_is_rejected(client):
     assert client.post("/api/v1/batch-score", json={"customers": []}).status_code == 422
+
+
+# --------------------------------------------------------------------------
+# Events / re-scoring (phase 6)
+# --------------------------------------------------------------------------
+
+
+def test_event_before_any_score_is_stored_but_not_scored(client, customers):
+    customer_id = customers[1]["customer_id"]
+    response = client.post(
+        f"/api/v1/events/{customer_id}",
+        json={"event_ts": "2025-06-01T12:00:00Z", "event_type": "missed_payment", "amount": 1},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["reason"] == "not_yet_scored"
+    assert body["rescored"] is False
+    assert body["result"] is None
+    assert len(client.events_repo.history(customer_id)) == 1
+
+
+def test_event_triggers_a_rescore_and_returns_the_new_result(client, customers):
+    customer = customers[2]
+    client.post("/api/v1/score", json={"customer": _to_json(customer)})
+
+    response = client.post(
+        f"/api/v1/events/{customer['customer_id']}",
+        json={"event_ts": "2025-06-01T12:00:00Z", "event_type": "missed_payment", "amount": 1},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["reason"] == "triggered"
+    assert body["rescored"] is True
+    assert body["result"] is not None
+    assert body["result"]["risk_band"] in ("Low", "Medium", "High", "Extreme")
+    assert body["result"]["latency_ms"] > 0
+
+
+def test_non_trigger_event_type_is_stored_but_not_scored(client, customers):
+    customer = customers[3]
+    client.post("/api/v1/score", json={"customer": _to_json(customer)})
+
+    response = client.post(
+        f"/api/v1/events/{customer['customer_id']}",
+        json={"event_ts": "2025-06-01T12:00:00Z", "event_type": "salary_credit", "amount": 8000},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["reason"] == "no_trigger"
+    assert body["result"] is None
+    assert len(client.events_repo.history(customer["customer_id"])) == 1
+
+
+def test_event_below_trigger_min_amount_via_the_real_api(client, customers):
+    customer = customers[4]
+    client.post("/api/v1/score", json={"customer": _to_json(customer)})
+
+    response = client.post(
+        f"/api/v1/events/{customer['customer_id']}",
+        json={"event_ts": "2025-06-01T12:00:00Z", "event_type": "cash_deposit", "amount": 10},
+    )
+    assert response.json()["reason"] == "no_trigger"
+
+
+def test_malformed_event_payload_is_rejected(client, customers):
+    customer_id = customers[0]["customer_id"]
+    response = client.post(
+        f"/api/v1/events/{customer_id}",
+        json={"event_ts": "2025-06-01T12:00:00Z", "event_type": "missed_payment", "amount": 1, "bogus": True},
+    )
+    assert response.status_code == 422
 
 
 # --------------------------------------------------------------------------

@@ -115,7 +115,7 @@ All data is synthetic. No real person, account or entity is represented.
 | `amount` | float64 | event | 0.0 | Signed amount; negative is money out. |
 | `counterparty_country` | str | event | 0.0 | Counterparty jurisdiction. |
 | `channel` | str | event | 0.0 | card / atm / branch / online / swift. |
-| `is_trigger_event` | int64 | event | 0.0 | Event should force an immediate re-score under the current policy. |
+| `is_trigger_event` | int64 | event | 0.0 | 1 if event_type is a tracked trigger type and happened within 30 days of the snapshot. Derived (crr.features.events), not caller input. |
 
 ## `outcomes`
 

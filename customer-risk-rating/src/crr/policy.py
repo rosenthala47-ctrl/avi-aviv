@@ -106,6 +106,39 @@ class Rule:
 
 
 @dataclass(frozen=True)
+class RescoringTrigger:
+    """One event type that should provoke a re-score (phase 6, requirement 4a)."""
+
+    event_type: str
+    debounce_minutes: int
+    min_amount: float | None = None
+
+    def matches(self, event_type: str, amount: float | None) -> bool:
+        if event_type != self.event_type:
+            return False
+        return self.min_amount is None or (amount is not None and abs(amount) >= self.min_amount)
+
+
+@dataclass(frozen=True)
+class RescoringConfig:
+    """The ``rescoring:`` policy section, typed and validated.
+
+    Parsed the same way ``rules``/``review`` are: a malformed trigger fails at
+    policy load, not silently at the first event that should have used it.
+    """
+
+    triggers: tuple[RescoringTrigger, ...]
+    max_score_age_days: int
+    notify_on_band_change_only: bool
+
+    def trigger_for(self, event_type: str) -> RescoringTrigger | None:
+        for trigger in self.triggers:
+            if trigger.event_type == event_type:
+                return trigger
+        return None
+
+
+@dataclass(frozen=True)
 class RiskPolicy:
     version: int
     bands: BandThresholds
@@ -113,7 +146,9 @@ class RiskPolicy:
     explainability: ExplainabilityConfig
     rules: tuple[Rule, ...]
     review_bands: frozenset[str] = frozenset()
-    rescoring: dict[str, Any] = field(default_factory=dict)
+    rescoring: RescoringConfig = field(
+        default_factory=lambda: RescoringConfig(triggers=(), max_score_age_days=365, notify_on_band_change_only=True)
+    )
     feedback: dict[str, Any] = field(default_factory=dict)
     source_path: str = ""
     source_mtime: float = 0.0
@@ -201,6 +236,29 @@ def _parse(payload: dict[str, Any], path: Path, mtime: float, content_hash: str)
     if unknown:
         raise PolicyError(f"'review.require_for_bands' has unknown band(s): {sorted(unknown)}")
 
+    rescoring_raw = payload.get("rescoring", {})
+    triggers: list[RescoringTrigger] = []
+    for trigger_raw in rescoring_raw.get("triggers", []):
+        event_type = _require(trigger_raw, "event_type", "rescoring trigger")
+        debounce = trigger_raw.get("debounce_minutes", 0)
+        if not isinstance(debounce, (int, float)) or debounce < 0:
+            raise PolicyError(f"rescoring trigger {event_type!r} has invalid debounce_minutes: {debounce!r}")
+        min_amount = trigger_raw.get("min_amount")
+        if min_amount is not None and (not isinstance(min_amount, (int, float)) or min_amount < 0):
+            raise PolicyError(f"rescoring trigger {event_type!r} has invalid min_amount: {min_amount!r}")
+        triggers.append(RescoringTrigger(event_type=event_type, debounce_minutes=int(debounce), min_amount=min_amount))
+    duplicate_types = {t.event_type for t in triggers if sum(1 for x in triggers if x.event_type == t.event_type) > 1}
+    if duplicate_types:
+        raise PolicyError(f"'rescoring.triggers' has more than one entry for: {sorted(duplicate_types)}")
+    max_score_age_days = int(rescoring_raw.get("max_score_age_days", 365))
+    if max_score_age_days <= 0:
+        raise PolicyError(f"'rescoring.max_score_age_days' must be positive, got {max_score_age_days}")
+    rescoring = RescoringConfig(
+        triggers=tuple(triggers),
+        max_score_age_days=max_score_age_days,
+        notify_on_band_change_only=bool(rescoring_raw.get("notify_on_band_change_only", True)),
+    )
+
     return RiskPolicy(
         version=int(payload.get("version", 0)),
         bands=bands,
@@ -208,7 +266,7 @@ def _parse(payload: dict[str, Any], path: Path, mtime: float, content_hash: str)
         explainability=explainability,
         rules=tuple(rules),
         review_bands=review_bands,
-        rescoring=payload.get("rescoring", {}),
+        rescoring=rescoring,
         feedback=payload.get("feedback", {}),
         source_path=str(path),
         source_mtime=mtime,

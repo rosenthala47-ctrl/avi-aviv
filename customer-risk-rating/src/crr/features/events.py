@@ -42,6 +42,31 @@ TYPE_WINDOW = 90
 _NIGHT_START_HOUR = 22
 _NIGHT_END_HOUR = 6
 
+#: An event counts as a "trigger" for the recency/count trigger features if it is
+#: one of the tracked types and happened within this many days of the snapshot.
+#: Matches ``crr.data.synthetic``'s generation rule exactly (verified by
+#: ``scripts/verify_rescoring.py`` replaying the generator's own output), which is
+#: what makes this safe to derive here rather than trust as caller input: a client
+#: has no reliable way to know this rule, so treating it as raw input data would be
+#: exactly the training/serving skew this module's docstring exists to prevent.
+_TRIGGER_RECENCY_DAYS = 30
+
+
+def _to_naive(series: pd.Series) -> pd.Series:
+    """Parse a datetime column and drop any timezone, converting to UTC first.
+
+    ``snapshot_date`` is a pure calendar date and is never tz-aware, but
+    ``event_ts`` is a caller-supplied instant and the API's Pydantic schema
+    (``dt.datetime``) accepts either a naive or a tz-aware ISO-8601 string —
+    exactly what a normal client sends. Subtracting a tz-aware column from a
+    naive one raises in pandas, so both sides of every comparison here are
+    normalized through this one function rather than assuming naive input.
+    """
+    parsed = pd.to_datetime(series)
+    if getattr(parsed.dt, "tz", None) is not None:
+        parsed = parsed.dt.tz_convert("UTC").dt.tz_localize(None)
+    return parsed
+
 
 def _within_window(events: pd.DataFrame, window_days: int) -> pd.DataFrame:
     """Events at or before the snapshot and no older than ``window_days``.
@@ -65,12 +90,19 @@ def _prepare(events: pd.DataFrame, index: pd.DataFrame) -> pd.DataFrame:
     if merged.empty:
         return merged.assign(age_days=pd.Series(dtype="int64"))
 
-    event_date = pd.to_datetime(merged["event_ts"]).dt.normalize()
-    as_of_date = pd.to_datetime(merged["as_of"]).dt.normalize()
+    event_ts_naive = _to_naive(merged["event_ts"])
+    event_date = event_ts_naive.dt.normalize()
+    as_of_date = _to_naive(merged["as_of"]).dt.normalize()
     merged["age_days"] = (as_of_date - event_date).dt.days
-    merged["hour"] = pd.to_datetime(merged["event_ts"]).dt.hour
+    merged["hour"] = event_ts_naive.dt.hour
     merged["is_night"] = ((merged["hour"] >= _NIGHT_START_HOUR) | (merged["hour"] < _NIGHT_END_HOUR)).astype(float)
     merged["is_foreign"] = (merged["counterparty_country"] != merged["home_country"]).astype(float)
+    # Derived, not trusted from the caller: see _TRIGGER_RECENCY_DAYS above. Any
+    # incoming is_trigger_event column (e.g. EventPayload's, kept only for request
+    # shape compatibility) is intentionally overwritten here.
+    merged["is_trigger_event"] = (
+        merged["event_type"].isin(TRACKED_EVENT_TYPES) & merged["age_days"].between(0, _TRIGGER_RECENCY_DAYS)
+    ).astype(int)
     merged["abs_amount"] = merged["amount"].abs()
     merged["inflow"] = merged["amount"].clip(lower=0)
     merged["outflow"] = (-merged["amount"]).clip(lower=0)

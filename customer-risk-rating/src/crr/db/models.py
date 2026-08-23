@@ -64,6 +64,32 @@ class ScoreRecord(Base):
     )
 
 
+class EventRecord(Base):
+    """One transaction/lifecycle event received for a customer. Append-only.
+
+    This is what makes phase 6's "recompute only the features the event
+    invalidates" claim literal rather than aspirational: the re-scoring engine
+    rebuilds the event-derived feature block from this log plus the newly
+    arrived event, while the customer's static profile is served from the last
+    stored ``ScoreRecord.customer_snapshot`` — the caller pushing one event
+    never needs to resend the other ~65 profile fields.
+    """
+
+    __tablename__ = "event_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    customer_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    event_ts: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    counterparty_country: Mapped[str] = mapped_column(String(3), nullable=False, default="IL")
+    channel: Mapped[str] = mapped_column(String(16), nullable=False, default="online")
+    received_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (Index("ix_event_customer_time", "customer_id", "event_ts"),)
+
+
 class JobRecord(Base):
     """A batch-scoring job."""
 

@@ -1,4 +1,4 @@
-.PHONY: help install data data-large validate train explain serve benchmark rules simulate-policy test lint clean
+.PHONY: help install data data-large validate train explain serve benchmark rules simulate-policy rescoring test lint clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS=":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -35,6 +35,9 @@ rules:  ## verify the phase 5 rule-engine exit criteria (hot reload, audit, roll
 
 simulate-policy:  ## simulate the example proposed policy against fresh demo traffic
 	python scripts/simulate_policy.py --proposed config/risk_policy_proposed.example.yaml
+
+rescoring:  ## verify the phase 6 re-scoring exit criteria (trigger-to-score p95, false-alert rate)
+	python scripts/verify_rescoring.py
 
 test:  ## run the test suite
 	pytest

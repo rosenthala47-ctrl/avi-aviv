@@ -17,10 +17,10 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from crr.db.models import Base, JobRecord, ScoreRecord
+from crr.db.models import Base, EventRecord, JobRecord, ScoreRecord
 
 
 @dataclass
@@ -70,12 +70,32 @@ class ScoreRepository(Protocol):
     def history(self, customer_id: str, limit: int = 100) -> list[StoredScore]: ...
     def find_by_input_hash(self, customer_id: str, input_hash: str) -> StoredScore | None: ...
     def recent(self, since: dt.datetime, limit: int = 10_000) -> list[StoredScore]: ...
+    def stale_customers(self, older_than: dt.datetime, limit: int = 10_000) -> list[str]: ...
 
 
 class JobRepository(Protocol):
     def create(self, job: StoredJob) -> None: ...
     def get(self, job_id: str) -> StoredJob | None: ...
     def update(self, job: StoredJob) -> None: ...
+
+
+@dataclass
+class StoredEvent:
+    """One transaction/lifecycle event received for a customer (storage-agnostic)."""
+
+    event_id: str
+    customer_id: str
+    event_ts: dt.datetime
+    event_type: str
+    amount: float
+    received_at: dt.datetime
+    counterparty_country: str = "IL"
+    channel: str = "online"
+
+
+class EventRepository(Protocol):
+    def append(self, event: StoredEvent) -> None: ...
+    def history(self, customer_id: str, limit: int = 10_000) -> list[StoredEvent]: ...
 
 
 # --------------------------------------------------------------------------
@@ -108,6 +128,18 @@ class InMemoryScoreRepository:
         all_scores = (score for scores in self._scores.values() for score in scores if score.scored_at >= since)
         return sorted(all_scores, key=lambda s: s.scored_at, reverse=True)[:limit]
 
+    def stale_customers(self, older_than: dt.datetime, limit: int = 10_000) -> list[str]:
+        """Customers whose LATEST score predates ``older_than`` — the
+        ``max_score_age_days`` staleness sweep: "re-score anyway, whatever the
+        events say." A customer never scored is not "stale"; they simply have
+        not entered the book yet, so they are excluded rather than flagged."""
+        stale = [
+            customer_id
+            for customer_id, scores in self._scores.items()
+            if scores and max(s.scored_at for s in scores) < older_than
+        ]
+        return sorted(stale)[:limit]
+
 
 class InMemoryJobRepository:
     def __init__(self) -> None:
@@ -121,6 +153,18 @@ class InMemoryJobRepository:
 
     def update(self, job: StoredJob) -> None:
         self._jobs[job.job_id] = job
+
+
+class InMemoryEventRepository:
+    def __init__(self) -> None:
+        self._events: dict[str, list[StoredEvent]] = {}
+
+    def append(self, event: StoredEvent) -> None:
+        self._events.setdefault(event.customer_id, []).append(event)
+
+    def history(self, customer_id: str, limit: int = 10_000) -> list[StoredEvent]:
+        events = sorted(self._events.get(customer_id, []), key=lambda e: e.event_ts)
+        return events[-limit:]
 
 
 # --------------------------------------------------------------------------
@@ -252,6 +296,54 @@ class SqlAlchemyScoreRepository:
                 .order_by(ScoreRecord.scored_at.desc()).limit(limit)
             ).all()
             return [_to_stored(r) for r in records]
+
+    def stale_customers(self, older_than: dt.datetime, limit: int = 10_000) -> list[str]:
+        with self._session_factory() as session:
+            latest_per_customer = (
+                select(ScoreRecord.customer_id, func.max(ScoreRecord.scored_at).label("latest"))
+                .group_by(ScoreRecord.customer_id)
+                .having(func.max(ScoreRecord.scored_at) < older_than)
+                .order_by("latest")
+                .limit(limit)
+            )
+            return [row[0] for row in session.execute(latest_per_customer).all()]
+
+
+class SqlAlchemyEventRepository:
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
+
+    def append(self, event: StoredEvent) -> None:
+        with self._session_factory() as session:
+            session.add(
+                EventRecord(
+                    event_id=event.event_id,
+                    customer_id=event.customer_id,
+                    event_ts=event.event_ts,
+                    event_type=event.event_type,
+                    amount=event.amount,
+                    counterparty_country=event.counterparty_country,
+                    channel=event.channel,
+                    received_at=event.received_at,
+                )
+            )
+            session.commit()
+
+    def history(self, customer_id: str, limit: int = 10_000) -> list[StoredEvent]:
+        with self._session_factory() as session:
+            records = session.scalars(
+                select(EventRecord).where(EventRecord.customer_id == customer_id)
+                .order_by(EventRecord.event_ts.desc()).limit(limit)
+            ).all()
+            events = [
+                StoredEvent(
+                    event_id=r.event_id, customer_id=r.customer_id, event_ts=r.event_ts,
+                    event_type=r.event_type, amount=r.amount, received_at=r.received_at,
+                    counterparty_country=r.counterparty_country, channel=r.channel,
+                )
+                for r in records
+            ]
+            return list(reversed(events))  # chronological, matching the in-memory repository
 
 
 class SqlAlchemyJobRepository:

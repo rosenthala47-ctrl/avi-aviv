@@ -9,6 +9,7 @@
     CRM, LOS)  ────▶│  POST /api/v1/score          (sync, <150ms)  │
                     │  POST /api/v1/batch-score    (async, job id) │
                     │  GET  /api/v1/explain/{id}   (stored SHAP)   │
+                    │  POST /api/v1/events/{id}    (re-score, <5s) │
                     └───────┬──────────────────────────────┬───────┘
                             │                              │
                   ┌─────────▼─────────┐          ┌─────────▼─────────┐
@@ -37,10 +38,11 @@
         ┌──────────────────────┼──────────────────────┐
         ▼                      ▼                      ▼
 ┌───────────────┐    ┌──────────────────┐   ┌──────────────────┐
-│  PostgreSQL   │    │      Redis       │   │  event consumer  │
-│  customers    │    │  feature cache   │   │  real-time       │
-│  score history│    │  policy cache    │   │  re-scoring      │
-│  audit log    │    │  idempotency     │   │  (crr.pipelines) │
+│  PostgreSQL   │    │      Redis       │   │ RescoringEngine  │
+│  customers    │    │  feature cache   │   │  trigger match,  │
+│  score history│    │  policy cache    │   │  debounce, band- │
+│  event log    │    │  idempotency,    │   │  change notify   │
+│  audit log    │    │  debounce TTL    │   │  (crr.pipelines) │
 └───────────────┘    └──────────────────┘   └──────────────────┘
 ```
 
@@ -191,6 +193,55 @@ review threshold — is a pure function of policy content. Replaying it against
 stored probabilities and the stored customer snapshot is exact, and cheap enough
 to run months of history in under a second; only a change to the model itself
 would need re-inference, and that is a retrain, not a policy edit.
+
+## Real-time re-scoring: three thresholds for three concerns
+
+Event-driven re-scoring conflates three questions that need separate answers:
+does this event get stored, does it cause a recompute, and does it interrupt a
+human. `RescoringEngine` (`crr/pipelines/rescoring.py`) keeps them separate —
+every event is stored regardless; a recompute happens only for a matched,
+non-debounced trigger; a notification fires only when the published band
+actually moves. Conflating any two produces either missed signal or alert
+fatigue, and a system that pages someone twelve times an hour for twelve "Low"
+results trains its own operators to ignore it.
+
+**Recomputing without resending the profile.** A caller pushing one event does
+not resend the customer's ~65-field profile. The engine rebuilds the scoring
+input from the *stored snapshot* of the last score (`StoredScore.customer_snapshot`,
+which phase 5 already needed for policy simulation) plus the *full event log*
+— the same "aggregate from raw events, never accept pre-aggregated columns"
+principle the feature pipeline uses for training, applied to the live path.
+
+**The snapshot's own as-of date has to move.** `customer_snapshot` carries a
+`snapshot_date` fixed at the time the *profile* was true, which is not when a
+re-score is happening. The feature pipeline's leakage guard drops any event
+dated after its `as_of` boundary as "future" — necessary for training, where
+`as_of` is always genuinely "now" for that record. It is actively wrong for
+re-scoring, where the event that triggered the recompute is, by definition,
+dated after the stored `as_of`. `RescoringEngine` advances `snapshot_date` to
+the current re-score time before handing the snapshot back to the same
+pipeline code training uses; nothing else about the profile changes, since
+`snapshot_date` is dropped before modelling and used for nothing but anchoring
+that one boundary. Getting this wrong doesn't crash anything — the recompute
+still runs and returns a plausible score — which is exactly why it survived
+until a test explicitly compared the score before and after a post-snapshot
+event and found no difference.
+
+**Debounce is a real-time-only concern, deliberately.** The debounce cache
+(the same TTL `KeyValueStore` behind the phase-4 idempotency and hot-score
+caches) keys on wall-clock time, not on the timestamp carried by any
+particular event. That is the correct choice for what debounce is actually
+protecting — compute budget against a real burst of live events — and the
+deliberate cost is that a *replay* of historical events at processing speed
+can under-count triggers relative to how they would have landed in real time.
+
+**Rules stay scoped to the static profile.** The rule engine (phase 5)
+evaluates the raw customer record a CRM supplies, never the event-derived
+aggregates this pipeline recomputes. A compliance rule reacts to a refreshed
+profile, not a transaction event streamed through this endpoint — a
+deliberate layering, not an oversight, and the reason a single triggered
+event moves the model's score but essentially never moves a rule-forced band
+floor.
 
 ## Explanations: SHAP into reason codes
 

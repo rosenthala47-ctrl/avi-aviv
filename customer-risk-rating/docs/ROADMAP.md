@@ -5,8 +5,8 @@ feeling — because "the model seems good" is how risk systems get deployed and
 then quietly fail. Phases 1-4 produce a system you could demo; phases 5-8 produce
 one a bank's model-risk committee would actually sign off.
 
-Phases 1-5 are **done** (see `src/crr/data/`, `src/crr/features/`, `src/crr/models/`,
-`src/crr/api/`, `src/crr/rules/`, `src/crr/policy.py`).
+Phases 1-6 are **done** (see `src/crr/data/`, `src/crr/features/`, `src/crr/models/`,
+`src/crr/api/`, `src/crr/rules/`, `src/crr/policy.py`, `src/crr/pipelines/`).
 
 ---
 
@@ -432,20 +432,167 @@ touching code.
 
 ---
 
-## Phase 6 — Real-time re-scoring
+## Phase 6 — Real-time re-scoring ✅
 
 **Goal.** Requirement 4a: the score moves when something happens, not once a year.
 
-**Work.**
-- Consume the event stream; evaluate `rescoring.triggers` from the policy file.
-- Debounce and deduplicate — a customer making twelve card payments in an hour
-  must not trigger twelve re-scores.
-- Recompute only the features the event actually invalidates.
-- Emit a notification only when the **band** changes, not on every score wobble.
-  Alert fatigue kills these systems faster than bad models do.
+**Delivered.**
+- **`EventRepository`** (`crr/api/repository.py`) — an append-only log
+  (`EventRecord` in `crr/db/models.py`, indexed on `customer_id, event_ts`),
+  in-memory and SQLAlchemy implementations, same Protocol-plus-two-backends
+  pattern as every other repository here. Every event is stored regardless of
+  whether it matches a trigger — a non-trigger event today is still part of
+  the trailing window the *next* triggered re-score (or the staleness sweep)
+  needs to see.
+- **`RescoringEngine`** (`crr/pipelines/rescoring.py`) — the orchestrator.
+  `ingest_event()` stores the event, looks up `rescoring.triggers` from the
+  **live** policy (a retuned debounce window or a new trigger takes effect on
+  the next event, no deploy — the same property the phase 5 rule engine has),
+  and re-scores only if the event type matches a trigger, clears `min_amount`,
+  and is not debounced. A customer with no score on record yet cannot be
+  re-scored this way (`reason="not_yet_scored"`) — there is no stored snapshot
+  to rebuild a profile from; their first score is always a normal
+  `POST /score` with a full payload.
+- **Recompute only what the event invalidates.** A caller pushing one event
+  never resends the customer's ~65-field profile: the engine rebuilds the
+  scoring input from the **stored snapshot** of the customer's last score
+  (`StoredScore.customer_snapshot`, added in phase 5) plus the **full event
+  log**, and only the event-derived feature block is naturally sensitive to
+  the new event — the static profile block is never recomputed from a stale
+  or re-supplied payload.
+- **Debounce** via the phase-4 `KeyValueStore` TTL cache, keyed by
+  `(customer_id, event_type)` — a customer making twelve card payments in an
+  hour triggers at most one re-score per debounce window, per trigger type.
+  `debounce_minutes: 0` (e.g. `missed_payment` in the shipped policy) means
+  "always fires" — every matching event re-scores, deliberately, because a
+  missed payment is exactly the kind of event where waiting out a debounce
+  window is itself the risk.
+- **Notification only on an actual band change** (`crr/pipelines/notifications.py`).
+  A re-score happens on every matched, non-debounced event; a *notification*
+  fires only when the published band actually moved — scoring a customer
+  twelve times in an hour and getting "Low" back twelve times is not a signal
+  worth interrupting anyone for. `NotificationSink` behind an interface, same
+  reason as everywhere else in this project: in-memory (tests), structured
+  JSON log (the zero-infrastructure production default, mirroring
+  `crr.api.audit`), and a fan-out sink for using both at once.
+- **Staleness sweep** (`RescoringEngine.sweep_stale`) — the "whatever the
+  events say" fallback from `rescoring.max_score_age_days`: catches customers
+  whose accumulated *non-trigger* events (small purchases, salary credits)
+  should still eventually move the score even though none of them
+  individually crossed a trigger threshold.
+- **`POST /api/v1/events/{customer_id}`** — the HTTP surface, wired through
+  `crr/api/dependencies.py`/`crr/api/app.py` following the exact pattern the
+  score/job/cache backends already use. Always returns the internal view
+  (unlike `/score`/`/explain`, there is no customer-facing caller of a
+  machine-to-machine event feed to filter for). Returns 200 whether or not
+  the event triggered anything — a non-trigger or debounced event is not an
+  error, it is a stored fact with no side effect yet.
+- **`scripts/verify_rescoring.py`** — replays a fresh synthetic population
+  against the real trained models. Since the generator's point-in-time
+  discipline means no event is ever dated after its customer's snapshot,
+  the script rolls each customer's snapshot back by `--replay-days`, scores
+  them from only the events before that point, then replays the remaining
+  events one at a time through the real engine using each event's own
+  timestamp as the simulated "now" — the same trajectory a real customer
+  follows.
 
-**Exit criterion.** Trigger-to-updated-score under 5 seconds at p95, replayable
-against the generated event stream, with a measured false-alert rate.
+**Exit criterion — met, measured by `scripts/verify_rescoring.py --customers 600`:**
+
+| criterion | measured |
+|---|---|
+| trigger-to-updated-score p95 < 5s | **p50 = 113ms, p95 = 126ms, max = 129ms** (n = 33 triggered re-scores) |
+| false-alert rate, measured | **97.0% of 33** triggered re-scores did not cross a band boundary (1 of 33 did) — see below for why this is a real, explained finding, not a broken engine |
+
+The false-alert number needs its own paragraph to be honest rather than
+alarming. "False alert" here means *triggered re-score, band unchanged* — a
+recompute that ran for nothing a downstream consumer would see. It does
+**not** mean a wrongly-fired notification: notification already gates on the
+band changing, so it is zero false positives by construction, always. At
+n = 33 in the default replay, zero of the recomputes were no-ops
+(`|Δrisk_score|` mean 1.91, median 1.23, on a 0–100 scale with 25-point-wide
+bands — every triggered event genuinely moved the model) — nearly all of them
+simply did not, on their own, move the score far enough to cross a 25-point
+boundary; one did. That is bands being coarse relative to one event's
+marginal effect, which is arguably the *right* conservative behaviour for a
+compliance-facing system, not a defect — and the one genuine crossing in this
+run is direct evidence the mechanism is live, not merely inert-but-plausible.
+The script prints both the rate and the delta
+statistics together for exactly this reason — a high false-alert rate next
+to near-zero deltas would mean something different (a dead recompute) than
+a high rate next to real, non-trivial deltas (coarse bands).
+
+### Three real bugs the work surfaced, worth keeping on record
+
+**The core mechanism was a no-op for the realistic case, caught before
+shipping.** `RescoringEngine._rescore` reused the stored score's
+`customer_snapshot` unchanged — including its `snapshot_date`, which is when
+the ~65 profile fields were true, not when the re-score is happening. The
+feature pipeline's leakage guard treats any event dated after `as_of`
+(`crr.features.events._within_window`) as being in the future and drops it.
+Since a re-score is, by definition, triggered by something that just
+happened — i.e. dated *after* the original snapshot — every event that could
+ever legitimately trigger a re-score was silently invisible to the recompute.
+The engine still returned `reason="triggered", rescored=True` and a
+plausible-looking score; it was simply the *same* score, every time,
+regardless of what had happened. Caught by explicitly testing an event dated
+five days after the snapshot and asserting the score changed — it didn't,
+until fixed. Fixed by advancing `snapshot_date` to `now` before handing the
+snapshot back to the pipeline, changing only the event-leakage boundary:
+`snapshot_date` is dropped before modelling (`crr.features.pipeline.DROP_COLUMNS`)
+and used nowhere else, so nothing else about the profile is affected. Locked
+in by `test_event_after_the_original_snapshot_date_moves_the_score` in
+`tests/test_rescoring.py`.
+
+**A model feature was being trusted from caller input instead of derived.**
+`is_trigger_event` (`trigger_event_count_Xd`, `days_since_last_trigger_event`)
+looked like ordinary event data — `EventPayload.is_trigger_event`, caller-set,
+default 0 — but the synthetic generator actually computes it as
+`event_type in {tracked types} and age_days <= 30`, a rule no real caller
+could know. Trusting it as input is exactly the training/serving skew
+`crr.features.events`'s own module docstring says the whole file exists to
+prevent. It also would have raised `KeyError: 'is_trigger_event'` the first
+time a re-scored event actually landed inside a valid trailing window — every
+event `RescoringEngine` builds omits the field entirely, and nothing before
+phase 6 had ever pushed an event through this path with a real, in-window
+timestamp to notice. Fixed by deriving the column inside `_prepare()` instead
+of reading it from the input; verified byte-for-byte identical to the
+generator's own values across all 537,609 rows of the real generated event
+log before trusting it as behaviour-preserving for training.
+
+**A timezone-aware timestamp crashed feature building.** `snapshot_date` is
+always naive; `event_ts` is typed `dt.datetime` with no timezone constraint,
+so a perfectly normal ISO-8601 client timestamp with a `Z`/offset suffix
+raised `TypeError: Cannot subtract tz-naive and tz-aware datetime-like
+objects` inside `crr.features.events._prepare`. Reachable through the plain
+`POST /score` endpoint, not just re-scoring — invisible until now because
+every synthetic timestamp in this project has always been naive. Fixed with
+one normalising helper applied to both sides of the subtraction.
+
+### Two things worth stating plainly rather than glossing over
+
+**Rules do not see live events; only the model does.** The rule engine
+(phase 5) evaluates the *raw customer record* — `large_cash_deposits_90d`,
+`sanctions_screen_hits`, and the rest of the static profile fields a CRM
+supplies — never the event-derived aggregates the ML pipeline recomputes
+live. A compliance rule like `SANCTIONS_MATCH` reacts to a refreshed profile
+(a new `POST /score`), not to a transaction event streamed through this
+endpoint. This is a deliberate layering, consistent with phase 5's own
+design (rules are written against the input contract's vocabulary, not
+pipeline internals) — but it is also *why* the false-alert measurement above
+only ever moves through the model, never through a rule floor, and it is
+worth a future risk-manager conversation about which compliance rules should
+eventually read live event aggregates too.
+
+**The debounce cache's clock is real wall time, not simulated time.**
+`KeyValueStore`'s TTL (shared with the idempotency and hot-score caches from
+phase 4) is `time.monotonic()`, never the `now` a caller passes to
+`ingest_event`. In production that is correct — debounce exists to protect
+real compute budget from a real burst of events. It means a *fast replay* of
+widely-spaced historical timestamps (`verify_rescoring.py`, or a test that
+fires two same-type events back to back) can under-count triggered re-scores
+relative to what would happen if the events actually arrived that far apart
+in wall time. Documented rather than engineered around: it only ever makes a
+verification run more conservative, never less.
 
 ---
 

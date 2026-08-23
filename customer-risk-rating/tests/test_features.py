@@ -146,6 +146,69 @@ def test_window_boundaries_are_exclusive_at_the_far_end(dataset):
     assert features["event_count_90d"].iloc[0] == 2
 
 
+def test_is_trigger_event_is_derived_not_trusted(dataset):
+    """A caller-supplied is_trigger_event is ignored; the real value is derived
+    from event_type and recency. Found while building phase 6's re-scoring
+    engine: nothing upstream of the API's /score endpoint can know the
+    (event_type in the tracked set) and (age_days <= 30) rule, so trusting it
+    as input would silently desync serving from what the model was trained on
+    — the exact skew crr.features.events exists to prevent (see its module
+    docstring). A fresh caller-built event, like the re-scoring engine sends,
+    never carries this column at all; both cases are covered here."""
+    customer = dataset.customers.iloc[0]
+    as_of = pd.to_datetime(customer["snapshot_date"])
+    index = pd.DataFrame({"customer_id": [customer["customer_id"]], "as_of": [as_of], "home_country": ["IL"]})
+    events = pd.DataFrame(
+        {
+            "event_id": ["a", "b", "c"],
+            "customer_id": [customer["customer_id"]] * 3,
+            "event_ts": [as_of - pd.Timedelta(days=10), as_of - pd.Timedelta(days=10), as_of - pd.Timedelta(days=45)],
+            # a: tracked type, recent -> should derive 1, though the caller says 0.
+            # b: untracked type, recent -> should derive 0, though the caller says 1.
+            # c: tracked type, but older than the 30-day trigger window -> 0.
+            "event_type": ["missed_payment", "card_purchase", "missed_payment"],
+            "amount": [-50.0, -50.0, -50.0],
+            "counterparty_country": ["IL", "IL", "IL"],
+            "channel": ["online", "online", "online"],
+            "is_trigger_event": [0, 1, 1],
+        }
+    )
+    features = build_event_features(events, index)
+    assert features["trigger_event_count_90d"].iloc[0] == 1, "only event 'a' should count as a trigger"
+
+    # A frame with no is_trigger_event column at all (what the re-scoring
+    # engine's replayed event history looks like) must produce the identical
+    # result -- the column is never required as input.
+    without_column = build_event_features(events.drop(columns=["is_trigger_event"]), index)
+    pd.testing.assert_frame_equal(features, without_column)
+
+
+def test_event_ts_can_be_timezone_aware(dataset):
+    """A caller may send event_ts as a tz-aware ISO-8601 timestamp (the normal
+    shape for a real client); snapshot_date is always tz-naive. Found the same
+    way as the above: build_event_features used to raise
+    'Cannot subtract tz-naive and tz-aware datetime-like objects' the first
+    time anything fed it a tz-aware event_ts, which nothing before phase 6
+    ever had (the synthetic generator's timestamps are naive)."""
+    customer = dataset.customers.iloc[0]
+    as_of = pd.to_datetime(customer["snapshot_date"])
+    index = pd.DataFrame({"customer_id": [customer["customer_id"]], "as_of": [as_of], "home_country": ["IL"]})
+    naive = pd.DataFrame(
+        {
+            "event_id": ["a"], "customer_id": [customer["customer_id"]],
+            "event_ts": [as_of - pd.Timedelta(days=1, hours=3)],
+            "event_type": ["cash_deposit"], "amount": [1000.0],
+            "counterparty_country": ["IL"], "channel": ["branch"],
+        }
+    )
+    aware = naive.copy()
+    aware["event_ts"] = pd.to_datetime(aware["event_ts"]).dt.tz_localize("UTC")
+
+    naive_features = build_event_features(naive, index)
+    aware_features = build_event_features(aware, index)
+    pd.testing.assert_frame_equal(naive_features, aware_features)
+
+
 def test_customers_without_events_still_get_a_row(fitted, dataset):
     _, X = fitted
     assert len(X) == len(dataset.customers)

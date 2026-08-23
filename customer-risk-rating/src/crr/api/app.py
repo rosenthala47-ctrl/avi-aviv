@@ -15,10 +15,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from crr.api.audit import configure_audit_logging
-from crr.api.dependencies import build_backends, load_service
-from crr.api.routers import batch, explain, health, score
+from crr.api.dependencies import build_backends, build_notifications, load_service
+from crr.api.routers import batch, events, explain, health, score
 from crr.api.scoring import ScoringService
 from crr.api.settings import Settings
+from crr.pipelines.notifications import configure_notification_logging
+from crr.pipelines.rescoring import RescoringEngine
 
 logger = logging.getLogger("crr.api")
 
@@ -46,18 +48,26 @@ def create_app(
     scores=None,
     jobs=None,
     cache=None,
+    events_repo=None,
+    notifications=None,
 ) -> FastAPI:
     settings = settings or Settings()
     configure_audit_logging()
+    configure_notification_logging()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.settings = settings
         app.state.service = service or load_service(settings)
-        default_scores, default_jobs, default_cache = build_backends(settings)
+        default_scores, default_jobs, default_cache, default_events = build_backends(settings)
         app.state.scores = scores or default_scores
         app.state.jobs = jobs or default_jobs
         app.state.cache = cache or default_cache
+        app.state.events = events_repo or default_events
+        app.state.notifications = notifications or build_notifications(settings)
+        app.state.rescoring_engine = RescoringEngine(
+            app.state.service, app.state.events, app.state.scores, app.state.cache, app.state.notifications
+        )
         _tune_gc_for_serving()
         logger.info("CRR API ready: models=%s policy_v=%s",
                     sorted(app.state.service.bundle.explainers), app.state.service.policy.version)
@@ -75,6 +85,6 @@ def create_app(
         logger.exception("unhandled error on %s", request.url.path)
         return JSONResponse(status_code=500, content={"detail": "internal error"})
 
-    for module in (health, score, batch, explain):
+    for module in (health, score, batch, explain, events):
         app.include_router(module.router)
     return app
