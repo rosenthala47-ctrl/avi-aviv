@@ -40,17 +40,33 @@ SYNONYMS: dict[str, str] = {
 }
 
 
+_MULTI_UNDERSCORE = re.compile(r"_+")
+
+
+def _normalise_value(value: object) -> object:
+    """Normalise one category value. Null in, null out.
+
+    A single pass in Python rather than five chained pandas ``.str`` calls: the
+    output is identical, but on the one-row frames the serving path builds, five
+    pandas passes per column dominated the request. Batch callers see the same
+    result at no extra cost.
+    """
+    if pd.isna(value):
+        return value
+    text = str(value).strip().lower()
+    text = _WHITESPACE.sub("_", text)
+    text = _NON_WORD.sub("", text)
+    text = _MULTI_UNDERSCORE.sub("_", text).strip("_")
+    return SYNONYMS.get(text, text)
+
+
 def normalise_category(series: pd.Series) -> pd.Series:
     """Case-fold, collapse separators and apply the synonym map.
 
     ``"  Self-Employed "`` and ``"SELF_EMPLOYED"`` both become ``"self_employed"``.
     Nulls are preserved as nulls; deciding what to do with them is the caller's job.
     """
-    text = series.astype("string").str.strip().str.lower()
-    text = text.map(lambda v: _WHITESPACE.sub("_", v) if pd.notna(v) else v)
-    text = text.map(lambda v: _NON_WORD.sub("", v) if pd.notna(v) else v)
-    text = text.str.replace(r"_+", "_", regex=True).str.strip("_")
-    return text.map(lambda v: SYNONYMS.get(v, v) if pd.notna(v) else v)
+    return series.map(_normalise_value)
 
 
 class CategoricalEncoder:

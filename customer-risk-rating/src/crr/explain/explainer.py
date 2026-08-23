@@ -185,29 +185,40 @@ class Explainer:
     # ---- per customer --------------------------------------------------------
 
     def explain_row(
-        self, customer_id: str, X_row: pd.DataFrame, *, audience: Audience = "internal"
+        self, customer_id: str, X_row: pd.DataFrame, *, audience: Audience = "internal",
+        include_features: bool | None = None,
     ) -> Explanation:
-        """Explain a single customer. ``X_row`` is a one-row feature frame."""
+        """Explain a single customer. ``X_row`` is a one-row feature frame.
+
+        ``include_features`` controls whether the per-feature breakdown is built.
+        It defaults to the audience (internal gets features), but a caller that
+        only needs the ranked reason codes — the scoring service does — passes
+        ``False`` to skip constructing objects it will discard, which is most of
+        the tail latency of an explained score."""
         if len(X_row) != 1:
             raise ValueError("explain_row expects exactly one row")
         result = self.shap.explain(X_row)
-        return self._build(customer_id, X_row, result, 0, audience)
+        return self._build(customer_id, X_row, result, 0, audience, include_features)
 
     def explain_batch(
-        self, customer_ids: list[str], X: pd.DataFrame, *, audience: Audience = "internal"
+        self, customer_ids: list[str], X: pd.DataFrame, *, audience: Audience = "internal",
+        include_features: bool | None = None,
     ) -> list[Explanation]:
         """Explain many customers in one SHAP pass (cheaper than looping)."""
         if len(customer_ids) != len(X):
             raise ValueError("customer_ids and X must be the same length")
         result = self.shap.explain(X)
         return [
-            self._build(customer_ids[i], X.iloc[[i]], result, i, audience)
+            self._build(customer_ids[i], X.iloc[[i]], result, i, audience, include_features)
             for i in range(len(X))
         ]
 
     def _build(
-        self, customer_id: str, X_row: pd.DataFrame, result: ShapResult, row: int, audience: Audience
+        self, customer_id: str, X_row: pd.DataFrame, result: ShapResult, row: int, audience: Audience,
+        include_features: bool | None = None,
     ) -> Explanation:
+        if include_features is None:
+            include_features = audience == "internal"
         shap_row = result.values[row]
         raw_margin = float(result.raw_margin[row])
         # SHAP additivity is on the margin; the calibrator was fit on the
@@ -232,7 +243,7 @@ class Explainer:
             if abs(contribution) < self.min_absolute_shap:
                 continue
 
-            members = self._member_features(reason_code, indices, shap_row, X_row) if audience == "internal" else []
+            members = self._member_features(reason_code, indices, shap_row, X_row) if include_features else []
             factors.append(
                 ReasonFactor(
                     code=code,

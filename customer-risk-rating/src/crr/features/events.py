@@ -150,6 +150,26 @@ def _recency(events: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(frames, axis=1)
 
 
+def _empty_event_frame(keys: np.ndarray, windows: tuple[int, ...]) -> pd.DataFrame:
+    """The feature row every customer with no event history receives.
+
+    A count of zero is a fact (fill 0); a ratio or a recency over zero events is
+    undefined (NaN). This reproduces exactly what the full path yields for empty
+    events, so the fast path cannot change a score — only its cost.
+    """
+    n = len(keys)
+    zeros = np.zeros(n, dtype=float)
+    nans = np.full(n, np.nan, dtype=float)
+    data: dict[str, np.ndarray] = {}
+    for name, kind in _expected_columns(windows).items():
+        data[name] = zeros.copy() if kind == "count" else nans.copy()
+    data["has_event_history"] = zeros.copy()
+    data["outflow_velocity_ratio"] = nans.copy()
+    data["event_count_velocity_ratio"] = nans.copy()
+    frame = pd.DataFrame(data, index=pd.Index(keys, name="customer_id"))
+    return frame[sorted(frame.columns)]
+
+
 def build_event_features(events: pd.DataFrame, index: pd.DataFrame, windows: tuple[int, ...] = EVENT_WINDOWS) -> pd.DataFrame:
     """Aggregate the event stream into per-customer features, point-in-time safe.
 
@@ -161,7 +181,9 @@ def build_event_features(events: pd.DataFrame, index: pd.DataFrame, windows: tup
         raise ValueError("index frame must carry customer_id")
 
     keys = index["customer_id"].to_numpy()
-    prepared = pd.DataFrame(columns=["customer_id", "age_days"]) if events is None or events.empty else _prepare(events, index)
+    if events is None or events.empty:
+        return _empty_event_frame(keys, windows)
+    prepared = _prepare(events, index)
 
     pieces: list[pd.DataFrame] = []
     if not prepared.empty:

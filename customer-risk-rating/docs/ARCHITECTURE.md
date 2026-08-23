@@ -116,6 +116,31 @@ is worthless. `crr.data.synthetic.GROUND_TRUTH_COLUMNS` names the columns to
 exclude, and `tests/test_synthetic_data.py` asserts they never appear in an input
 frame.
 
+## The serving API
+
+Three endpoints, one scoring service. `POST /score` builds features once, scores
+both models, blends them into the 0-100 composite via the policy, and returns the
+band plus merged reason factors. `POST /batch-score` returns a job id and scores in
+the background. `GET /explain/{id}` reads the stored explanation rather than
+recomputing it — the score a customer was given and the explanation a reviewer sees
+must be the same event, and a recompute could differ if the model or policy moved.
+
+Choices that carry weight:
+
+- **Backends are behind interfaces.** In-memory by default so the service runs with
+  no infrastructure; SQLAlchemy (PostgreSQL in production, SQLite in tests) and
+  Redis swap in through two env vars. The score history is append-only.
+- **Missing is modelled, never zero-filled.** An absent input field is NaN, which
+  the pipeline's missing-value machinery already handles; fabricating a zero would
+  invent a customer attribute and score it with false confidence.
+- **Latency came from measurement.** The p99 tail was GC pauses, not compute, so the
+  service calls `gc.freeze()` after loading the model — the large model objects are
+  permanent and do not belong in any collection pass. Real-time decisions use the
+  fast score-only path (p99 91 ms); explanations add SHAP (p99 107 ms) and can also
+  be served off the hot path.
+- **Throughput is a process-count question.** Scoring is GIL-bound Python/pandas, so
+  100 rps is reached with ~9 worker processes, not threads.
+
 ## Explanations: SHAP into reason codes
 
 The explainer takes the exact per-feature TreeSHAP contributions and aggregates

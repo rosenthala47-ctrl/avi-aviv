@@ -8,13 +8,19 @@ dependencies = [
     "pandas>=2.1",
     "scikit-learn>=1.4",
     "lightgbm>=4.3",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "sqlalchemy>=2.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
 # Phases 1-2 need the core dependencies above. These arrive with later phases.
 model = ["shap>=0.45", "pyarrow>=15.0"]
-api = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "pydantic>=2.6", "pydantic-settings>=2.2"]
-db = ["sqlalchemy>=2.0", "alembic>=1.13", "psycopg[binary]>=3.1", "redis>=5.0"]
+# The API and SQLAlchemy are core (above). These are the production extras.
+db = ["alembic>=1.13", "psycopg[binary]>=3.1", "redis>=5.0"]
 dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.4", "mypy>=1.9"]
 
 [build-system]
@@ -37,6 +43,11 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom puts Depends()/Query() in argument
+# defaults on purpose; these are not the mutable-default bug B008 targets.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
 
 [tool.ruff.lint.per-file-ignores]
 # Pure data tables. The phrase banks (including RTL Hebrew, where character count

@@ -48,6 +48,21 @@ INDICATOR_COLUMNS: tuple[str, ...] = (
     "years_at_employer", "source_of_funds_verified", "loan_to_value", "collateral_coverage_ratio",
 )
 
+#: The raw columns :meth:`FeaturePipeline._derive` reads. Declared so the serving
+#: path can convert only these to numeric instead of the whole (mostly string)
+#: customer frame. Kept in sync by a test that asserts _derive never reads outside it.
+_DERIVE_SOURCE_COLUMNS: tuple[str, ...] = (
+    "declared_annual_income", "total_credit_limit", "revolving_balance", "avg_monthly_balance",
+    "min_monthly_balance", "savings_to_income_ratio", "dti_ratio", "verified_income_ratio",
+    "income_months_missing_12m", "overdraft_days_12m", "overdraft_events_12m",
+    "months_since_last_delinquency", "delinquencies_30d_12m", "delinquencies_60d_24m",
+    "delinquencies_90d_24m", "num_credit_inquiries_12m", "num_open_loans", "num_products_held",
+    "account_age_months", "age", "sanctions_screen_hits", "adverse_media_hits_12m",
+    "kyc_document_completeness", "kyc_refresh_overdue_days", "pep_flag",
+    "high_risk_jurisdiction_exposure", "sar_filed_prior", "edd_required",
+    "source_of_funds_verified", "cash_intensity_ratio", "crypto_exposure_ratio_90d",
+)
+
 #: Everything :meth:`FeaturePipeline._derive` produces. Declared here so the
 #: ablation study can isolate the block, and asserted against the actual output
 #: so the two cannot drift apart.
@@ -186,7 +201,11 @@ class FeaturePipeline:
         copies of the generator's functional forms, and none of them uses a
         quantity that would be unavailable at serving time.
         """
-        numeric = customers.apply(pd.to_numeric, errors="coerce")
+        # Convert only the numeric columns _derive actually reads, not the whole
+        # frame: applying to_numeric to the string categoricals produced NaN
+        # columns that were never used and dominated the serving-path allocation.
+        needed = [c for c in _DERIVE_SOURCE_COLUMNS if c in customers.columns]
+        numeric = customers[needed].apply(pd.to_numeric, errors="coerce")
         income = numeric["declared_annual_income"].to_numpy(dtype=float)
         monthly_income = income / 12.0
         account_age = numeric["account_age_months"].to_numpy(dtype=float)

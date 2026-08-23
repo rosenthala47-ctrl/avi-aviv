@@ -1,4 +1,4 @@
-.PHONY: help install data data-large validate train explain test lint clean
+.PHONY: help install data data-large validate train explain serve benchmark test lint clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS=":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -23,6 +23,12 @@ train:  ## train and evaluate the calibrated baseline on both targets
 explain:  ## validate SHAP explanations and check them against ground truth
 	python scripts/explain_model.py
 	python scripts/explain_model.py --target financial_crime_12m
+
+serve:  ## run the scoring API (in-memory backends, no infra needed)
+	python scripts/serve.py
+
+benchmark:  ## measure single-score latency against the p99 < 150ms target
+	python scripts/benchmark_api.py --requests 1000
 
 test:  ## run the test suite
 	pytest
