@@ -1,4 +1,4 @@
-.PHONY: help install data data-large validate train test lint clean
+.PHONY: help install data data-large validate train explain test lint clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS=":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -19,6 +19,10 @@ validate:  ## check the generated dataset carries learnable signal
 train:  ## train and evaluate the calibrated baseline on both targets
 	python scripts/train_baseline.py --ablation
 	python scripts/train_baseline.py --target financial_crime_12m
+
+explain:  ## validate SHAP explanations and check them against ground truth
+	python scripts/explain_model.py
+	python scripts/explain_model.py --target financial_crime_12m
 
 test:  ## run the test suite
 	pytest

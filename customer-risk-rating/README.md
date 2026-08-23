@@ -5,9 +5,10 @@ structured financial data, an LLM branch over unstructured text (support calls,
 underwriter notes, KYC documents), SHAP explanations, and a policy layer a risk
 manager can retune without a deploy.
 
-**Status: phases 1-2 of 8 complete.** The synthetic data foundation, the
-point-in-time feature pipeline and a calibrated LightGBM baseline are built,
-tested and measured. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan
+**Status: phases 1-3 of 8 complete.** The synthetic data foundation, the
+point-in-time feature pipeline, a calibrated LightGBM baseline, and a SHAP
+explainability layer that maps to policy-owned reason codes are built, tested
+and measured. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan
 and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design.
 
 ## Quickstart
@@ -23,7 +24,9 @@ python scripts/validate_dataset.py --data data/raw
 
 # train the calibrated baseline, with a per-feature-block ablation
 python scripts/train_baseline.py --ablation
-python scripts/train_baseline.py --target financial_crime_12m
+
+# validate SHAP additivity, map to reason codes, check against ground truth
+python scripts/explain_model.py
 
 pytest
 ```
@@ -98,12 +101,13 @@ customer-risk-rating/
 │   ├── generate_synthetic_data.py
 │   ├── validate_dataset.py      proves the data is fit to train on
 │   ├── train_baseline.py        trains, calibrates, ablates, judges exit criteria
+│   ├── explain_model.py         SHAP additivity, reason codes, ground-truth check
 │   └── render_data_dictionary.py
 ├── src/crr/
 │   ├── data/                    ✅ phase 1 — synthetic generator, taxonomy, narratives
 │   ├── features/                ✅ phase 2 — point-in-time pipeline, feature contract
 │   ├── models/                  ✅ phase 2 — LightGBM core, calibration, metrics
-│   ├── explain/                 ◻ phase 3 — SHAP → reason codes
+│   ├── explain/                 ✅ phase 3 — TreeSHAP → reason codes, two audiences
 │   ├── api/                     ◻ phase 4 — FastAPI service
 │   ├── db/                      ◻ phase 4 — PostgreSQL + Redis
 │   ├── rules/                   ◻ phase 5 — policy-driven rule engine
@@ -149,6 +153,36 @@ single column and therefore invisible to a tree; LightGBM categorical splits
 overfitting two 30-level columns at a cost of 0.005 AUC; and isotonic calibration
 collapsing 8,217 scores into 43 steps. All three are written up in
 [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+## What phase 3 produced
+
+TreeSHAP over the model, aggregated into **31 policy-owned reason codes** that a
+regulator or an adverse-action notice can use. Not the `shap` library — LightGBM's
+native `pred_contrib` is byte-identical to it (0.0e0 difference) and additive to
+5e-15, so the serving path stays dependency-light.
+
+- **Every one of the 134 features maps to a reason code.** All the delinquency
+  features become "adverse repayment history"; the customer is owed a reason, not
+  a coefficient.
+- **Two audiences.** The internal view shows every code and the SHAP value behind
+  each feature; the customer view drops the codes suppressed by
+  `config/risk_policy.yaml` (PEP, prior SAR, sanctions, structuring) and never
+  exposes a raw value.
+- **Additivity is the guarantee.** SHAP values plus the bias reconstruct the raw
+  margin to 5e-15, so every reason code is a real share of the decision, not a
+  plausible story.
+
+### The finding that matters
+
+Because phase 1 wrote the true generative coefficients, we can check whether SHAP
+importance tracks the drivers the generator actually used. The credit model
+does (Spearman 0.62). **The financial-crime model does not (0.03):** it rides
+`structuring_score` and all but ignores the rare regulatory flags — PEP,
+sanctions, opaque ownership — that any compliance regime treats as primary. SHAP
+is faithful (additivity 1e-14); the *model* is memorising one dense feature. A
+compliance model that scores acceptably but explains through the wrong factors is
+exactly what model-risk review exists to catch, and here the ground-truth check
+caught it. Written up in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Two things to know before phase 7
 

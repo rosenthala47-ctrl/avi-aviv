@@ -116,6 +116,27 @@ is worthless. `crr.data.synthetic.GROUND_TRUTH_COLUMNS` names the columns to
 exclude, and `tests/test_synthetic_data.py` asserts they never appear in an input
 frame.
 
+## Explanations: SHAP into reason codes
+
+The explainer takes the exact per-feature TreeSHAP contributions and aggregates
+them into 31 policy-owned reason codes. Three properties make it defensible:
+
+- **Faithful.** SHAP values plus the bias reconstruct the model's raw margin to
+  5e-15. Every reason code is a real share of the decision, and grouping features
+  into a code is exact because SHAP is additive.
+- **On the right scale.** SHAP explains the raw margin — the decision function.
+  Calibration is a monotone rescaling applied afterward; it changes the level of
+  the probability, never the order of the factors. The two are reported side by
+  side, never conflated.
+- **Audience-aware.** Codes suppressed by policy (PEP, prior SAR, sanctions,
+  structuring) never reach a customer-facing explanation; showing them can tip off
+  a subject and is often legally prohibited. The vocabulary and the policy's
+  suppression list are cross-checked so they cannot silently disagree.
+
+The `shap` library is not on the serving path: LightGBM's native `pred_contrib`
+is byte-identical to it and additive to machine precision, so the endpoint depends
+only on LightGBM.
+
 ## Security and privacy posture
 
 | requirement | approach |
