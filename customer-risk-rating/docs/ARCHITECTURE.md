@@ -341,6 +341,65 @@ The synthetic PII in the generated data is deliberately impossible to confuse
 with real data: `SYN-` prefixed identifiers with no valid checksum, the reserved
 `.invalid` e-mail TLD, and phone numbers from the `+1-555-01xx` fiction range.
 
+## Model risk management: gates that decide eligibility, never promotion
+
+`crr.governance` is deliberately structured so no automatic process can both
+decide a challenger is good enough *and* put it into production. Those are
+two different questions, answered by two different actors.
+
+**Train on outcomes; decisions are a monitoring signal, never a label.** The
+generator gives its underwriters a real bias — lenient toward private
+banking and corporate relationships, harsh on jurisdiction exposure, with no
+legitimate causal role in either outcome model — on purpose, because a
+feedback loop that silently learns to imitate the humans it is meant to
+audit is a real failure mode, not a hypothetical one. `scripts/retrain.py`
+fits only on the true outcome label. `underwriter_decision` is used for
+exactly two things: computing an agreement rate against the model's own
+band (a monitoring number — rising disagreement over time is a signal worth
+investigating, not evidence either side is wrong), and training a second,
+throwaway booster on the decision label specifically to *measure* what
+naive imitation would have reproduced. That second model is never saved,
+never served, and exists only to turn the roadmap's warning into a number:
+on this dataset it reproduces a −0.02 to −0.03 private-banking leniency gap
+beyond what the outcome-trained model shows, in the same direction the
+generator's bias points.
+
+**Eligibility is automatic; promotion is not.** `crr.governance.promotion`
+computes a `PromotionDecision` whose `eligible` property depends only on
+measured numbers — an out-of-time AUC gain past
+`policy.feedback.promotion_min_auc_gain`, and no non-exempt fairness
+failure — and whose `promoted` property additionally requires
+`approved_by_human=True` whenever the policy (or an active fairness
+exemption) demands it. `scripts/retrain.py` always computes and saves the
+eligibility verdict; it only ever copies a candidate into the live
+`models/<target>/` directory when `--approve` was passed on that specific
+invocation. A script that could promote itself would make the human-approval
+requirement in `risk_policy.yaml` decorative.
+
+**Fairness is measured identically everywhere and interpreted by causal
+structure, not assumption.** `country_of_residence` is a real example of a
+protected-attribute tension that most systems either ignore or resolve by
+fiat: it is a legitimate, direct driver of `financial_crime_12m` risk
+(`BETA_CRIME` contains `high_risk_jurisdiction`, `medium_risk_jurisdiction`,
+`cross_border` terms) and has no legitimate role in `default_12m` at all
+(`BETA_CREDIT` contains none). `crr.governance.fairness` computes the same
+four-fifths-rule disparate-impact and equal-opportunity ratios on every
+protected axis for every target — it does not special-case jurisdiction — and
+a lookup table (`EXEMPT_DISPARITIES`) records *which* (target, axis)
+combinations have a documented legitimate basis, with the reasoning inline.
+An exemption changes the promotion consequence (named human sign-off
+instead of an automatic block); it never changes the measurement, and it
+never suppresses the number. The identical jurisdiction disparity that is
+exempt on `financial_crime_12m` is an ordinary blocking failure on
+`default_12m`, because there it has no such basis.
+
+**A model card that cannot drift from what it describes.**
+`scripts/generate_model_card.py` reads the trained artefact's own
+`metadata.json`/`metrics.json`, the dataset's `manifest.json`, the last
+`retrain.py` run's governance report and the live policy — never hand-written
+numbers — so the card goes stale exactly when the files it reads change, and
+regenerating it after a retrain is one command.
+
 ## Where the competitive claim actually lives
 
 Enterprise vendors are strong on coverage and compliance paperwork and weak on

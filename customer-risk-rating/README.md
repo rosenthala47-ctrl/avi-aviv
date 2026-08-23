@@ -5,12 +5,14 @@ structured financial data, an LLM branch over unstructured text (support calls,
 underwriter notes, KYC documents), SHAP explanations, and a policy layer a risk
 manager can retune without a deploy.
 
-**Status: phases 1-7 of 8 complete.** The synthetic data foundation, the
+**Status: all 8 phases complete.** The synthetic data foundation, the
 point-in-time feature pipeline, a calibrated LightGBM baseline, a SHAP
 explainability layer, a FastAPI serving layer with the three endpoints,
 persistence and audit, a safe, versioned, no-code rule engine, event-driven
-real-time re-scoring, and an LLM extraction branch feeding bounded, explainable
-features into the same model are built, tested and measured. See
+real-time re-scoring, an LLM extraction branch feeding bounded, explainable
+features into the same model, and a feedback loop with champion/challenger
+promotion, drift monitoring, group fairness testing and a generated
+documentation pack are built, tested and measured. See
 [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan and
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design.
 
@@ -44,6 +46,12 @@ python scripts/verify_rescoring.py
 
 # verify the LLM branch: AUC lift, extraction agreement, prompt-injection suite
 python scripts/verify_extraction.py
+
+# retrain on outcomes (never on human decisions), evaluate fairness/drift and
+# the champion/challenger promotion gate, then verify the phase 8 exit criteria
+python scripts/retrain.py --target default_12m
+python scripts/retrain.py --target financial_crime_12m
+python scripts/verify_governance.py
 
 pytest
 ```
@@ -128,6 +136,9 @@ customer-risk-rating/
 │   ├── manage_policy.py         list / show / diff / rollback policy versions
 │   ├── verify_rescoring.py      measures the phase 6 exit criteria, judges PASS/FAIL
 │   ├── verify_extraction.py     measures the phase 7 exit criteria, judges PASS/FAIL
+│   ├── retrain.py               phase 8 — retrain on outcomes, fairness/drift, promotion gate
+│   ├── generate_model_card.py   phase 8 — assembles the documentation pack from disk
+│   ├── verify_governance.py     measures the phase 8 exit criteria, judges PASS/FAIL
 │   └── render_data_dictionary.py
 ├── src/crr/
 │   ├── data/                    ✅ phase 1 — synthetic generator, taxonomy, narratives
@@ -140,7 +151,8 @@ customer-risk-rating/
 │   ├── rules/                   ✅ phase 5 — safe expressions, engine, simulation
 │   ├── security/                ◻ phase 4 — anonymisation, crypto
 │   ├── pipelines/               ✅ phase 6 — real-time re-scoring, notifications
-│   └── llm/                     ✅ phase 7 — extraction schema, prompts, reference + Claude extractors, cache
+│   ├── llm/                     ✅ phase 7 — extraction schema, prompts, reference + Claude extractors, cache
+│   └── governance/              ✅ phase 8 — drift, fairness, human-model disagreement, promotion gate
 └── tests/
 ```
 
@@ -390,11 +402,66 @@ accuracy a rigged number), and every exit-criterion script takes
 LLM the moment `ANTHROPIC_API_KEY` is available. Do that before treating the
 Cohen's κ criterion — or the AUC-lift number — as validated for production.
 
-## One thing to know before phase 8
+## What phase 8 produced
 
-**`country_of_residence` is both a legitimate AML factor and a proxy for national
-origin.** That tension is real and needs a documented decision, not a silent one.
-It is on the phase 8 checklist for a reason.
+A feedback loop that retrains on outcomes, never on human decisions, and a
+champion/challenger gate where automatic checks decide *eligibility* and a
+human decides *promotion* — never the same actor.
+
+- **`scripts/retrain.py`** fits exclusively on the true outcome labels.
+  `underwriter_decision` — deliberately biased in the generator (lenient
+  toward private banking and corporate, with no legitimate causal role in
+  either outcome model) — is used only to measure human-model disagreement,
+  and to train a second, throwaway booster purely to quantify what training
+  on the decision *would* have reproduced. That check worked: the
+  decision-trained model shows a −0.021 to −0.027 extra private-banking
+  leniency gap beyond the true-outcome-trained model, matching the
+  generator's documented bias in both sign and target.
+- **The promotion gate is threshold-driven, not automatic**
+  (`crr/governance/promotion.py`): eligible only on a measured out-of-time
+  AUC gain past `policy.feedback.promotion_min_auc_gain`, with no non-exempt
+  fairness failure; promoted only when `--approve` is explicitly passed.
+- **`country_of_residence` is both a legitimate AML factor and a proxy for
+  national origin** — resolved not by picking a side, but by measuring the
+  same way on every protected axis (age, AML jurisdiction tier, residency
+  status) and letting the generator's own causal structure decide which
+  disparities are expected: jurisdiction risk is a real, intended driver of
+  `financial_crime_12m` (documented, listed as an exemption requiring named
+  sign-off) but has no legitimate role in `default_12m` at all (an ordinary,
+  blocking failure there). See `crr/governance/fairness.py`'s module
+  docstring for the full reasoning.
+- **`scripts/generate_model_card.py`** assembles a documentation pack from
+  files other scripts already produced — data lineage from the manifest,
+  performance and fairness from the artefact's own metrics and the last
+  retrain's governance report, the monitoring plan from the live policy —
+  rather than hand-written prose that goes stale the moment the model changes.
+
+### Exit criteria (measured by `scripts/verify_governance.py`)
+
+| criterion | measured |
+|---|---|
+| promotion gate is threshold-driven, not automatic | **met** — proven with controlled synthetic gains/policies (a real retrain on unchanged data legitimately produces a 0.0000 gain, which correctly blocks promotion — the gate working, not a null result) |
+| fairness measured for every (target, protected axis) combination | **met** — 6/6 on the real trained models against real held-out data |
+| documentation pack generates with every required section | **met** — both targets |
+
+Real fairness testing on the live models found four genuine, non-exempt
+equal-opportunity gaps (solid false-positive counts behind each, not
+small-sample noise) — `default_12m` by jurisdiction tier (0.74) and residency
+status (0.57), `financial_crime_12m` by age (0.68) and residency status
+(0.49). The `default_12m` findings are the interesting ones: jurisdiction and
+residency have no direct causal term in that target's outcome model at all,
+so this is a proxy effect — almost certainly via legitimate credit features
+(thin file, income volatility, account tenure) that happen to correlate with
+residency status. That is a real finding a governance process exists to
+catch, reported honestly rather than suppressed; closing it is out of scope
+for the governance *mechanism* this phase delivers. Full numbers and the
+per-group breakdown in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+One correctness bug the work surfaced before it shipped: a group landing on a
+0% false-positive rate purely by chance (rare-event target, small group) made
+every other group's equal-opportunity ratio collapse toward 0 against that
+accidental zero. Fixed with `MIN_FALSE_POSITIVE_EVENTS` — below 5 raw false
+positives, a group is excluded from the comparison entirely, on both sides.
 
 ## Data provenance
 

@@ -1,4 +1,4 @@
-.PHONY: help install data data-large validate train explain serve benchmark rules simulate-policy rescoring extraction test lint clean
+.PHONY: help install data data-large validate train explain serve benchmark rules simulate-policy rescoring extraction retrain model-card governance test lint clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS=":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -41,6 +41,17 @@ rescoring:  ## verify the phase 6 re-scoring exit criteria (trigger-to-score p95
 
 extraction:  ## verify the phase 7 LLM-extraction exit criteria (AUC lift, kappa, prompt injection)
 	python scripts/verify_extraction.py
+
+retrain:  ## retrain on outcomes, evaluate fairness/drift and the promotion gate (never auto-promotes)
+	python scripts/retrain.py --target default_12m
+	python scripts/retrain.py --target financial_crime_12m
+
+model-card:  ## regenerate the documentation pack for both trained models
+	python scripts/generate_model_card.py --target default_12m
+	python scripts/generate_model_card.py --target financial_crime_12m
+
+governance:  ## verify the phase 8 exit criteria (promotion gate, fairness coverage, doc pack)
+	python scripts/verify_governance.py
 
 test:  ## run the test suite
 	pytest
