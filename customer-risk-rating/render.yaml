@@ -1,0 +1,25 @@
+# Render blueprint — https://render.com/docs/blueprint-spec
+#
+# One-click: push this repo, then on Render choose New → Blueprint and point it
+# at the repo. Render reads this file, builds the Dockerfile (which generates
+# the dataset and trains both models during the build) and serves the Streamlit
+# UI on the port it injects as $PORT. No dashboard configuration needed.
+services:
+  - type: web
+    name: customer-risk-rating
+    runtime: docker
+    plan: starter          # the build trains two LightGBM models; `free` is memory-tight
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /_stcore/health   # Streamlit's own readiness endpoint
+    autoDeploy: true
+    envVars:
+      # The API is internal to the container; the UI reaches it over loopback.
+      - key: CRR_API_PORT
+        value: "8000"
+      - key: CRR_API_WORKERS
+        value: "1"
+      # Optional. Unset means the deterministic reference extractor: no network
+      # calls, no cost, and narrative text never leaves the container.
+      - key: CRR_ANTHROPIC_API_KEY
+        sync: false

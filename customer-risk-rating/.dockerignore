@@ -1,0 +1,27 @@
+# The image builds its own dataset and models (see Dockerfile), so never copy
+# a local one in — it would bloat the context and could silently ship a model
+# trained on data that is not in the repo.
+data/
+models/
+mlruns/
+
+.git/
+.github/
+tests/
+notebooks/
+docs/
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+.env
+.env.*
+!.env.example

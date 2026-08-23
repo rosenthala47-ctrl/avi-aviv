@@ -19,7 +19,7 @@ documentation pack are built, tested and measured. See
 ## Quickstart
 
 ```bash
-pip install -e ".[dev,model]"
+pip install -e ".[dev,model,frontend]"
 
 # generate a 10k-customer training set (bilingual narratives)
 python scripts/generate_synthetic_data.py -n 10000 --language mixed
@@ -36,6 +36,9 @@ python scripts/explain_model.py
 # run the API (in-memory backends, no infra needed) and measure latency
 python scripts/serve.py &
 python scripts/benchmark_api.py --requests 500
+
+# the web UI — API and front end together, exactly as the container runs them
+./scripts/start_all.sh          # then open http://localhost:8501
 
 # verify the rule engine's exit criteria, then try a proposed policy change
 python scripts/verify_rule_engine.py
@@ -114,6 +117,11 @@ is what caught it.
 
 ```
 customer-risk-rating/
+├── app.py                       Streamlit front end — a pure HTTP client of the API
+├── Dockerfile                   API + UI in one image; trains the models at build time
+├── render.yaml                  Render blueprint (1-click deploy)
+├── railway.json                 Railway config (1-click deploy)
+├── requirements.txt             flat deps for platforms that do not read pyproject
 ├── config/
 │   ├── data_generation.yaml               generation profiles (smoke / alpha / adversarial)
 │   ├── risk_policy.yaml                   bands, rules, triggers — the no-code control surface
@@ -139,6 +147,7 @@ customer-risk-rating/
 │   ├── retrain.py               phase 8 — retrain on outcomes, fairness/drift, promotion gate
 │   ├── generate_model_card.py   phase 8 — assembles the documentation pack from disk
 │   ├── verify_governance.py     measures the phase 8 exit criteria, judges PASS/FAIL
+│   ├── start_all.sh             container entrypoint: API + UI, health-gated
 │   └── render_data_dictionary.py
 ├── src/crr/
 │   ├── data/                    ✅ phase 1 — synthetic generator, taxonomy, narratives
@@ -462,6 +471,66 @@ One correctness bug the work surfaced before it shipped: a group landing on a
 every other group's equal-opportunity ratio collapse toward 0 against that
 accidental zero. Fixed with `MIN_FALSE_POSITIVE_EVENTS` — below 5 raw false
 positives, a group is excluded from the comparison entirely, on both sides.
+
+## The web UI
+
+`app.py` is a Streamlit front end over the same public endpoints an integrator
+would call. It is a **client only** — no model, no policy, no copy of the
+reason-code vocabulary lives in it, so a number on screen can only be wrong if
+the API is wrong. Three tabs:
+
+- **Score a customer** — form inputs for ~40 of the ~65 fields, three realistic
+  starting profiles, and a control to send chosen fields as *unknown*. That
+  control exists to make the missing-data contract visible: an omitted field
+  reaches the model as a genuine NaN plus a missing-indicator, never a
+  fabricated zero.
+- **Explanation & reason codes** — the stored explanation read back from the
+  API, with the internal reviewer's view beside the customer-facing one and an
+  explicit list of what was withheld and why. Filterable by dimension,
+  direction and visibility.
+- **Real-time re-scoring** — push one event, see whether the policy triggered,
+  debounced or ignored it, and what the score did.
+
+The SHAP chart is a diverging bar of summed log-odds contributions: red raises
+risk, blue lowers it, zero is a real midpoint. That colour pair is validated
+for colour-vision deficiency against the page's surface, and direction is never
+carried by colour alone — every bar is labelled and each chart carries a table
+view with exact values.
+
+```bash
+./scripts/start_all.sh                      # API + UI, one command
+CRR_API_URL=https://api.example.com streamlit run app.py   # UI against a remote API
+```
+
+## Deployment
+
+`Dockerfile` builds one image that runs both processes: the API on an internal
+port, Streamlit on `$PORT`. One container because a PaaS web service exposes
+one port and this is a demo; at real scale they are two services.
+
+**The models are trained during the image build, not committed.** `data/` and
+`models/` are git-ignored on purpose — the dataset is reproducible from a seed
+and model binaries do not belong in version control — so a fresh clone has no
+model and `ModelBundle.load` fails loudly rather than serving nothing. The
+build generates a seeded 50,000-customer dataset and trains both targets
+(~75 s), then deletes the dataset, which is ~130 MB and is not read at runtime.
+
+50,000 is a measured floor, not a round number: `financial_crime_12m` runs at
+~1.5% prevalence, and a smaller draw starves it of positives. At 15,000 it
+lands 7 of 10 calibration bins within 2 SE against a bar of 8 and
+`train_baseline.py` exits non-zero; at 50,000 both models clear all four phase-2
+criteria with 9/10. The build deliberately keeps `set -e`, so a model that
+misses its own exit criteria fails the build rather than shipping miscalibrated.
+
+| Platform | How |
+|---|---|
+| Render | New → Blueprint on this repo; `render.yaml` is read automatically |
+| Railway | New → Deploy from repo; `railway.json` selects the Dockerfile |
+| Any Docker host | `docker build -t crr . && docker run -p 8501:8501 crr` |
+
+`CRR_ANTHROPIC_API_KEY` is optional everywhere. Unset — the default — means the
+deterministic reference extractor: no network calls, no cost, and narrative
+text never leaves the container.
 
 ## Data provenance
 

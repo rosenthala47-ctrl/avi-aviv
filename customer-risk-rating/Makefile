@@ -1,10 +1,10 @@
-.PHONY: help install data data-large validate train explain serve benchmark rules simulate-policy rescoring extraction retrain model-card governance test lint clean
+.PHONY: help install data data-large validate train explain serve ui app benchmark rules simulate-policy rescoring extraction retrain model-card governance test lint clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS=":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-install:  ## install the package plus dev and model extras
-	pip install -e ".[dev,model]"
+install:  ## install the package plus dev, model and frontend extras
+	pip install -e ".[dev,model,frontend]"
 
 data:  ## generate the default 10k-customer alpha dataset
 	python scripts/generate_synthetic_data.py -n 10000 --language mixed
@@ -26,6 +26,12 @@ explain:  ## validate SHAP explanations and check them against ground truth
 
 serve:  ## run the scoring API (in-memory backends, no infra needed)
 	python scripts/serve.py
+
+ui:  ## run the Streamlit front end (needs the API up: make serve, in another shell)
+	streamlit run app.py
+
+app:  ## run API + Streamlit together, exactly as the container does
+	./scripts/start_all.sh
 
 benchmark:  ## measure single-score latency against the p99 < 150ms target
 	python scripts/benchmark_api.py --requests 1000
@@ -57,7 +63,7 @@ test:  ## run the test suite
 	pytest
 
 lint:  ## ruff + mypy
-	ruff check src scripts tests
+	ruff check src scripts tests app.py
 	mypy src
 
 clean:  ## remove generated data, models and caches
