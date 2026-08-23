@@ -5,10 +5,11 @@ structured financial data, an LLM branch over unstructured text (support calls,
 underwriter notes, KYC documents), SHAP explanations, and a policy layer a risk
 manager can retune without a deploy.
 
-**Status: phases 1-4 of 8 complete.** The synthetic data foundation, the
+**Status: phases 1-5 of 8 complete.** The synthetic data foundation, the
 point-in-time feature pipeline, a calibrated LightGBM baseline, a SHAP
-explainability layer, and a FastAPI serving layer with the three endpoints,
-persistence and audit are built, tested and measured. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan
+explainability layer, a FastAPI serving layer with the three endpoints,
+persistence and audit, and a safe, versioned, no-code rule engine are built,
+tested and measured. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan
 and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design.
 
 ## Quickstart
@@ -31,6 +32,10 @@ python scripts/explain_model.py
 # run the API (in-memory backends, no infra needed) and measure latency
 python scripts/serve.py &
 python scripts/benchmark_api.py --requests 500
+
+# verify the rule engine's exit criteria, then try a proposed policy change
+python scripts/verify_rule_engine.py
+python scripts/simulate_policy.py --proposed config/risk_policy_proposed.example.yaml
 
 pytest
 ```
@@ -94,8 +99,10 @@ is what caught it.
 ```
 customer-risk-rating/
 ├── config/
-│   ├── data_generation.yaml     generation profiles (smoke / alpha / adversarial)
-│   └── risk_policy.yaml         bands, rules, triggers — the no-code control surface
+│   ├── data_generation.yaml               generation profiles (smoke / alpha / adversarial)
+│   ├── risk_policy.yaml                   bands, rules, triggers — the no-code control surface
+│   ├── risk_policy_proposed.example.yaml  a ready-to-try proposed edit for simulate_policy.py
+│   └── policy_history/                    every policy version ever loaded, immutable, archived
 ├── data/                        generated output (git-ignored, reproducible from seed)
 ├── docs/
 │   ├── ROADMAP.md               eight phases with measurable exit criteria
@@ -108,6 +115,9 @@ customer-risk-rating/
 │   ├── explain_model.py         SHAP additivity, reason codes, ground-truth check
 │   ├── serve.py                 run the API with uvicorn
 │   ├── benchmark_api.py         measure scoring latency against the p99 target
+│   ├── verify_rule_engine.py    measures the phase 5 exit criteria, judges PASS/FAIL
+│   ├── simulate_policy.py       what would change if a proposed policy went live
+│   ├── manage_policy.py         list / show / diff / rollback policy versions
 │   └── render_data_dictionary.py
 ├── src/crr/
 │   ├── data/                    ✅ phase 1 — synthetic generator, taxonomy, narratives
@@ -116,8 +126,8 @@ customer-risk-rating/
 │   ├── explain/                 ✅ phase 3 — TreeSHAP → reason codes, two audiences
 │   ├── api/                     ✅ phase 4 — FastAPI, scoring service, persistence
 │   ├── db/                      ✅ phase 4 — SQLAlchemy models (Postgres / SQLite)
-│   ├── policy.py                ✅ phase 4 — risk policy loader (bands, composite)
-│   ├── rules/                   ◻ phase 5 — policy-driven rule engine
+│   ├── policy.py                ✅ phase 4/5 — loader, versioning, archive, rollback
+│   ├── rules/                   ✅ phase 5 — safe expressions, engine, simulation
 │   ├── security/                ◻ phase 4 — anonymisation, crypto
 │   └── pipelines/               ◻ phase 6 — real-time re-scoring
 └── tests/
@@ -230,6 +240,52 @@ The honest caveat: p99 < 150 ms is latency; 100 rps is throughput. A score is
 ~90 ms of GIL-bound CPU, so 100 rps needs ~9 worker processes, not threads. The
 benchmark's throughput probe shows the GIL ceiling directly. Written up in
 [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+## What phase 5 produced
+
+A rule engine that lets a risk manager change what the system does by editing
+`config/risk_policy.yaml` — no code, no deploy — without that editability
+becoming a way to silently weaken a control.
+
+- **A safe expression evaluator**, not `eval()`. The policy file is explicitly
+  designed for a non-engineer to edit, which makes its `when` clauses an
+  untrusted-enough input; the evaluator parses with `ast` and walks a
+  whitelist (booleans, comparisons, `in`, literals, names — nothing else), so
+  every one of 24 tested injection attempts (`__import__`, attribute access,
+  comprehensions, `exec`, …) is rejected at policy-load time, before a bad
+  rule ever reaches a scoring request.
+- **Raise-only, structurally.** A fired rule's floor combines with the model's
+  band via `max(...)` on ordinal rank. A test tries to build a rule that
+  lowers a band — an always-firing `floor_band: Low` rule against a model band
+  of `Extreme` — and confirms it cannot.
+- **Immutable, archived, rollback-able versions.** Reusing a version number for
+  different content is a load error, checked against a durable on-disk
+  archive (not only in-memory state, so the guarantee survives a restart).
+  `rollback_to(N)` restores the exact bytes that ran under version N.
+- **Fails safe.** A broken edit degrades to "serve the last known-good policy,
+  log loudly" rather than 500ing every request.
+- **Simulation before go-live**: `scripts/simulate_policy.py` replays stored
+  probabilities against a proposed policy — no ML re-inference needed, since
+  everything downstream of the model's two probabilities is a pure function
+  of policy content — and reports exactly which customers would change band
+  or review status.
+
+### Exit criteria (measured by `scripts/verify_rule_engine.py`)
+
+| criterion | measured |
+|---|---|
+| policy change takes effect within 60s, no deploy | **9.4 ms** |
+| fully audit-logged | `policy.changed` JSON event on every version change |
+| rollback to any prior version | exact byte-for-byte restore, verified |
+| rules can only raise risk | tested against all 4 bands; none lowered |
+
+Two real bugs surfaced along the way, both fixed: a Python default-argument
+late-binding gotcha that silently defeated archive isolation in tests (and
+would have made `DEFAULT_ARCHIVE_DIR` unoverridable anywhere), and a
+`datetime.date` inside a JSON column that would have failed every score save
+against the real SQLAlchemy backend — invisible against the in-memory
+repository, caught only because the SQLite-backed path is tested too. Both
+are written up in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Two things to know before phase 7
 

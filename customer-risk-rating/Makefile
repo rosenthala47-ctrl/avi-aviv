@@ -1,4 +1,4 @@
-.PHONY: help install data data-large validate train explain serve benchmark test lint clean
+.PHONY: help install data data-large validate train explain serve benchmark rules simulate-policy test lint clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS=":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -29,6 +29,12 @@ serve:  ## run the scoring API (in-memory backends, no infra needed)
 
 benchmark:  ## measure single-score latency against the p99 < 150ms target
 	python scripts/benchmark_api.py --requests 1000
+
+rules:  ## verify the phase 5 rule-engine exit criteria (hot reload, audit, rollback, raise-only)
+	python scripts/verify_rule_engine.py
+
+simulate-policy:  ## simulate the example proposed policy against fresh demo traffic
+	python scripts/simulate_policy.py --proposed config/risk_policy_proposed.example.yaml
 
 test:  ## run the test suite
 	pytest

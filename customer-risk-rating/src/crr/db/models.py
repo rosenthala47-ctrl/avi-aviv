@@ -36,7 +36,9 @@ class ScoreRecord(Base):
     scored_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     risk_score: Mapped[float] = mapped_column(Float, nullable=False)
+    model_band: Mapped[str] = mapped_column(String(16), nullable=False)
     risk_band: Mapped[str] = mapped_column(String(16), nullable=False)
+    band_floor_applied: Mapped[bool] = mapped_column(Integer, nullable=False, default=0)
     credit_probability: Mapped[float] = mapped_column(Float, nullable=False)
     financial_crime_probability: Mapped[float] = mapped_column(Float, nullable=False)
     requires_review: Mapped[bool] = mapped_column(Integer, nullable=False, default=0)
@@ -46,7 +48,14 @@ class ScoreRecord(Base):
     input_hash: Mapped[str] = mapped_column(String(32), nullable=False)
     audience: Mapped[str] = mapped_column(String(16), nullable=False, default="internal")
 
-    # Full explanation payload, so GET /explain reads rather than recomputes.
+    # The exact customer input that produced this score — what makes
+    # reproducibility literal (recompute from this, not just verify a hash
+    # against it) and what the policy simulator replays against a proposed
+    # rule set (crr.rules.simulate).
+    customer_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    # Full explanation payload (every SHAP factor and fired rule, unfiltered),
+    # so GET /explain reads and audience-filters rather than recomputes.
     explanation: Mapped[dict] = mapped_column(JSON, nullable=False)
 
     __table_args__ = (

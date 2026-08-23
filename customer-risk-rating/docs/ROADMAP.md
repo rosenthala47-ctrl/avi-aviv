@@ -5,7 +5,8 @@ feeling — because "the model seems good" is how risk systems get deployed and
 then quietly fail. Phases 1-4 produce a system you could demo; phases 5-8 produce
 one a bank's model-risk committee would actually sign off.
 
-Phases 1-4 are **done** (see `src/crr/data/`, `src/crr/features/`, `src/crr/models/`).
+Phases 1-5 are **done** (see `src/crr/data/`, `src/crr/features/`, `src/crr/models/`,
+`src/crr/api/`, `src/crr/rules/`, `src/crr/policy.py`).
 
 ---
 
@@ -316,20 +317,118 @@ will add a third signal, and the merge point — `RiskPolicy.composite_score` an
 factor merger — is already the seam it plugs into. Nothing about the API shape
 changes when it arrives.
 
-## Phase 5 — Rule engine and the no-code control surface
+## Phase 5 — Rule engine and the no-code control surface ✅
 
 **Goal.** Requirement 4c: a risk manager retunes the system without a deploy.
 
-**Work.**
-- Load and validate `config/risk_policy.yaml` at request time, cached in Redis.
-- Rules may only **raise** risk or force review, never lower it. A policy edit
-  must not be able to quietly disable a control; the loader rejects such rules.
-- Policy versions are immutable and stamped onto every score.
-- A simulation mode: run a proposed policy against the last 90 days of scores and
-  show what would have changed, before it goes live.
+**Delivered.**
+- **A safe expression evaluator** (`crr/rules/expressions.py`) for the `when`
+  clauses in `risk_policy.yaml`. Parsed with `ast`, then walked against a tiny
+  whitelist — boolean combinators, comparisons, `in`/`not in`, literals, bare
+  names — with everything else rejected at policy-load time, before a bad rule
+  ever reaches a scoring request. This is not a theoretical precaution: the
+  policy file is explicitly designed to be edited by a risk manager with no
+  code review, which is exactly the profile of an input that must never reach
+  `eval()`. 24 injection attempts (`__import__`, attribute/subscript access,
+  comprehensions, `exec`, walrus assignment, arithmetic, `is`/`is not`, …) are
+  each asserted rejected in `tests/test_rules.py`.
+- **`RuleEngine`** (`crr/rules/engine.py`): compiles a policy's rules once,
+  evaluates them against the *raw customer record* — the same field names a
+  risk manager writes in the YAML and the same ones in the API's input
+  contract, never the pipeline's internal encoded feature matrix. A fired
+  rule's floor combines with the model's band via `max(...)` on the band's
+  ordinal rank, so applying zero, one, or many rules is monotone by
+  construction. `tests/test_rules.py` tries to construct a rule that lowers a
+  band — a `floor_band: Low` rule that always fires, tested against a model
+  band of `Extreme` — and confirms it cannot.
+- **A band-level review threshold** (`review.require_for_bands` in the policy),
+  distinct from the rule list: High/Extreme requires review from the model
+  score alone, with zero rules needing to fire. It is a separate, simpler
+  lever because it compares the *computed* band, which a `when` expression —
+  scoped to raw input fields — cannot see.
+- **Per-rule `customer_visible`**, mirroring the phase-3 SHAP reason-code
+  pattern: the three genuinely compliance-sensitive rules (sanctions, PEP,
+  unverified source of funds) are marked hidden from customer-facing
+  responses; the rule still fires, still floors the band, still forces
+  review, for every audience — only whether it is *named* in a customer
+  response is affected.
+- **Immutable, archived, rollback-able versions** (`crr/policy.py`). Reusing a
+  version number for different content is a load error. Every version ever
+  loaded is written once to `config/policy_history/<file-stem>/v{N}.yaml` and
+  never overwritten, so `rollback_to(N)` restores the exact byte content that
+  ran under that version — not a re-serialisation that could drift from it.
+  The immutability check consults that durable archive, not only an
+  in-process cache, so the guarantee survives a restart (verified by a test
+  that clears every in-memory record to simulate a fresh process and confirms
+  a conflicting reload is still rejected).
+- **Fail-safe reloading.** A broken edit — a version reused for different
+  content, or YAML that no longer parses — degrades to "serve the last
+  known-good policy and log loudly" (`load_policy_or_fallback`, what the
+  scoring service actually calls) rather than 500ing every request. The
+  operator who broke the file gets a `policy.load_failed` audit event; every
+  other caller keeps scoring on the last policy that worked.
+- **`scripts/simulate_policy.py`**: replays stored customer probabilities
+  against a proposed policy without re-running the ML model — the composite
+  blend, band cut-offs, rule floors and review threshold are all pure
+  functions of policy content, so this is exact, not an approximation, and
+  fast enough to run against months of history in well under a second. Two
+  modes: production (`--database-url`, real scoring history) and a
+  self-contained demo (scores a fresh sample so the script runs with no
+  external database — matching this project's "runnable with no infra"
+  pattern throughout). `config/risk_policy_proposed.example.yaml` is a
+  committed, ready-to-try example (tightens the KYC refresh window).
+- **`scripts/manage_policy.py`**: `list` / `show` / `diff` / `rollback` against
+  the version archive — the operational half of the no-code promise.
 
-**Exit criterion.** A policy change takes effect within 60 seconds with no
-deploy, is fully audit-logged, and can be rolled back to any prior version.
+**Exit criteria — met, all four measured by `scripts/verify_rule_engine.py`:**
+
+| criterion | measured |
+|---|---|
+| policy change takes effect within 60s, no deploy | **9.4 ms** (edit-to-reload, real filesystem) |
+| fully audit-logged | `policy.changed` JSON event emitted on every version change |
+| rollback to any prior version | archive holds every version loaded; `rollback_to(1)` restores it exactly |
+| rules can only raise risk, never lower it | tested against all 4 bands with an always-firing `Low`-floor rule; none lowered |
+
+### Two real bugs the work surfaced, worth keeping on record
+
+**Python's late-bound default arguments defeated the archive-isolation design.**
+`_archive_dir_for(path, archive_root: Path = DEFAULT_ARCHIVE_DIR)` looks like it
+reads the module constant at call time; Python actually binds a default
+argument value once, at function *definition* time. Monkeypatching
+`crr.policy.DEFAULT_ARCHIVE_DIR` in a test — or reassigning it from any
+caller — silently had no effect on already-defined functions, including the
+call *inside* `load_policy()` itself. Worse, this meant every test using a
+policy file named `risk_policy.yaml` (chosen to test realistic paths) was
+archiving into the **real, committed** `config/policy_history/risk_policy/`
+directory and colliding with other tests picking the same version number for
+different content. Fixed by resolving the default inside the function body
+(`archive_root: Path | None = None`, then `archive_root or DEFAULT_ARCHIVE_DIR`
+at call time) rather than in the signature — the general shape of the bug:
+never bind a value that might legitimately change at import time into a
+default argument.
+
+**A `datetime.date` in a JSON column would have failed every score save in
+production.** `customer_snapshot` stores the raw customer payload for
+reproducibility and simulation; Pydantic's `model_dump()` leaves
+`snapshot_date` as a real `date` object, and the stdlib `json.dumps` the
+SQLAlchemy JSON type uses by default rejects it outright. The in-memory
+repository never exercises JSON serialisation at all, so this was invisible
+until tested against the real SQLAlchemy path — exactly the gap the project's
+"test the SQLite-backed path, not only in-memory" pattern exists to catch.
+Fixed once, at the engine boundary (`json_serializer` with a `str()`
+fallback), so it protects every JSON column now and any added later rather
+than relying on each call site to pre-sanitise its own payload.
+
+### A design decision worth stating plainly
+
+The rule engine evaluates the *raw customer record* your API caller sent —
+never the feature pipeline's encoded matrix. This is deliberate: a risk
+manager writing `source_of_funds_declared in ['undeclared', 'gift']` is
+writing against the same vocabulary as the API's input contract and the data
+dictionary, not against pipeline internals (categorical encoding, derived
+ratios, one-hot columns) that would make the policy file unreadable to
+exactly the person requirement 4c says should be able to edit it without
+touching code.
 
 ---
 

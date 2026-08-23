@@ -151,6 +151,23 @@ class ReasonFactorOut(BaseModel):
     direction: Literal["increases", "decreases"]
 
 
+class FiredRuleOut(BaseModel):
+    """A deterministic policy rule that matched this customer.
+
+    Kept separate from ``top_factors``: a rule is a pass/fail policy override
+    with no continuous SHAP-style contribution, and a regulator or reviewer
+    needs to see plainly whether a decision came from the model's learned
+    judgement or a hard compliance rule — conflating the two into one list
+    would blur exactly the distinction that matters here.
+    """
+
+    id: str
+    description: str
+    reason_code: str
+    floor_band: Literal["Low", "Medium", "High", "Extreme"] | None
+    require_review: bool
+
+
 class DimensionResult(BaseModel):
     probability: float = Field(ge=0, le=1)
     band_probability_note: str | None = None
@@ -161,10 +178,13 @@ class ScoreResult(BaseModel):
 
     customer_id: str
     risk_score: float = Field(ge=0, le=100)
+    model_band: Literal["Low", "Medium", "High", "Extreme"]
     risk_band: Literal["Low", "Medium", "High", "Extreme"]
+    band_floor_applied: bool
     credit: DimensionResult
     financial_crime: DimensionResult
     top_factors: list[ReasonFactorOut]
+    fired_rules: list[FiredRuleOut]
     requires_review: bool = False
     model_version: str
     policy_version: int
@@ -202,12 +222,15 @@ class ExplanationResponse(BaseModel):
 
     customer_id: str
     risk_score: float
+    model_band: str
     risk_band: str
+    band_floor_applied: bool
     credit_probability: float
     financial_crime_probability: float
     audience: Literal["internal", "customer"]
     top_factors: list[ReasonFactorOut]
     protective_factors: list[ReasonFactorOut]
+    fired_rules: list[FiredRuleOut]
     model_version: str
     policy_version: int
     scored_at: dt.datetime

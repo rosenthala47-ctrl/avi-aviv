@@ -119,9 +119,10 @@ frame.
 ## The serving API
 
 Three endpoints, one scoring service. `POST /score` builds features once, scores
-both models, blends them into the 0-100 composite via the policy, and returns the
-band plus merged reason factors. `POST /batch-score` returns a job id and scores in
-the background. `GET /explain/{id}` reads the stored explanation rather than
+both models, blends them into the 0-100 composite via the policy, applies the rule
+engine, and returns the band plus the model's reason factors and any fired rules
+as two separate lists. `POST /batch-score` returns a job id and scores in the
+background. `GET /explain/{id}` reads the stored explanation rather than
 recomputing it — the score a customer was given and the explanation a reviewer sees
 must be the same event, and a recompute could differ if the model or policy moved.
 
@@ -129,17 +130,67 @@ Choices that carry weight:
 
 - **Backends are behind interfaces.** In-memory by default so the service runs with
   no infrastructure; SQLAlchemy (PostgreSQL in production, SQLite in tests) and
-  Redis swap in through two env vars. The score history is append-only.
+  Redis swap in through two env vars. The score history is append-only, and every
+  record carries the exact customer payload that produced it (`customer_snapshot`),
+  not just a hash of it — the difference between being able to *verify* a stored
+  score and being able to *recompute* one from nothing, and what lets policy
+  simulation replay history without a live upstream system.
 - **Missing is modelled, never zero-filled.** An absent input field is NaN, which
   the pipeline's missing-value machinery already handles; fabricating a zero would
   invent a customer attribute and score it with false confidence.
+- **Filtering by audience happens once, at read time.** SHAP factors and fired
+  rules are always computed and stored in full; a customer-facing request filters
+  the *response*, never what gets persisted. Baking the filter into computation
+  would mean a score first shown to a customer could never later be reviewed
+  internally in full — exactly the inconsistency a regulator would flag.
 - **Latency came from measurement.** The p99 tail was GC pauses, not compute, so the
   service calls `gc.freeze()` after loading the model — the large model objects are
   permanent and do not belong in any collection pass. Real-time decisions use the
   fast score-only path (p99 91 ms); explanations add SHAP (p99 107 ms) and can also
-  be served off the hot path.
+  be served off the hot path. The rule engine runs on *both* paths unconditionally —
+  a sanctions floor is cheap (no SHAP) and must never be something `explain=False`
+  can skip.
 - **Throughput is a process-count question.** Scoring is GIL-bound Python/pandas, so
   100 rps is reached with ~9 worker processes, not threads.
+
+## The rule engine: a no-code control surface that cannot weaken itself
+
+`config/risk_policy.yaml` is designed to be edited by a risk manager with no code
+review — which makes its `when` clauses an untrusted-enough input. The evaluator
+(`crr/rules/expressions.py`) parses each one with `ast` and walks a whitelist of
+node types (booleans, comparisons, `in`, literals, bare names); everything else —
+attribute access, calls, comprehensions, imports — is rejected at policy-load
+time. There is no code path from a rule string to arbitrary execution, and no
+`eval()` anywhere in the chain.
+
+The engine evaluates rules against the **raw customer record** — the same field
+names in the API's input contract and the data dictionary — never the pipeline's
+internally encoded feature matrix. A risk manager writes
+`source_of_funds_declared in ['undeclared', 'gift']` in the same vocabulary they
+already use to read a customer file, not against categorical-encoding internals.
+
+**Raise-only is structural, not conventional.** A fired rule's floor combines with
+the model's band through `max(...)` on the band's ordinal rank. Applying zero,
+one, or many rules is monotone by construction: there is no code path by which a
+rule — however the policy file is edited, including by mistake — can lower a
+band the model alone produced. A separate, simpler policy lever
+(`review.require_for_bands`) sends High/Extreme to review from the model score
+alone, with no rule needing to fire, because it compares the *computed* band,
+which a `when` expression scoped to raw input cannot see.
+
+**Versions are immutable and durable across a restart.** Reusing a version number
+for different content is a load error, checked against an on-disk archive (every
+version ever loaded, written once, never overwritten) — not only an in-process
+cache, which would make "immutable" a claim that only held between restarts. A
+broken edit degrades to serving the last known-good policy with a loud audit
+event, rather than failing every subsequent scoring request.
+
+**Policy simulation needs no model re-inference.** Everything downstream of the
+model's two probabilities — the composite blend, band cut-offs, rule floors, the
+review threshold — is a pure function of policy content. Replaying it against
+stored probabilities and the stored customer snapshot is exact, and cheap enough
+to run months of history in under a second; only a change to the model itself
+would need re-inference, and that is a retrain, not a policy edit.
 
 ## Explanations: SHAP into reason codes
 

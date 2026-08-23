@@ -15,7 +15,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +25,8 @@ from crr.explain import Explainer
 from crr.explain.reason_codes import BY_CODE
 from crr.features import FeaturePipeline
 from crr.models import ModelArtifact
-from crr.policy import RiskPolicy, load_policy
+from crr.policy import RiskPolicy, load_policy_or_fallback
+from crr.rules import FiredRule, RuleEngine
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MODEL_DIR = REPO_ROOT / "models"
@@ -53,30 +54,45 @@ class Assessment:
 
     customer_id: str
     risk_score: float
+    model_band: str
     risk_band: str
+    band_floor_applied: bool
     credit_probability: float
     financial_crime_probability: float
     top_factors: list[MergedFactor]
     protective_factors: list[MergedFactor]
+    fired_rules: list[FiredRule]
     requires_review: bool
     model_version: str
     policy_version: int
     scored_at: dt.datetime
     audience: str
     input_hash: str
+    customer_snapshot: dict[str, Any] = field(default_factory=dict)
     latency_ms: float = 0.0
     additivity_error: float = 0.0
 
     def to_audit_record(self) -> dict[str, Any]:
-        """The minimum needed to reproduce and defend this decision."""
+        """The minimum needed to reproduce and defend this decision.
+
+        ``risk_score`` stays the model's continuous composite even when a rule
+        floors the band: inflating the NUMBER to match a floored BAND would be
+        dishonest (a customer whose model score is 40 and gets floored to
+        Extreme by a sanctions hit should show 40 with an Extreme band and the
+        rule that did it, not a fabricated 97). ``model_band`` is what the
+        score alone produced; ``risk_band`` is what was actually acted on.
+        """
         return {
             "customer_id": self.customer_id,
             "scored_at": self.scored_at.isoformat(),
             "risk_score": round(self.risk_score, 4),
+            "model_band": self.model_band,
             "risk_band": self.risk_band,
+            "band_floor_applied": self.band_floor_applied,
             "credit_probability": round(self.credit_probability, 6),
             "financial_crime_probability": round(self.financial_crime_probability, 6),
             "requires_review": self.requires_review,
+            "fired_rule_ids": [r.id for r in self.fired_rules],
             "model_version": self.model_version,
             "policy_version": self.policy_version,
             "input_hash": self.input_hash,
@@ -148,12 +164,36 @@ class ScoringService:
     def __init__(self, bundle: ModelBundle, policy: RiskPolicy | None = None) -> None:
         self.bundle = bundle
         self._policy = policy
+        self._engine_cache: dict[str, RuleEngine] = {}
 
     @property
     def policy(self) -> RiskPolicy:
-        # Re-read on each access so a policy edit is picked up without a restart;
-        # load_policy caches on mtime, so this is cheap when nothing changed.
-        return self._policy or load_policy()
+        # Re-read on each access so a policy edit is picked up without a restart.
+        # load_policy_or_fallback caches on content hash, so this is cheap when
+        # nothing changed, and degrades to the last known-good policy rather than
+        # failing every request if the file is mid-edit or broken.
+        return self._policy or load_policy_or_fallback()
+
+    def _rule_engine(self, policy: RiskPolicy) -> RuleEngine:
+        """The compiled rule engine for this policy's exact content.
+
+        Compiling walks and validates every rule's AST (see
+        ``crr.rules.expressions``), which is unnecessary work to repeat on every
+        request when the policy has not changed — cached by content hash, the
+        same key ``load_policy`` itself uses to decide whether anything changed.
+        """
+        cached = self._engine_cache.get(policy.content_hash)
+        if cached is not None:
+            return cached
+        engine = RuleEngine(policy.rules)
+        # An unbounded cache would leak memory across policy edits over a long
+        # process lifetime; in practice policy edits are rare operator actions,
+        # so keeping only the current and previous few versions is enough headroom
+        # for in-flight requests spanning a reload, without growing forever.
+        if len(self._engine_cache) >= 8:
+            self._engine_cache.pop(next(iter(self._engine_cache)))
+        self._engine_cache[policy.content_hash] = engine
+        return engine
 
     def score(
         self,
@@ -188,8 +228,17 @@ class ScoringService:
             artifact = self.bundle.artifacts[dimension]
             if explain:
                 probabilities[dimension] = float(artifact.predict_proba(features)[0])
+                # Always compute the full internal view here, regardless of the
+                # audience the caller ultimately wants displayed. Filtering by
+                # audience is applied once, at the response/projection layer
+                # (crr.api.projections), never baked into what gets computed or
+                # persisted — otherwise a score first requested for a customer
+                # display would permanently lose the internal-only factors, and
+                # a LATER `GET /explain?audience=internal` on that same score
+                # could never recover them. The stored record must hold
+                # everything a reviewer might need to see.
                 explanation = explainer.explain_row(
-                    str(customer["customer_id"]), features, audience=audience, include_features=False
+                    str(customer["customer_id"]), features, audience="internal", include_features=False
                 )
                 additivity = max(additivity, explanation.additivity_error)
                 for factor in explanation.top_factors + explanation.protective_factors:
@@ -207,24 +256,31 @@ class ScoringService:
                 probabilities[dimension] = float(artifact.predict_proba(features)[0])
 
         risk_score = policy.composite_score(probabilities["credit"], probabilities["financial_crime"])
-        risk_band = policy.band_for_score(risk_score)
+        model_band = policy.band_for_score(risk_score)
         top, protective = self._merge_factors(all_factors, policy.explainability.top_factors,
                                               policy.explainability.min_absolute_shap)
 
-        # Interim review rule: High/Extreme goes to a human. The phase 5 rule
-        # engine replaces this with the policy's rule set (which can also floor
-        # the band and attach reason codes).
-        requires_review = risk_band in ("High", "Extreme")
+        # The rule engine evaluates against the RAW customer record — the same
+        # field names a risk manager writes in risk_policy.yaml and the same
+        # ones in the API's input contract — never the pipeline's internal
+        # encoded feature matrix. A rule can only raise the band or force
+        # review (see crr.rules.engine); it is structurally incapable of
+        # lowering either, however the policy file is edited.
+        outcome = self._rule_engine(policy).apply(model_band, customer, review_bands=policy.review_bands)
 
         return Assessment(
             customer_id=str(customer["customer_id"]),
             risk_score=risk_score,
-            risk_band=risk_band,
+            model_band=model_band,
+            risk_band=outcome.final_band,
+            band_floor_applied=outcome.band_floor_applied,
             credit_probability=probabilities["credit"],
             financial_crime_probability=probabilities["financial_crime"],
             top_factors=top,
             protective_factors=protective,
-            requires_review=requires_review,
+            fired_rules=list(outcome.fired_rules),
+            requires_review=outcome.requires_review,
+            customer_snapshot=dict(customer),
             model_version=self.bundle.version,
             policy_version=policy.version,
             scored_at=scored_at,
@@ -279,6 +335,26 @@ class ScoringService:
 
 
 def visible_factor(code: str) -> bool:
-    """Whether a reason code may appear in a customer-facing response."""
+    """Whether a SHAP-derived reason code may appear in a customer-facing response."""
     reason_code = BY_CODE.get(code)
     return reason_code is None or reason_code.customer_visible
+
+
+def filter_for_audience(
+    factors: list[dict[str, Any]], fired_rules: list[dict[str, Any]], audience: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Reduce a full (internal) factor/rule set down to what an audience may see.
+
+    The single place this filtering happens, applied identically whether the
+    caller is reading the immediate ``POST /score`` response or a later
+    ``GET /explain`` fetch of the same stored record — so the two can never
+    disagree about what is safe to show a customer. ``factors`` and
+    ``fired_rules`` are the plain-dict (JSON-serialisable) forms already used
+    for storage, so this works directly against a persisted record with no
+    reconstruction of dataclasses.
+    """
+    if audience != "customer":
+        return factors, fired_rules
+    visible_factors = [f for f in factors if visible_factor(f["code"])]
+    visible_rules = [r for r in fired_rules if r.get("customer_visible", True)]
+    return visible_factors, visible_rules
