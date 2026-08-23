@@ -5,8 +5,9 @@ structured financial data, an LLM branch over unstructured text (support calls,
 underwriter notes, KYC documents), SHAP explanations, and a policy layer a risk
 manager can retune without a deploy.
 
-**Status: phase 1 of 8 complete.** The synthetic data foundation is built,
-tested and validated. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan
+**Status: phases 1-2 of 8 complete.** The synthetic data foundation, the
+point-in-time feature pipeline and a calibrated LightGBM baseline are built,
+tested and measured. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan
 and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design.
 
 ## Quickstart
@@ -19,6 +20,10 @@ python scripts/generate_synthetic_data.py -n 10000 --language mixed
 
 # prove the data carries learnable signal before training anything on it
 python scripts/validate_dataset.py --data data/raw
+
+# train the calibrated baseline, with a per-feature-block ablation
+python scripts/train_baseline.py --ablation
+python scripts/train_baseline.py --target financial_crime_12m
 
 pytest
 ```
@@ -92,11 +97,12 @@ customer-risk-rating/
 ├── scripts/
 │   ├── generate_synthetic_data.py
 │   ├── validate_dataset.py      proves the data is fit to train on
+│   ├── train_baseline.py        trains, calibrates, ablates, judges exit criteria
 │   └── render_data_dictionary.py
 ├── src/crr/
 │   ├── data/                    ✅ phase 1 — synthetic generator, taxonomy, narratives
-│   ├── features/                ◻ phase 2 — point-in-time feature pipeline
-│   ├── models/                  ◻ phase 2 — LightGBM core
+│   ├── features/                ✅ phase 2 — point-in-time pipeline, feature contract
+│   ├── models/                  ✅ phase 2 — LightGBM core, calibration, metrics
 │   ├── explain/                 ◻ phase 3 — SHAP → reason codes
 │   ├── api/                     ◻ phase 4 — FastAPI service
 │   ├── db/                      ◻ phase 4 — PostgreSQL + Redis
@@ -105,6 +111,44 @@ customer-risk-rating/
 │   └── pipelines/               ◻ phase 6 — real-time re-scoring
 └── tests/
 ```
+
+## What phase 2 produced
+
+One `FeaturePipeline` used for **both** batch training and single-customer
+serving — there is no second implementation to drift. It emits 134 features
+across five blocks, validated against a contract that is saved with the model.
+
+- **Point-in-time correctness is enforced.** Event aggregates are filtered at the
+  snapshot date, and the test suite injects 300 future-dated events worth
+  −9,999,999 each and asserts the matrix is byte-identical.
+- **Leakage is rejected by construction.** Outcome labels, generator latents and
+  PII are refused by name and by pattern on every frame the pipeline builds, not
+  just in tests.
+- **Missingness is preserved, not imputed** — `source_of_funds_verified` goes
+  missing precisely when the declared source is 'undeclared', and imputing that
+  away destroys more signal than it recovers.
+- **Calibrated output.** Platt scaling on the validation split: expected
+  calibration error 0.0055, and 8 of 10 deciles within two standard errors.
+
+### Measured (60k customers, out-of-time test split)
+
+| | credit default | financial crime |
+|---|---|---|
+| test AUC / Gini | 0.769 / 0.538 | 0.799 / 0.598 |
+| expected calibration error | 0.0055 | 0.0016 |
+| top-decile lift | 4.5x | — |
+
+### The finding worth reading
+
+The feature blocks **do not move AUC beyond the noise floor**. 57 raw columns
+score 0.7722; all 134 score 0.7710, with ±0.002 seed noise. The pipeline's value
+in this phase is correctness — point-in-time safety, training/serving parity,
+dirty-data handling, calibration — not accuracy. Three specific things the
+ablation caught: six engineered features that were monotone transforms of a
+single column and therefore invisible to a tree; LightGBM categorical splits
+overfitting two 30-level columns at a cost of 0.005 AUC; and isotonic calibration
+collapsing 8,217 scores into 43 steps. All three are written up in
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Two things to know before phase 7
 

@@ -69,10 +69,35 @@ quietly disable a control — the loader rejects a rule that lowers risk.
 set version, input hash. In two years someone will ask why this customer was
 declined; without those four fields the answer is a shrug.
 
-**Point-in-time correctness is enforced, not encouraged.** Every feature carries
-the timestamp of the data behind it. A feature dated after the snapshot fails the
-build. This is the single most common way credit models get accidentally
-excellent in development and useless in production.
+**Point-in-time correctness is enforced, not encouraged.** Event aggregates are
+filtered at the customer's snapshot date, and the leakage guard runs on every
+frame the pipeline builds. This is the single most common way credit models get
+accidentally excellent in development and useless in production.
+
+**The model outputs a calibrated probability, not a score.** Platt scaling on the
+validation split, because the number feeds pricing, provisioning and a policy
+band cut-off — all of which need "7%" to mean seven percent. Isotonic was
+measured and rejected: it collapsed 8,217 distinct scores into 43 flat steps,
+which is unusable granularity for a 0-100 score with bands at 25/50/75.
+
+## The feature contract
+
+Built when the pipeline is fitted, saved beside the model, and validated on every
+frame at scoring time. It carries the exact column list and order, the type and
+allowed range of each feature, and the category vocabulary learned at fit time.
+
+It refuses forbidden columns by name *and* by pattern — outcome labels, generator
+latents, PII — on every frame the pipeline produces, not only under test. The
+cost is a set lookup per column. The cost of missing one is a model that scores
+0.99, passes review, and is worthless.
+
+Two properties the tests hold it to:
+
+- **Point-in-time.** Event aggregates filter at the snapshot date. Injecting 300
+  future-dated events worth −9,999,999 each must leave the matrix byte-identical.
+- **Parity.** Transforming one customer must produce exactly what batch scoring
+  produced for that customer, across all 134 features. This is what makes "one
+  code path for training and serving" a checked claim rather than an intention.
 
 ## Data flow (training)
 

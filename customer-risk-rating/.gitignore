@@ -4,8 +4,10 @@ data/interim/
 data/processed/
 !data/**/README.md
 
-# Models and experiment output
-models/
+# Trained model artefacts and experiment output.
+# Anchored with a leading slash: a bare "models/" also matches the
+# src/crr/models/ source package and silently excludes it from the repo.
+/models/
 mlruns/
 *.pkl
 *.joblib

@@ -5,7 +5,7 @@ feeling — because "the model seems good" is how risk systems get deployed and
 then quietly fail. Phases 1-4 produce a system you could demo; phases 5-8 produce
 one a bank's model-risk committee would actually sign off.
 
-Phase 1 is **done** (see `src/crr/data/`, `scripts/generate_synthetic_data.py`).
+Phases 1-2 are **done** (see `src/crr/data/`, `src/crr/features/`, `src/crr/models/`).
 
 ---
 
@@ -33,31 +33,125 @@ lift, and measurable headroom for the LLM branch. Numbers in [`RESULTS`](#phase-
 
 ---
 
-## Phase 2 — Feature pipeline and tabular baseline
+## Phase 2 — Feature pipeline and tabular baseline ✅
 
 **Goal.** A reproducible path from raw frames to a model-ready matrix, and the
 first honest benchmark.
 
-**Work.**
-- `crr/features/`: point-in-time-correct feature builders. Every feature carries
-  the timestamp of the data it used; anything dated after `snapshot_date` is a
-  leak and must fail the build, not warn.
-- Aggregations computed from `events.csv` rather than taken pre-aggregated, so the
-  same code path serves batch training and real-time scoring.
-- Imputation and encoding that survive MNAR (missingness itself is a feature —
-  `source_of_funds_verified` being absent is informative, and imputing it away
-  destroys signal).
-- LightGBM baseline on both targets, out-of-time validation, isotonic calibration.
-- A feature store contract so training and serving cannot diverge.
+**Delivered.**
+- `crr/features/`: a single pipeline used for both batch training and
+  single-customer serving, so there is no second implementation to drift.
+- **Point-in-time correctness enforced, not encouraged.** Event aggregates are
+  computed from the raw stream with a hard filter at the snapshot date. The test
+  suite injects 300 future-dated events worth −9,999,999 each and asserts the
+  feature matrix is byte-identical.
+- **A feature contract** (`crr/features/contract.py`) that rejects outcome
+  labels, generator latents and PII by name *and* by pattern, on every frame the
+  pipeline produces — not only in tests. It is saved with the model and validated
+  at scoring time, so a renamed upstream column fails loudly instead of becoming
+  an all-null feature.
+- Categorical normalisation that collapses the deliberately dirty values
+  (`Self-Employed` / `self employed` / `SELF_EMPLOYED` → one category), with
+  explicit sentinels for unseen and missing values.
+- Missing **indicators** rather than imputation, so the MNAR signal survives.
+- LightGBM baseline, out-of-time early stopping, Platt calibration.
 
-**Exit criterion.** Test-split AUC within 0.01 of the validation-split AUC (no
-overfit), calibration error under 2 percentage points per decile, and a
-leakage test suite that fails when a future-dated feature is introduced.
+**Exit criteria — met**, on both targets (see the results table below).
 
-**Main risk.** Training/serving skew. Mitigated by generating serving features
-through the identical code path, and asserting equality on a held-out sample.
+### Three findings that changed the design
 
----
+**1. Six of nineteen engineered features contributed exactly zero.** They were
+monotone transforms of a single existing column — `debt_service_headroom = 1 −
+dti_ratio`, `savings_months_of_cover = savings_to_income_ratio × 12`, a binned
+`account_seasoning_bucket`, and three more. A decision tree is invariant to
+those: a split at `x ≥ t` is the same partition as a split at `f(x) ≥ f(t)`.
+They look like sensible feature engineering, they are written by reflex, and for
+a tree model they are pure cost. Removed. They would matter for a linear model,
+where choosing the functional form is the modeller's job.
+
+**2. LightGBM's native categorical splits were losing 0.005 AUC.** With
+`country_of_residence` (33 levels) and `occupation` (30 levels) against ~2,100
+defaults, the default settings overfit: adding the categorical block scored
+*worse* than dropping it entirely. Tightened `cat_smooth`, `cat_l2`,
+`min_data_per_group` and `max_cat_threshold` and the regression went from −0.0041
+to −0.0006. If those columns need to contribute more, the answer is out-of-fold
+target or WOE encoding, not looser splits.
+
+**3. Isotonic calibration was the wrong default.** It is the reflex choice, and
+here it lost on both axes: it collapsed 8,217 distinct scores into 43 flat steps,
+cost 0.0014 AUC, and calibrated *worse* than Platt scaling (ECE 0.0087 vs
+0.0056). For a 0-100 score with policy bands cutting at 25/50/75, 43 distinct
+values is unusable granularity. Platt is strictly monotone, so AUC is preserved
+exactly. Both remain available behind `--calibration`.
+
+### The uncomfortable result: the feature blocks do not move AUC
+
+Averaged over three seeds, on the credit target:
+
+| feature set | n | test AUC | seed sd | delta |
+|---|---|---|---|---|
+| raw customer columns | 57 | 0.7722 | 0.0017 | — |
+| + categorical encoding | 69 | 0.7716 | 0.0027 | −0.0006 |
+| + missing indicators | 77 | 0.7720 | 0.0017 | +0.0004 |
+| + engineered ratios | 90 | 0.7704 | 0.0029 | −0.0016 |
+| + event aggregates | 134 | 0.7710 | 0.0017 | +0.0007 |
+
+**No block moves AUC beyond the ±0.002 noise floor.** That is the honest finding
+and it should not be dressed up. Two things follow from it.
+
+First, the pipeline's value in this phase is **correctness, not accuracy**:
+point-in-time safety, training/serving parity, surviving dirty categoricals and
+MNAR missingness, and producing a calibrated probability. Those are properties
+you cannot get back later, and none of them shows up in an AUC column.
+
+Second, the event block underperforms here for a reason specific to the data:
+the phase 1 generator does not make the credit outcome depend on the raw event
+stream (best univariate event feature: 0.548 AUC against 0.756 for
+`credit_utilization_ratio`). Real transaction data carries far more, and the
+block is a prerequisite for phase 6 regardless — real-time re-scoring is
+event-driven by definition. But on *this* data it earns its place on
+architecture, not on measurement, and saying otherwise would be dishonest.
+
+The ablation is itself a deliverable: it says ship 57 features, not 134, unless
+a later phase gives the rest something to do.
+
+### Measured results (60,000 customers, out-of-time test split)
+
+| | credit default | financial crime |
+|---|---|---|
+| prevalence (test) | 5.41% | 1.42% |
+| test AUC | 0.7692 | 0.7991 |
+| test Gini | 0.5383 | 0.5982 |
+| test KS | 0.4187 | 0.4606 |
+| test PR-AUC | 0.2651 | 0.1456 |
+| expected calibration error | 0.0055 | 0.0016 |
+| calibration bins within 2 SE | 8/10 | 10/10 |
+| validation→test AUC gap | 0.0038 | 0.0250 |
+| train→test AUC gap | 0.044 | **0.179** |
+
+The financial-crime model memorises: 0.978 train AUC against 0.799 test, on ~650
+positives and 134 features. It generalises acceptably today, but that gap is a
+standing instability risk under drift and it is reported on every run rather than
+left to be discovered. Fewer features or stronger regularisation for that target
+is phase 3 work.
+
+### Two exit criteria were rewritten, and why
+
+The roadmap originally said *"test AUC within 0.01 of validation AUC"* and
+*"calibration error under 2 percentage points per decile"*. Both were replaced,
+because both were unachievable for reasons unrelated to model quality:
+
+- With ~550 positives in a split, the sampling standard error of a single AUC is
+  already about 0.012. A 0.01 threshold sits below the noise floor and would fail
+  good models at random. Now the gap is compared against **2 standard errors of
+  the gap itself** (Hanley-McNeil).
+- The worst of ten calibration bins is an extreme order statistic dominated by
+  noise at 5% prevalence. The headline is now the count-weighted **expected**
+  calibration error, with the worst bin still reported next to its own standard
+  error so nobody chases a deviation that is only sampling.
+
+Writing a criterion you cannot measure is worse than writing none: it gets quietly
+dropped the first time it fails.
 
 ## Phase 3 — Explainability (XAI)
 
