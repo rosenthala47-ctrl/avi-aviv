@@ -24,6 +24,8 @@ import pandas as pd
 from crr.explain import Explainer
 from crr.explain.reason_codes import BY_CODE
 from crr.features import FeaturePipeline
+from crr.llm.batch import extract_all
+from crr.llm.extraction import Extractor
 from crr.models import ModelArtifact
 from crr.policy import RiskPolicy, load_policy_or_fallback
 from crr.rules import FiredRule, RuleEngine
@@ -71,6 +73,10 @@ class Assessment:
     customer_snapshot: dict[str, Any] = field(default_factory=dict)
     latency_ms: float = 0.0
     additivity_error: float = 0.0
+    degraded: bool = False
+    """True when narrative text was supplied but no real extraction happened
+    (no extractor configured, or the LLM was unavailable) — the score is
+    tabular-only rather than failing the request (roadmap phase 7)."""
 
     def to_audit_record(self) -> dict[str, Any]:
         """The minimum needed to reproduce and defend this decision.
@@ -99,6 +105,7 @@ class Assessment:
             "audience": self.audience,
             "additivity_error": self.additivity_error,
             "latency_ms": round(self.latency_ms, 3),
+            "degraded": self.degraded,
         }
 
 
@@ -161,9 +168,10 @@ def _hash_payload(payload: dict[str, Any]) -> str:
 class ScoringService:
     """Stateless scorer. Persistence and caching are the router's concern."""
 
-    def __init__(self, bundle: ModelBundle, policy: RiskPolicy | None = None) -> None:
+    def __init__(self, bundle: ModelBundle, policy: RiskPolicy | None = None, extractor: Extractor | None = None) -> None:
         self.bundle = bundle
         self._policy = policy
+        self._extractor = extractor
         self._engine_cache: dict[str, RuleEngine] = {}
 
     @property
@@ -199,13 +207,22 @@ class ScoringService:
         self,
         customer: dict[str, Any],
         events: list[dict[str, Any]] | None = None,
+        narratives: dict[str, str] | None = None,
         *,
         audience: str = "internal",
         explain: bool = True,
         now: dt.datetime | None = None,
     ) -> Assessment:
-        """Score one customer. ``customer`` and ``events`` are plain dicts (the
-        router passes ``model_dump()`` of the validated payloads).
+        """Score one customer. ``customer``, ``events`` and ``narratives`` are
+        plain dicts (the router passes ``model_dump()`` of the validated
+        payloads).
+
+        ``narratives`` is optional free text (support-call summary,
+        underwriter note, KYC extract) fed through the configured extractor
+        (phase 7). No narratives, or no extractor configured, or the
+        extractor unavailable, all score tabular-only — only the last one
+        sets ``Assessment.degraded``, since it is the only one that means "we
+        tried and could not."
 
         ``explain=False`` skips the SHAP pass entirely and returns the score, band
         and probabilities with no factors. That is the low-latency path for a
@@ -216,7 +233,8 @@ class ScoringService:
         policy = self.policy
         scored_at = now or dt.datetime.now(dt.UTC)
 
-        features = self._build_features(customer, events or [])
+        text_features, degraded = self._narrative_features(customer, narratives)
+        features = self._build_features(customer, events or [], text_features)
 
         probabilities: dict[str, float] = {}
         all_factors: list[MergedFactor] = []
@@ -285,11 +303,42 @@ class ScoringService:
             policy_version=policy.version,
             scored_at=scored_at,
             audience=audience,
-            input_hash=_hash_payload({"customer": customer, "events": events or []}),
+            input_hash=_hash_payload({"customer": customer, "events": events or [], "narratives": narratives or {}}),
             additivity_error=additivity,
+            degraded=degraded,
         )
 
-    def _build_features(self, customer: dict[str, Any], events: list[dict[str, Any]]) -> pd.DataFrame:
+    def _narrative_features(
+        self, customer: dict[str, Any], narratives: dict[str, str] | None
+    ) -> tuple[pd.DataFrame | None, bool]:
+        """Runs ``narratives`` through the configured extractor and returns the
+        raw extraction frame ``FeaturePipeline`` expects (the same shape
+        ``crr.llm.batch.extract_all`` produces for training — one code path,
+        not two that could drift), plus whether the request degraded to
+        tabular-only. No narratives supplied is not a degradation — it is
+        simply nothing to extract, same as a customer with no events."""
+        if not narratives or not any(narratives.values()):
+            return None, False
+        if self._extractor is None:
+            return None, True
+
+        narratives_frame = pd.DataFrame(
+            [
+                {
+                    "customer_id": str(customer["customer_id"]),
+                    "support_call_summary": narratives.get("support_call_summary") or "",
+                    "underwriter_note": narratives.get("underwriter_note") or "",
+                    "kyc_document_extract": narratives.get("kyc_document_extract") or "",
+                }
+            ]
+        )
+        extraction_frame = extract_all(narratives_frame, self._extractor)
+        degraded = bool(extraction_frame["degraded"].iloc[0])
+        return (None if degraded else extraction_frame), degraded
+
+    def _build_features(
+        self, customer: dict[str, Any], events: list[dict[str, Any]], text_features: pd.DataFrame | None = None
+    ) -> pd.DataFrame:
         """One-row feature frame. Omitted fields become NaN, never zero."""
         row = dict(customer)
         row.setdefault("split", "serve")
@@ -304,7 +353,7 @@ class ScoringService:
             events_frame["event_ts"] = pd.to_datetime(events_frame["event_ts"])
             if "event_id" not in events_frame.columns:
                 events_frame.insert(0, "event_id", [f"EVT-REQ-{i}" for i in range(len(events_frame))])
-        return self.bundle.pipeline.transform(customers, events_frame)
+        return self.bundle.pipeline.transform(customers, events_frame, text_features)
 
     def _merge_factors(
         self, factors: list[MergedFactor], top_n: int, min_abs: float

@@ -53,4 +53,5 @@ def explain(
         model_version=stored.model_version,
         policy_version=stored.policy_version,
         scored_at=stored.scored_at,
+        degraded=stored.degraded,
     )

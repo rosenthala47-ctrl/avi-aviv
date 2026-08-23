@@ -13,18 +13,25 @@ from fastapi import Request
 from crr.api.cache import InMemoryCache, KeyValueStore, RedisCache
 from crr.api.repository import (
     EventRepository,
+    ExtractionRepository,
     InMemoryEventRepository,
+    InMemoryExtractionRepository,
     InMemoryJobRepository,
     InMemoryScoreRepository,
     JobRepository,
     ScoreRepository,
     SqlAlchemyEventRepository,
+    SqlAlchemyExtractionRepository,
     SqlAlchemyJobRepository,
     SqlAlchemyScoreRepository,
     create_session_factory,
 )
 from crr.api.scoring import ModelBundle, ScoringService
 from crr.api.settings import Settings
+from crr.llm.anthropic_extractor import AnthropicExtractor
+from crr.llm.cache import CachingExtractor
+from crr.llm.extraction import Extractor
+from crr.llm.reference_extractor import ReferenceExtractor
 from crr.pipelines.notifications import LoggingNotificationSink, NotificationSink
 from crr.pipelines.rescoring import RescoringEngine
 
@@ -53,9 +60,33 @@ def build_notifications(settings: Settings) -> NotificationSink:  # settings: un
     return LoggingNotificationSink()
 
 
+def build_extraction_cache(settings: Settings) -> ExtractionRepository:
+    """A separate connection pool from ``build_backends``'s when a database is
+    configured — a second, small pool against the same URL, traded here for
+    keeping this concern independent (the same choice already made for
+    ``build_notifications``). Worth revisiting only if pool exhaustion is
+    ever actually observed."""
+    if settings.database_url:
+        return SqlAlchemyExtractionRepository(create_session_factory(settings.database_url))
+    return InMemoryExtractionRepository()
+
+
+def build_extractor(settings: Settings) -> Extractor:
+    """The real Claude-backed extractor when an API key is configured, the
+    deterministic reference extractor otherwise — the same "runs with no
+    infrastructure by default" pattern as every other backend here. Always
+    cached: notes change rarely and LLM calls dominate cost (phase 7)."""
+    inner: Extractor
+    if settings.anthropic_api_key:
+        inner = AnthropicExtractor(api_key=settings.anthropic_api_key, model=settings.extraction_model)
+    else:
+        inner = ReferenceExtractor()
+    return CachingExtractor(inner, build_extraction_cache(settings))
+
+
 def load_service(settings: Settings) -> ScoringService:
     bundle = ModelBundle.load(settings.model_dir)
-    return ScoringService(bundle)
+    return ScoringService(bundle, extractor=build_extractor(settings))
 
 
 # ---- request-scoped accessors -------------------------------------------

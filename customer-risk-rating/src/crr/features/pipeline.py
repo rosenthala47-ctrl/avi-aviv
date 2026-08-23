@@ -22,9 +22,10 @@ import pandas as pd
 
 from crr.features.contract import FeatureContract, FeatureSpec, assert_no_leakage
 from crr.features.events import EVENT_WINDOWS, build_event_features, event_feature_specs
+from crr.features.text import TEXT_FEATURE_COLUMNS, build_text_features
 from crr.features.transforms import CategoricalEncoder, missing_indicators, safe_ratio
 
-PIPELINE_VERSION = "1.0.0"
+PIPELINE_VERSION = "1.1.0"  # phase 7: adds the text-extraction feature block
 
 #: Identifiers and PII. Dropped, never modelled.
 DROP_COLUMNS: tuple[str, ...] = (
@@ -111,7 +112,9 @@ class FeaturePipeline:
 
     # ---- fit / transform -------------------------------------------------
 
-    def fit(self, customers: pd.DataFrame, events: pd.DataFrame | None = None) -> FeaturePipeline:
+    def fit(
+        self, customers: pd.DataFrame, events: pd.DataFrame | None = None, text_features: pd.DataFrame | None = None
+    ) -> FeaturePipeline:
         """Learn category vocabularies and freeze the output contract.
 
         Must be given the TRAINING split only. Fitting on all the data lets the
@@ -123,7 +126,7 @@ class FeaturePipeline:
         self.encoder.fit(categorical_source, list(categorical_source.columns))
 
         # Build once to discover the concrete numeric column set, then freeze it.
-        frame = self._assemble(customers, events)
+        frame = self._assemble(customers, events, text_features)
         self._contract = FeatureContract(
             pipeline_version=PIPELINE_VERSION,
             specs=tuple(self._specs(frame)),
@@ -131,19 +134,25 @@ class FeaturePipeline:
         )
         return self
 
-    def transform(self, customers: pd.DataFrame, events: pd.DataFrame | None = None) -> pd.DataFrame:
+    def transform(
+        self, customers: pd.DataFrame, events: pd.DataFrame | None = None, text_features: pd.DataFrame | None = None
+    ) -> pd.DataFrame:
         """Build the feature matrix, validated against the frozen contract."""
-        frame = self._assemble(customers, events)
+        frame = self._assemble(customers, events, text_features)
         frame = frame[self.contract.names]
         self.contract.validate(frame, check_ranges=False)
         return frame
 
-    def fit_transform(self, customers: pd.DataFrame, events: pd.DataFrame | None = None) -> pd.DataFrame:
-        return self.fit(customers, events).transform(customers, events)
+    def fit_transform(
+        self, customers: pd.DataFrame, events: pd.DataFrame | None = None, text_features: pd.DataFrame | None = None
+    ) -> pd.DataFrame:
+        return self.fit(customers, events, text_features).transform(customers, events, text_features)
 
     # ---- internals -------------------------------------------------------
 
-    def _assemble(self, customers: pd.DataFrame, events: pd.DataFrame | None) -> pd.DataFrame:
+    def _assemble(
+        self, customers: pd.DataFrame, events: pd.DataFrame | None, text_features: pd.DataFrame | None = None
+    ) -> pd.DataFrame:
         if "customer_id" not in customers.columns:
             raise ValueError("customers frame must carry customer_id")
 
@@ -161,11 +170,12 @@ class FeaturePipeline:
         derived_numeric = derived.astype("float64")
         indicators = missing_indicators(customers, list(INDICATOR_COLUMNS))
         events_frame = self._event_block(customers, events)
+        text_frame = build_text_features(customers, text_features)
 
-        for block in (numeric, derived_numeric, indicators, categorical, events_frame):
+        for block in (numeric, derived_numeric, indicators, categorical, events_frame, text_frame):
             block.index = customers.index
 
-        frame = pd.concat([numeric, derived_numeric, indicators, categorical, events_frame], axis=1)
+        frame = pd.concat([numeric, derived_numeric, indicators, categorical, events_frame, text_frame], axis=1)
         frame = frame.loc[:, ~frame.columns.duplicated()]
         assert_no_leakage(frame)
         return frame
@@ -271,6 +281,12 @@ class FeaturePipeline:
                 specs.append(FeatureSpec(column, "categorical", "categorical", f"Normalised category: {column}."))
             elif column in DERIVED_COLUMNS:
                 specs.append(FeatureSpec(column, "numeric", "derived", f"Engineered ratio or composite: {column}."))
+            elif column in TEXT_FEATURE_COLUMNS:
+                maximum = 3 if column.endswith("_level") else 1
+                specs.append(
+                    FeatureSpec(column, "numeric", "text_extraction", f"LLM-extracted signal: {column}.",
+                                minimum=0, maximum=maximum)
+                )
             elif column.endswith("_is_missing"):
                 source = column.removesuffix("_is_missing")
                 specs.append(

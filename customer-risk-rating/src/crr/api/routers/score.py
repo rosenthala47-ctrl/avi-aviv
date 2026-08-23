@@ -28,8 +28,9 @@ def score(
     started = time.perf_counter()
     customer = request.customer.model_dump()
     events = [e.model_dump() for e in request.events]
+    narratives = request.narratives.model_dump() if request.narratives is not None else None
 
-    assessment = service.score(customer, events, audience=request.audience, explain=request.explain)
+    assessment = service.score(customer, events, narratives, audience=request.audience, explain=request.explain)
 
     # Idempotency: a client retry with the same input returns the first score
     # rather than creating a second one at a new timestamp.

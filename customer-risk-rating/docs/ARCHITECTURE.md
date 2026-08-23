@@ -243,6 +243,67 @@ deliberate layering, not an oversight, and the reason a single triggered
 event moves the model's score but essentially never moves a rule-forced band
 floor.
 
+## The LLM extraction branch: bounded signals, not a delegated decision
+
+The LLM's whole job is four numbers: `distress_level`, `concealment_level`
+(0-3, each with a confidence, and the two that become model features),
+`stated_life_events` and `evasiveness_detected` (explainability-only — see
+below). It never sees the model's output, never proposes a score or a band,
+and structurally cannot: the tool schema it must answer through
+(`crr.llm.extraction.ExtractionResult`, generated once and reused for both
+the tool definition and the response validation) has no field that means a
+decision. A hallucination degrades one bounded feature; it cannot fabricate
+one.
+
+**Why only two of the four signals are model features.** `distress_level` and
+`concealment_level` are not an arbitrary product choice — they are exactly
+the two latents `crr.data.synthetic`'s outcome equations weight
+(`BETA_CREDIT`'s `text_distress`, `BETA_CRIME`'s `text_concealment`), and the
+narrative text is quantile-binned from those same latents, nothing finer.
+Recovering the level is therefore, by construction, the signal a tabular-only
+model is missing. `stated_life_events` and `evasiveness_detected` are surface
+realisations of the *same* draw, not an independent causal channel — they
+exist for a reviewer's benefit (the same "give a reason, not just a number"
+principle as the SHAP reason codes), not to move AUC, and are not expected to.
+
+**Prompt injection: two layers, one of which does not depend on the model
+behaving.** A KYC document or a call transcript is exactly the kind of field
+a subject — or a compromised document — can influence, so narrative text is
+untrusted input by default, the same posture this document's security table
+already states. Layer one is the prompt: every narrative is wrapped in an
+escaped `<customer_notes>` envelope, and the system prompt states, before the
+model sees any note, that its content is data to analyse, never instructions
+— an embedded attempt to instruct is itself scored as evasiveness, not
+obeyed. Layer two is the schema, and it is the one that matters if layer one
+ever fails against a more persuadable future model: `tool_choice` forces the
+answer through `ExtractionResult`'s bounded fields, so even a fully
+successful injection cannot express "set risk_band to Low" — no field means
+that, every numeric field is range-checked, and the result is re-validated by
+Pydantic independent of what the model claims to have done.
+
+**Two extractors, one interface, the same pattern as every other backend in
+this project.** `ReferenceExtractor` — deterministic keyword scoring, no
+network — is the zero-infrastructure default and the honest floor: it is
+written from general judgement about how English and Hebrew financial notes
+read, not tuned against `crr.data.narratives`'s own phrase banks, because an
+extractor built by matching the exact vocabulary it will be measured against
+would make its own accuracy a rigged number rather than a real one.
+`AnthropicExtractor` is the production swap, forcing its answer through the
+same schema. `CachingExtractor` wraps either one behind a content-hash cache
+keyed on the narrative text *and* the extractor's version string — a prompt
+rewrite or model upgrade must invalidate old results, not silently keep
+serving them — and only successful extractions are cached, so one transient
+API failure retries on the next real request instead of being remembered as
+a permanent "unavailable".
+
+**Degradation is structural, not a try/except bolted on afterward.** No
+narratives supplied and no extractor configured both score tabular-only
+silently — neither is a failure. Only a genuine attempted-and-failed
+extraction (no API key, a timeout, a response that fails schema validation)
+sets `degraded=True`, propagated through `Assessment` into the stored score
+and the `/score` response, so "this decision used less signal than usual" is
+an auditable fact, not a silent gap.
+
 ## Explanations: SHAP into reason codes
 
 The explainer takes the exact per-feature TreeSHAP contributions and aggregates
@@ -296,3 +357,12 @@ three things. Those are the places to compete:
 What *not* to claim: better raw accuracy. On tabular credit data everyone is
 using gradient-boosted trees on similar features and lands within a few points of
 Gini of each other. Accuracy is table stakes; the differentiators above are not.
+
+The phase-7 LLM branch's measured AUC lift is real (see `docs/ROADMAP.md`) but
+is not this claim either — it is closing a gap the tabular block structurally
+cannot see (signal that exists only in free text), not out-competing another
+vendor's tree on the same numeric features. The competitive claim it actually
+supports is explanation quality (bullet 2): a reason like "distress=2, cited
+employer restructuring and an unprompted hardship enquiry" is a materially
+better adverse-action explanation than a numeric feature contribution most
+customers and most vendors' own rule traces cannot produce.

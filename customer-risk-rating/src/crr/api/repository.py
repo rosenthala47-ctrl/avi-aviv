@@ -15,12 +15,14 @@ from __future__ import annotations
 import datetime as dt
 import json
 from dataclasses import asdict, dataclass, field
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from crr.db.models import Base, EventRecord, JobRecord, ScoreRecord
+from crr.db.models import Base, EventRecord, ExtractionRecord, JobRecord, ScoreRecord
+from crr.llm.extraction import ExtractionSource
 
 
 @dataclass
@@ -51,6 +53,7 @@ class StoredScore:
     audience: str
     customer_snapshot: dict[str, Any] = field(default_factory=dict)
     explanation: dict[str, Any] = field(default_factory=dict)
+    degraded: bool = False
 
 
 @dataclass
@@ -96,6 +99,30 @@ class StoredEvent:
 class EventRepository(Protocol):
     def append(self, event: StoredEvent) -> None: ...
     def history(self, customer_id: str, limit: int = 10_000) -> list[StoredEvent]: ...
+
+
+@dataclass
+class StoredExtraction:
+    """A cached, successful text extraction (storage-agnostic). See
+    ``ExtractionRecord`` for why only successes are ever stored here."""
+
+    content_hash: str
+    customer_id: str
+    source: ExtractionSource
+    extractor_version: str
+    distress_level: int
+    distress_confidence: float
+    concealment_level: int
+    concealment_confidence: float
+    created_at: dt.datetime
+    stated_life_events: tuple[str, ...] = ()
+    evasiveness_detected: bool = False
+    evasiveness_confidence: float = 0.0
+
+
+class ExtractionRepository(Protocol):
+    def get(self, content_hash: str) -> StoredExtraction | None: ...
+    def put(self, extraction: StoredExtraction) -> None: ...
 
 
 # --------------------------------------------------------------------------
@@ -167,6 +194,17 @@ class InMemoryEventRepository:
         return events[-limit:]
 
 
+class InMemoryExtractionRepository:
+    def __init__(self) -> None:
+        self._cache: dict[str, StoredExtraction] = {}
+
+    def get(self, content_hash: str) -> StoredExtraction | None:
+        return self._cache.get(content_hash)
+
+    def put(self, extraction: StoredExtraction) -> None:
+        self._cache[extraction.content_hash] = extraction
+
+
 # --------------------------------------------------------------------------
 # SQLAlchemy (production; tested against SQLite)
 # --------------------------------------------------------------------------
@@ -234,6 +272,7 @@ def _to_stored(record: ScoreRecord) -> StoredScore:
         audience=record.audience,
         customer_snapshot=record.customer_snapshot,
         explanation=record.explanation,
+        degraded=bool(record.degraded),
     )
 
 
@@ -260,6 +299,7 @@ class SqlAlchemyScoreRepository:
                     audience=score.audience,
                     customer_snapshot=score.customer_snapshot,
                     explanation=score.explanation,
+                    degraded=int(score.degraded),
                 )
             )
             session.commit()
@@ -344,6 +384,53 @@ class SqlAlchemyEventRepository:
                 for r in records
             ]
             return list(reversed(events))  # chronological, matching the in-memory repository
+
+
+class SqlAlchemyExtractionRepository:
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
+
+    def get(self, content_hash: str) -> StoredExtraction | None:
+        with self._session_factory() as session:
+            record = session.get(ExtractionRecord, content_hash)
+            if record is None:
+                return None
+            return StoredExtraction(
+                content_hash=record.content_hash, customer_id=record.customer_id,
+                # The column is a plain string; only put() ever writes it, and it only
+                # ever writes a valid ExtractionSource, so this is a trusted narrowing.
+                source=cast(ExtractionSource, record.source),
+                extractor_version=record.extractor_version, distress_level=record.distress_level,
+                distress_confidence=record.distress_confidence, concealment_level=record.concealment_level,
+                concealment_confidence=record.concealment_confidence, created_at=record.created_at,
+                stated_life_events=tuple(record.stated_life_events), evasiveness_detected=bool(record.evasiveness_detected),
+                evasiveness_confidence=record.evasiveness_confidence,
+            )
+
+    def put(self, extraction: StoredExtraction) -> None:
+        with self._session_factory() as session:
+            # content_hash is the whole narrative text plus the extractor version, so
+            # two puts for the same hash are always the same content by construction —
+            # a concurrent duplicate is a benign race, not a real conflict, and is
+            # dropped rather than raised.
+            existing = session.get(ExtractionRecord, extraction.content_hash)
+            if existing is not None:
+                return
+            session.add(
+                ExtractionRecord(
+                    content_hash=extraction.content_hash, customer_id=extraction.customer_id,
+                    source=extraction.source, extractor_version=extraction.extractor_version,
+                    distress_level=extraction.distress_level, distress_confidence=extraction.distress_confidence,
+                    concealment_level=extraction.concealment_level, concealment_confidence=extraction.concealment_confidence,
+                    stated_life_events=list(extraction.stated_life_events),
+                    evasiveness_detected=int(extraction.evasiveness_detected),
+                    evasiveness_confidence=extraction.evasiveness_confidence, created_at=extraction.created_at,
+                )
+            )
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
 
 
 class SqlAlchemyJobRepository:

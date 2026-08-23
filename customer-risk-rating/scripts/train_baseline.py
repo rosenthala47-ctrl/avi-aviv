@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -28,6 +29,9 @@ if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from crr.features import FeaturePipeline  # noqa: E402
+from crr.llm.anthropic_extractor import AnthropicExtractor  # noqa: E402
+from crr.llm.batch import extract_all  # noqa: E402
+from crr.llm.reference_extractor import ReferenceExtractor  # noqa: E402
 from crr.models import build_artifact, format_metrics, summarise, train_booster  # noqa: E402
 from crr.models.metrics import calibration_table, decile_table  # noqa: E402
 
@@ -46,12 +50,25 @@ standard errors of the gap. The original 'within 0.01 AUC' wording is below the
 noise floor for a split of this size, so it would fail good models at random."""
 
 
-def load_data(data_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def load_data(data_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame | None]:
     customers = pd.read_csv(data_dir / "customers.csv", parse_dates=["snapshot_date"])
     outcomes = pd.read_csv(data_dir / "outcomes.csv")
     events_path = data_dir / "events.csv"
     events = pd.read_csv(events_path, parse_dates=["event_ts"]) if events_path.exists() else pd.DataFrame()
-    return customers, outcomes, events
+    narratives_path = data_dir / "narratives.csv"
+    narratives = pd.read_csv(narratives_path) if narratives_path.exists() else None
+    return customers, outcomes, events, narratives
+
+
+def load_extractor(name: str) -> AnthropicExtractor | ReferenceExtractor:
+    if name == "reference":
+        return ReferenceExtractor()
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    extractor = AnthropicExtractor(api_key=api_key)
+    if not extractor.available:
+        print("warning: --extractor anthropic requested but ANTHROPIC_API_KEY is not set "
+              "(or the anthropic package is not installed) — every extraction will be degraded.", file=sys.stderr)
+    return extractor
 
 
 def split_masks(customers: pd.DataFrame) -> dict[str, np.ndarray]:
@@ -88,6 +105,8 @@ def run_ablation(
         ("+ missing indicators", ["customer", "categorical", "indicator"]),
         ("+ engineered ratios", ["customer", "categorical", "indicator", "derived"]),
         ("+ event aggregates (all)", ["customer", "categorical", "indicator", "derived", "event"]),
+        ("+ text extraction (phase 7)",
+         ["customer", "categorical", "indicator", "derived", "event", "text_extraction"]),
     ]
 
     rows = []
@@ -133,12 +152,15 @@ def main(argv: list[str] | None = None) -> int:
                         help="see crr.models.calibration for why platt is the default")
     parser.add_argument("--ablation", action="store_true", help="measure the contribution of each feature block")
     parser.add_argument("--ablation-seeds", type=int, default=3, help="seeds to average each ablation row over")
+    parser.add_argument("--extractor", choices=["reference", "anthropic"], default="reference",
+                        help="reference: deterministic, no network, the honest floor (default). "
+                             "anthropic: the real extractor, needs ANTHROPIC_API_KEY.")
     parser.add_argument("--no-save", action="store_true")
     args = parser.parse_args(argv)
 
     out_dir = args.out or (REPO_ROOT / "models" / args.target)
 
-    customers, outcomes, events = load_data(args.data)
+    customers, outcomes, events, narratives = load_data(args.data)
     labels = outcomes.set_index("customer_id")[args.target]
     y = labels.loc[customers["customer_id"]].to_numpy(dtype=int)
     masks = split_masks(customers)
@@ -150,10 +172,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {name:<12}{int(mask.sum()):>8,} rows   prevalence {y[mask].mean():>7.2%}")
     print()
 
+    text_features = None
+    if narratives is not None:
+        extractor = load_extractor(args.extractor)
+        print(f"  extracting text signals ({args.extractor}) for {len(narratives):,} customers...")
+        text_features = extract_all(narratives, extractor)
+        degraded_share = text_features["degraded"].mean()
+        note = " (expected: no API key/package for --extractor anthropic)" if degraded_share and args.extractor == "anthropic" else ""
+        print(f"  extraction done: {degraded_share:.1%} degraded{note}")
+        print()
+
     # Fit on TRAIN ONLY. Fitting the vocabulary on all splits would let the
     # encoder see categories that exist only in the future.
-    pipeline = FeaturePipeline().fit(customers[masks["train"]], events)
-    X = pipeline.transform(customers, events)
+    pipeline = FeaturePipeline().fit(customers[masks["train"]], events, text_features)
+    X = pipeline.transform(customers, events, text_features)
     print(f"  feature matrix: {X.shape[0]:,} x {X.shape[1]} "
           f"({len(pipeline.contract.categorical_names)} categorical, {X.isna().to_numpy().mean():.1%} null)")
 

@@ -5,11 +5,12 @@ structured financial data, an LLM branch over unstructured text (support calls,
 underwriter notes, KYC documents), SHAP explanations, and a policy layer a risk
 manager can retune without a deploy.
 
-**Status: phases 1-6 of 8 complete.** The synthetic data foundation, the
+**Status: phases 1-7 of 8 complete.** The synthetic data foundation, the
 point-in-time feature pipeline, a calibrated LightGBM baseline, a SHAP
 explainability layer, a FastAPI serving layer with the three endpoints,
-persistence and audit, a safe, versioned, no-code rule engine, and event-driven
-real-time re-scoring are built, tested and measured. See
+persistence and audit, a safe, versioned, no-code rule engine, event-driven
+real-time re-scoring, and an LLM extraction branch feeding bounded, explainable
+features into the same model are built, tested and measured. See
 [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan and
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design.
 
@@ -40,6 +41,9 @@ python scripts/simulate_policy.py --proposed config/risk_policy_proposed.example
 
 # verify real-time re-scoring: trigger-to-score p95 vs the 5s exit criterion
 python scripts/verify_rescoring.py
+
+# verify the LLM branch: AUC lift, extraction agreement, prompt-injection suite
+python scripts/verify_extraction.py
 
 pytest
 ```
@@ -123,18 +127,20 @@ customer-risk-rating/
 │   ├── simulate_policy.py       what would change if a proposed policy went live
 │   ├── manage_policy.py         list / show / diff / rollback policy versions
 │   ├── verify_rescoring.py      measures the phase 6 exit criteria, judges PASS/FAIL
+│   ├── verify_extraction.py     measures the phase 7 exit criteria, judges PASS/FAIL
 │   └── render_data_dictionary.py
 ├── src/crr/
 │   ├── data/                    ✅ phase 1 — synthetic generator, taxonomy, narratives
-│   ├── features/                ✅ phase 2 — point-in-time pipeline, feature contract
+│   ├── features/                ✅ phase 2/7 — point-in-time pipeline, feature contract, text block
 │   ├── models/                  ✅ phase 2 — LightGBM core, calibration, metrics
-│   ├── explain/                 ✅ phase 3 — TreeSHAP → reason codes, two audiences
-│   ├── api/                     ✅ phase 4/6 — FastAPI, scoring service, persistence, events
-│   ├── db/                      ✅ phase 4/6 — SQLAlchemy models (Postgres / SQLite)
+│   ├── explain/                 ✅ phase 3/7 — TreeSHAP → reason codes, two audiences
+│   ├── api/                     ✅ phase 4/6/7 — FastAPI, scoring service, persistence, events
+│   ├── db/                      ✅ phase 4/6/7 — SQLAlchemy models (Postgres / SQLite)
 │   ├── policy.py                ✅ phase 4/5/6 — loader, versioning, archive, rollback, triggers
 │   ├── rules/                   ✅ phase 5 — safe expressions, engine, simulation
 │   ├── security/                ◻ phase 4 — anonymisation, crypto
-│   └── pipelines/               ✅ phase 6 — real-time re-scoring, notifications
+│   ├── pipelines/               ✅ phase 6 — real-time re-scoring, notifications
+│   └── llm/                     ✅ phase 7 — extraction schema, prompts, reference + Claude extractors, cache
 └── tests/
 ```
 
@@ -330,14 +336,61 @@ untrustable caller input instead of derived, and a timezone-aware timestamp
 that crashed feature building — are both written up in full, with how each
 was caught, in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
-## Two things to know before phase 7
+## What phase 7 produced
 
-**A bag-of-words model already captures nearly all the text lift on this corpus**
-(+0.025 of a +0.026 headroom). That is a property of template-generated
-narratives, whose vocabulary is finite — not evidence that the LLM branch is
-unnecessary. Real notes are paraphrased, misspelled and multilingual, which is
-where bag-of-words collapses. But it does mean the LLM branch cannot be justified
-on synthetic data alone; validate it on real held-out notes before scaling spend.
+An LLM extraction branch that reads a customer's free-text notes and returns
+four bounded signals — never a score, a band, or a decision — that flow into
+the *same* tabular model everything else here trains. `distress_level` and
+`concealment_level` (0-3, with confidence) are model features, chosen because
+they are exactly the two latents the generator's own outcome equations weight;
+`stated_life_events` and `evasiveness_detected` are explainability-only, the
+same "give the reviewer a reason, not just a number" principle as phase 3's
+SHAP reason codes.
+
+- **Two layers of prompt-injection defence** (`crr/llm/prompts.py`): an
+  escaped `<customer_notes>` envelope plus a system instruction that content
+  inside it is data, never commands — and underneath that, a schema so
+  narrow a successful injection still cannot express a decision, because no
+  field means one.
+- **`ReferenceExtractor`** (deterministic, no API key) and
+  **`AnthropicExtractor`** (the real Claude-backed extractor) behind one
+  interface — the zero-infrastructure-by-default pattern used everywhere in
+  this project. The reference extractor is hand-written from general
+  judgement, deliberately not tuned against the synthetic phrase banks it is
+  measured against — see the caveat below for why that distinction matters.
+- **Cached on content hash + extractor version**, so a prompt or model
+  upgrade invalidates stale results instead of serving them forever; only
+  successful extractions are cached, so a transient failure can always retry.
+- **Fails to tabular-only, marked `degraded`**, never fails the request.
+
+### Exit criteria (measured by `scripts/verify_extraction.py`, fresh 60k customers)
+
+| criterion | measured |
+|---|---|
+| AUC lift over the phase 2 baseline | **met** — `default_12m` +0.0178 AUC, `financial_crime_12m` +0.0351 AUC, both real retrains, both well beyond seed noise |
+| extraction agreement, Cohen's κ ≥ 0.8 | **not met with the free reference extractor** — 0.72 / 0.79 quadratic-weighted. This measures the no-API floor, not the real LLM; see the caveat |
+| prompt-injection test suite | **met** — 8/8 adversarial payloads in the verify script, 39 more in `tests/test_extraction_security.py` |
+
+`text_distress_level` is the 4th most important feature by gain in
+`default_12m`; `text_concealment_level`/`_confidence` are 2nd and 3rd in
+`financial_crime_12m`. One real bug surfaced: `nan or ""` is `nan` in Python
+(NaN is truthy), so a customer with a genuinely missing note type extracted as
+the literal string `"nan"` instead of empty — invisible against this
+project's own data (no customer is ever missing a note type) until a test
+built one on purpose. Fixed with an explicit `pd.isna()` check. Full write-up,
+including why the reference extractor reads concealment better than
+distress relative to bag-of-words, in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+**This still cannot be validated on synthetic data alone** — the same caveat
+this project already carried before phase 7 was built, now acted on rather
+than deferred: `ReferenceExtractor` was deliberately not tuned against
+`crr.data.narratives`'s own phrase banks (that would make its measured
+accuracy a rigged number), and every exit-criterion script takes
+`--extractor anthropic` to re-run the identical measurement against the real
+LLM the moment `ANTHROPIC_API_KEY` is available. Do that before treating the
+Cohen's κ criterion — or the AUC-lift number — as validated for production.
+
+## One thing to know before phase 8
 
 **`country_of_residence` is both a legitimate AML factor and a proxy for national
 origin.** That tension is real and needs a documented decision, not a silent one.
@@ -346,7 +399,14 @@ It is on the phase 8 checklist for a reason.
 ## Data provenance
 
 All data is synthetic and generated locally — no external API, no real customer
-data, nothing leaves the machine. The jurisdiction, occupation and sanctions
+data, nothing leaves the machine, **by default**. The one exception, opt-in
+only: if `CRR_ANTHROPIC_API_KEY` is set, `AnthropicExtractor` (phase 7) sends
+narrative text to Anthropic's API for extraction, inside the data envelope
+described in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). With no key set
+— the default — extraction uses the local, offline `ReferenceExtractor` and
+nothing leaves the machine, same as every other phase.
+
+The jurisdiction, occupation and sanctions
 taxonomies in `src/crr/data/taxonomy.py` are illustrative structure for the
 alpha, **not** a compliance source; production must replace each with a live,
 versioned feed (FATF, OFAC/EU/UN, a licensed PEP and adverse-media vendor).

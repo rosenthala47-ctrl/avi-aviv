@@ -12,6 +12,8 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from crr.llm.anthropic_extractor import DEFAULT_MODEL
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -28,3 +30,8 @@ class Settings(BaseSettings):
     idempotency_ttl_seconds: int = 300
     max_batch_sync_size: int = 50
     api_version: str = "0.4.0"
+
+    # Empty => the deterministic reference extractor (no network, no cost).
+    # Set to use the real Claude-backed extractor for phase 7's text signals.
+    anthropic_api_key: str = ""
+    extraction_model: str = DEFAULT_MODEL

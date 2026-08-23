@@ -135,6 +135,19 @@ class CustomerPayload(BaseModel):
     edd_required: int | None = Field(default=None, ge=0, le=1)
 
 
+class NarrativePayload(BaseModel):
+    """Free text for the phase-7 extraction pipeline. Every field optional —
+    not every customer has all three note types on file. Treated as
+    untrusted input throughout (crr.llm.prompts): this is exactly the kind
+    of field a customer, or a compromised document, can influence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    support_call_summary: str | None = Field(default=None, max_length=20_000)
+    underwriter_note: str | None = Field(default=None, max_length=20_000)
+    kyc_document_extract: str | None = Field(default=None, max_length=20_000)
+
+
 class ScoreRequest(BaseModel):
     """A single-customer scoring request."""
 
@@ -142,6 +155,7 @@ class ScoreRequest(BaseModel):
 
     customer: CustomerPayload
     events: list[EventPayload] = Field(default_factory=list, max_length=10000)
+    narratives: NarrativePayload | None = None
     explain: bool = True
     audience: Literal["internal", "customer"] = "internal"
 
@@ -194,6 +208,10 @@ class ScoreResult(BaseModel):
     policy_version: int
     scored_at: dt.datetime
     latency_ms: float
+    degraded: bool = False
+    """True when narratives were supplied but no real extraction happened
+    (no extractor configured, or it was unavailable) — this score is
+    tabular-only rather than the request having failed."""
 
 
 class ScoreResponse(BaseModel):
@@ -238,6 +256,7 @@ class ExplanationResponse(BaseModel):
     model_version: str
     policy_version: int
     scored_at: dt.datetime
+    degraded: bool = False
 
 
 class EventIngestResponse(BaseModel):

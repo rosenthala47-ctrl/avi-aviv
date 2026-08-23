@@ -75,6 +75,7 @@ def assessment_to_result(assessment: Assessment) -> ScoreResult:
         policy_version=assessment.policy_version,
         scored_at=assessment.scored_at,
         latency_ms=round(assessment.latency_ms, 3),
+        degraded=assessment.degraded,
     )
 
 
@@ -99,4 +100,5 @@ def assessment_to_stored(assessment: Assessment) -> StoredScore:
             "protective_factors": [_factor_dict(f) for f in assessment.protective_factors],
             "fired_rules": [_rule_dict(r) for r in assessment.fired_rules],
         },
+        degraded=assessment.degraded,
     )

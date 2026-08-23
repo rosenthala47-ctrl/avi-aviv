@@ -26,6 +26,11 @@ from crr.policy import (
 )
 
 _BASE_POLICY_TEXT = Path("config/risk_policy.yaml").read_text(encoding="utf-8")
+#: Derived, not hardcoded: the real file's version number changes over the
+#: project's life (it just did, for phase 7), and a test suite that hardcodes
+#: "1" for what the shipped file happens to be versioned at breaks on every
+#: such change for reasons unrelated to what it is actually testing.
+_BASE_VERSION: int = yaml.safe_load(_BASE_POLICY_TEXT)["version"]
 
 
 @pytest.fixture(autouse=True)
@@ -166,10 +171,10 @@ def test_content_change_is_picked_up_on_next_load(policy_file):
     first = load_policy(policy_file)
     assert first.bands.low_max == 25.0
 
-    _bump(policy_file, 2, **{"bands.Low": {"max_score": 20}})
+    _bump(policy_file, _BASE_VERSION + 1, **{"bands.Low": {"max_score": 20}})
     second = load_policy(policy_file)
     assert second.bands.low_max == 20.0
-    assert second.version == 2
+    assert second.version == _BASE_VERSION + 1
 
 
 def test_unchanged_file_returns_the_cached_object(policy_file):
@@ -191,7 +196,7 @@ def test_cache_can_be_bypassed(policy_file):
 
 
 def test_reusing_a_version_number_with_different_content_is_rejected(policy_file):
-    load_policy(policy_file)  # establishes version 1's content hash
+    load_policy(policy_file)  # establishes the base version's content hash
     raw = yaml.safe_load(policy_file.read_text())
     raw["bands"]["Low"]["max_score"] = 1  # different content, SAME version number
     policy_file.write_text(yaml.safe_dump(raw))
@@ -207,16 +212,16 @@ def test_reloading_identical_content_under_the_same_version_is_fine(policy_file)
 
 def test_genuine_version_bump_is_accepted(policy_file):
     load_policy(policy_file)
-    _bump(policy_file, 2, **{"bands.Low": {"max_score": 22}})
+    _bump(policy_file, _BASE_VERSION + 1, **{"bands.Low": {"max_score": 22}})
     second = load_policy(policy_file)
-    assert second.version == 2
+    assert second.version == _BASE_VERSION + 1
 
 
 def test_immutability_survives_across_a_simulated_restart(policy_file, monkeypatch):
     """The in-memory record is process-local; the guarantee must also hold via
     the durable filesystem archive, or it would only be a guarantee between
     restarts, not the "immutable" claim requirement 4c depends on."""
-    load_policy(policy_file)  # archives v1 to disk
+    load_policy(policy_file)  # archives the base version to disk
 
     # Simulate a fresh process: clear every in-memory cache/record.
     monkeypatch.setattr("crr.policy._CACHE", {})
@@ -238,26 +243,27 @@ def test_immutability_survives_across_a_simulated_restart(policy_file, monkeypat
 
 def test_first_load_archives_the_version(policy_file):
     load_policy(policy_file)
-    assert list_archived_versions(policy_file) == [1]
+    assert list_archived_versions(policy_file) == [_BASE_VERSION]
 
 
 def test_archive_is_never_overwritten_by_a_later_load(policy_file, isolated_archive):
     load_policy(policy_file)
-    original_v1 = (isolated_archive / "risk_policy" / "v1.yaml").read_text()
+    archived_path = isolated_archive / "risk_policy" / f"v{_BASE_VERSION}.yaml"
+    original_content = archived_path.read_text()
     load_policy(policy_file, use_cache=False)  # reload the same content again
-    assert (isolated_archive / "risk_policy" / "v1.yaml").read_text() == original_v1
+    assert archived_path.read_text() == original_content
 
 
 def test_rollback_restores_exact_prior_content(policy_file):
     original_text = policy_file.read_text()
-    load_policy(policy_file)  # v1
+    load_policy(policy_file)  # base version
 
-    _bump(policy_file, 2, **{"bands.Low": {"max_score": 5}})
-    load_policy(policy_file)  # v2
+    _bump(policy_file, _BASE_VERSION + 1, **{"bands.Low": {"max_score": 5}})
+    load_policy(policy_file)  # bumped version
     assert load_policy(policy_file).bands.low_max == 5.0
 
-    restored = rollback_to(1, policy_file)
-    assert restored.version == 1
+    restored = rollback_to(_BASE_VERSION, policy_file)
+    assert restored.version == _BASE_VERSION
     assert restored.bands.low_max == 25.0
     assert policy_file.read_text() == original_text
 
@@ -271,8 +277,8 @@ def test_rollback_to_unknown_version_raises(policy_file):
 def test_load_policy_version_does_not_touch_the_live_file(policy_file):
     load_policy(policy_file)
     live_before = policy_file.read_text()
-    historical = load_policy_version(1, policy_file)
-    assert historical.version == 1
+    historical = load_policy_version(_BASE_VERSION, policy_file)
+    assert historical.version == _BASE_VERSION
     assert policy_file.read_text() == live_before  # untouched
 
 
@@ -287,22 +293,22 @@ def test_list_archived_versions_empty_when_never_loaded(tmp_path):
 
 def test_fallback_serves_last_good_policy_on_a_version_conflict(policy_file):
     good = load_policy_or_fallback(policy_file)
-    assert good.version == 1
+    assert good.version == _BASE_VERSION
 
     raw = yaml.safe_load(policy_file.read_text())
     raw["bands"]["Low"]["max_score"] = 1  # conflicting content, same version
     policy_file.write_text(yaml.safe_dump(raw))
 
     fallback = load_policy_or_fallback(policy_file)
-    assert fallback.version == 1
-    assert fallback.bands.low_max == 25.0  # the ORIGINAL v1 content, not the broken edit
+    assert fallback.version == _BASE_VERSION
+    assert fallback.bands.low_max == 25.0  # the ORIGINAL base content, not the broken edit
 
 
 def test_fallback_serves_last_good_policy_on_malformed_yaml(policy_file):
     load_policy_or_fallback(policy_file)
     policy_file.write_text("not: [valid, yaml: {{{")
     fallback = load_policy_or_fallback(policy_file)
-    assert fallback.version == 1
+    assert fallback.version == _BASE_VERSION
 
 
 def test_fallback_raises_on_a_first_load_with_nothing_to_fall_back_to(tmp_path):
@@ -315,9 +321,9 @@ def test_fallback_raises_on_a_first_load_with_nothing_to_fall_back_to(tmp_path):
 def test_fallback_recovers_once_the_file_is_fixed(policy_file):
     load_policy_or_fallback(policy_file)
     policy_file.write_text("broken {{{")
-    assert load_policy_or_fallback(policy_file).version == 1
+    assert load_policy_or_fallback(policy_file).version == _BASE_VERSION
 
-    _bump(policy_file, 2, **{"bands.Low": {"max_score": 18}})
+    _bump(policy_file, _BASE_VERSION + 1, **{"bands.Low": {"max_score": 18}})
     recovered = load_policy_or_fallback(policy_file)
-    assert recovered.version == 2
+    assert recovered.version == _BASE_VERSION + 1
     assert recovered.bands.low_max == 18.0

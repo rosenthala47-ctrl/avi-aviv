@@ -24,6 +24,7 @@ from crr.api.repository import (
 from crr.api.scoring import ModelBundle, ScoringService
 from crr.api.settings import Settings
 from crr.data.synthetic import GeneratorConfig, generate
+from crr.llm.reference_extractor import ReferenceExtractor
 from crr.pipelines.notifications import InMemoryNotificationSink
 
 REPO_ROOT = pytest.importorskip("pathlib").Path(__file__).resolve().parents[1]
@@ -66,7 +67,7 @@ def client(bundle):
     notifications = InMemoryNotificationSink()
     app = create_app(
         settings=Settings(),
-        service=ScoringService(bundle),
+        service=ScoringService(bundle, extractor=ReferenceExtractor()),
         scores=scores,
         jobs=jobs,
         events_repo=events_repo,
@@ -449,6 +450,85 @@ def test_malformed_event_payload_is_rejected(client, customers):
 
 
 # --------------------------------------------------------------------------
+# Narrative text extraction (phase 7)
+# --------------------------------------------------------------------------
+
+
+def test_score_without_narratives_is_not_degraded(client, customers):
+    response = client.post("/api/v1/score", json={"customer": _to_json(customers[10])})
+    assert response.json()["result"]["degraded"] is False
+
+
+def test_distressed_narrative_moves_the_score(client, customers):
+    customer = customers[11]
+    baseline = client.post("/api/v1/score", json={"customer": _to_json(customer)}).json()["result"]
+
+    with_narrative = client.post(
+        "/api/v1/score",
+        json={
+            "customer": _to_json(customer),
+            "narratives": {
+                "support_call_summary": "Customer's employment ended last week; "
+                "severance covers roughly one month of obligations."
+            },
+        },
+    ).json()["result"]
+
+    assert with_narrative["degraded"] is False
+    assert with_narrative["risk_score"] != baseline["risk_score"]
+
+
+def test_narratives_without_an_extractor_configured_is_degraded(bundle, customers):
+    """A deployment that never wires an extractor still serves a score --
+    just a tabular-only, honestly-flagged one."""
+    app = create_app(settings=Settings(), service=ScoringService(bundle))  # no extractor=
+    with TestClient(app) as test_client:
+        response = test_client.post(
+            "/api/v1/score",
+            json={"customer": _to_json(customers[12]), "narratives": {"support_call_summary": "test note"}},
+        )
+    assert response.json()["result"]["degraded"] is True
+
+
+def test_empty_narratives_object_is_not_degraded(client, customers):
+    """All-None narrative fields is the same as omitting narratives entirely
+    -- nothing to extract, not a failure."""
+    response = client.post(
+        "/api/v1/score",
+        json={"customer": _to_json(customers[13]), "narratives": {"support_call_summary": None}},
+    )
+    assert response.json()["result"]["degraded"] is False
+
+
+def test_malformed_narratives_field_is_rejected(client, customers):
+    response = client.post(
+        "/api/v1/score",
+        json={"customer": _to_json(customers[14]), "narratives": {"bogus_field": "x"}},
+    )
+    assert response.status_code == 422
+
+
+def test_two_different_narratives_are_not_treated_as_the_same_idempotency_key(client, customers):
+    """Idempotency keys off input_hash, which must include narrative content
+    -- otherwise a differently-narrated request for the same customer would
+    collide with an earlier one and silently keep its stale result."""
+    customer = customers[15]
+    first = client.post(
+        "/api/v1/score",
+        json={"customer": _to_json(customer), "narratives": {"support_call_summary": "Routine, satisfied."}},
+    ).json()["result"]
+    second = client.post(
+        "/api/v1/score",
+        json={
+            "customer": _to_json(customer),
+            "narratives": {"support_call_summary": "Customer's employment ended last week."},
+        },
+    ).json()["result"]
+    assert len(client.scores.history(customer["customer_id"])) == 2
+    assert first["risk_score"] != second["risk_score"]
+
+
+# --------------------------------------------------------------------------
 # SQLAlchemy persistence (SQLite exercises the production ORM path)
 # --------------------------------------------------------------------------
 
@@ -464,12 +544,14 @@ def test_sqlalchemy_repository_round_trips_a_score():
         model_version="v1", policy_version=1, input_hash="deadbeefdeadbeef", audience="internal",
         customer_snapshot={"customer_id": "CUS-DB", "snapshot_date": "2026-01-01"},
         explanation={"top_factors": [{"code": "CR01"}]},
+        degraded=True,
     )
     repo.save(score)
     latest = repo.latest("CUS-DB")
     assert latest is not None
     assert latest.risk_band == "High"
     assert latest.explanation["top_factors"][0]["code"] == "CR01"
+    assert latest.degraded is True
     assert repo.find_by_input_hash("CUS-DB", "deadbeefdeadbeef") is not None
 
 

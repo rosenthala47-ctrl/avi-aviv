@@ -1,4 +1,4 @@
-.PHONY: help install data data-large validate train explain serve benchmark rules simulate-policy rescoring test lint clean
+.PHONY: help install data data-large validate train explain serve benchmark rules simulate-policy rescoring extraction test lint clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS=":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -16,9 +16,9 @@ validate:  ## check the generated dataset carries learnable signal
 	python scripts/validate_dataset.py --data data/raw
 	python scripts/validate_dataset.py --data data/raw --target financial_crime_12m
 
-train:  ## train and evaluate the calibrated baseline on both targets
+train:  ## train and evaluate the calibrated baseline on both targets, with ablation
 	python scripts/train_baseline.py --ablation
-	python scripts/train_baseline.py --target financial_crime_12m
+	python scripts/train_baseline.py --target financial_crime_12m --ablation
 
 explain:  ## validate SHAP explanations and check them against ground truth
 	python scripts/explain_model.py
@@ -38,6 +38,9 @@ simulate-policy:  ## simulate the example proposed policy against fresh demo tra
 
 rescoring:  ## verify the phase 6 re-scoring exit criteria (trigger-to-score p95, false-alert rate)
 	python scripts/verify_rescoring.py
+
+extraction:  ## verify the phase 7 LLM-extraction exit criteria (AUC lift, kappa, prompt injection)
+	python scripts/verify_extraction.py
 
 test:  ## run the test suite
 	pytest

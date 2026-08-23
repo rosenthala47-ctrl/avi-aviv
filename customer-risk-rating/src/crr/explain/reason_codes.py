@@ -208,6 +208,16 @@ REASON_CODES: tuple[ReasonCode, ...] = (
         frozenset({"age", "marital_status", "dependents_count", "education_level",
                    "residency_status", "segment", "preferred_channel"}),
     ),
+    # --- text extraction (phase 7) -----------------------------------------
+    ReasonCode(
+        "TX01", "affordability", "Forward-looking distress described in recent notes",
+        frozenset({"text_distress_level", "text_distress_confidence"}),
+    ),
+    ReasonCode(
+        "TX02", "aml", "Concealment or evasiveness described in recent notes",
+        frozenset({"text_concealment_level", "text_concealment_confidence"}),
+        customer_visible=False,
+    ),
     # --- data quality -----------------------------------------------------
     ReasonCode(
         "DQ01", "data_quality", "Missing information in the customer file",

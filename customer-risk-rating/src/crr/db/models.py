@@ -58,6 +58,10 @@ class ScoreRecord(Base):
     # so GET /explain reads and audience-filters rather than recomputes.
     explanation: Mapped[dict] = mapped_column(JSON, nullable=False)
 
+    # True when narratives were supplied but extraction was unavailable — this
+    # score is tabular-only (phase 7), a fact worth keeping on the record.
+    degraded: Mapped[bool] = mapped_column(Integer, nullable=False, default=0)
+
     __table_args__ = (
         Index("ix_score_customer_time", "customer_id", "scored_at"),
         Index("ix_score_input_hash", "input_hash"),
@@ -88,6 +92,32 @@ class EventRecord(Base):
     received_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (Index("ix_event_customer_time", "customer_id", "event_ts"),)
+
+
+class ExtractionRecord(Base):
+    """A cached text extraction, keyed by content hash (narrative text +
+    extractor version) so a prompt or model upgrade invalidates old results
+    rather than silently keeping stale ones forever. Only successful
+    extractions are cached — see ``crr.llm.cache`` — so a row existing here
+    always means a real extraction happened, never a remembered failure.
+    """
+
+    __tablename__ = "extraction_cache"
+
+    content_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    customer_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    extractor_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    distress_level: Mapped[int] = mapped_column(Integer, nullable=False)
+    distress_confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    concealment_level: Mapped[int] = mapped_column(Integer, nullable=False)
+    concealment_confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    stated_life_events: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    evasiveness_detected: Mapped[bool] = mapped_column(Integer, nullable=False, default=0)
+    evasiveness_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (Index("ix_extraction_customer", "customer_id"),)
 
 
 class JobRecord(Base):
