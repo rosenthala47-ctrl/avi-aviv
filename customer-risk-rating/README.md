@@ -487,7 +487,19 @@ positives, a group is excluded from the comparison entirely, on both sides.
 would call, shaped as an operations console (Unit21/Feedzai-style) rather than
 a single calculator. It is a **client only** — no model, no policy, no copy of
 the reason-code vocabulary lives in it, so a number on screen can only be
-wrong if the API is wrong. Three pages:
+wrong if the API is wrong. Bilingual — a language selector at the top of the
+sidebar (Hebrew default, English toggle) switches every page instantly:
+titles, KPI tiles, table headers, status/band badges, form labels, chart
+axes and legends, and the ~65-term operational vocabulary (occupations,
+segments, event types, ...) all read from one `I18N`/`VOCAB` lookup rather
+than being hardcoded, so nothing is half-translated. The API itself is never
+localised — band/status/reason values stay the fixed English identifiers it
+returns and expects; only their on-screen labels change. The page also ships
+the standard signals (`<meta name="google" content="notranslate">`, `<html
+translate="no">`, a `notranslate` CSS class) that stop a browser's own
+translate feature from rewriting the page — that fights the Hebrew/English
+toggle for the same text nodes and is what throws Streamlit's React frontend
+into a `removeChild` crash. Three pages:
 
 - **Risk Operations Queue** — every customer scored this session, highest
   risk first, with KPI tiles (total scored, high-risk pending review, SLA

@@ -11,6 +11,14 @@ database, and a page refresh or a new tab starts a fresh queue. It exists to
 demonstrate the reviewer workflow a real deployment would wire to a case
 system, not to replace one.
 
+Bilingual (Hebrew default, English toggle) via the ``I18N``/``VOCAB`` tables
+and the ``t()``/``vocab_label()`` lookups below — every user-facing string in
+this file goes through one of them rather than being hardcoded, so the
+sidebar's language selector can switch the whole app on the same rerun. The
+API itself is not localised (it always returns English band/status/reason
+values); those are translated for DISPLAY only, never for what gets sent back
+to the API or used as a lookup key.
+
     streamlit run app.py
 
 Set ``CRR_API_URL`` to point at a running API (default http://127.0.0.1:8000).
@@ -28,6 +36,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+from streamlit.components.v1 import html as components_html
 
 API_URL = os.environ.get("CRR_API_URL", "http://127.0.0.1:8000").rstrip("/")
 REQUEST_TIMEOUT = float(os.environ.get("CRR_UI_TIMEOUT", "30"))
@@ -59,8 +68,10 @@ HAIRLINE = "rgba(11,11,11,0.10)"
 RAISES_RISK = "#e34948"
 LOWERS_RISK = "#2a78d6"
 
-# Bands are a state, not an identity, so they wear the reserved status palette
-# — and always beside their own name, never as colour alone.
+# Bands, status keys, event types etc. below are internal English identifiers
+# — used as dict keys, sent to/read from the API, and never translated. Their
+# on-screen text goes through band_label()/status_label()/vocab_label() at
+# the point of display only.
 BAND_COLOUR = {"Low": "#0ca30c", "Medium": "#fab219", "High": "#ec835a", "Extreme": "#d03b3b"}
 BAND_ORDER = ("Low", "Medium", "High", "Extreme")
 BAND_RANK = {"Extreme": 0, "High": 1, "Medium": 2, "Low": 3}
@@ -79,13 +90,7 @@ BAND_CUTOFFS = {"Low": 25.0, "Medium": 50.0, "High": 75.0, "Extreme": 100.0}
 # reasonable stand-in for what a real Unit21/Feedzai-style queue enforces
 # server-side) documented here rather than left implicit.
 # --------------------------------------------------------------------------
-STATUS_LABEL = {
-    "pending_review": "Pending Review",
-    "approved": "Approved",
-    "escalated_aml": "Escalated to AML",
-    "kyc_requested": "KYC Requested",
-    "blocked": "Blocked",
-}
+STATUS_KEYS = ("pending_review", "approved", "escalated_aml", "kyc_requested", "blocked")
 STATUS_COLOUR = {
     "pending_review": INK_MUTED,
     "approved": "#0ca30c",
@@ -103,20 +108,14 @@ EVENT_TYPES = (
     "wire_transfer_out", "crypto_transfer", "card_purchase", "atm_withdrawal",
     "salary_credit", "wire_transfer_in", "direct_debit", "loan_repayment",
 )
+CHANNELS = ("online", "branch", "mobile", "atm", "wire")
+AUDIENCES = ("internal", "customer")
 # A hint for the operator, not a rule: the policy decides, and the API's
 # `reason` field reports what it actually decided.
 LIKELY_TRIGGERS = frozenset(
     {"missed_payment", "overdraft_breach", "chargeback", "cash_deposit",
      "wire_transfer_out", "crypto_transfer"}
 )
-
-REASON_HELP = {
-    "triggered": "The event matched a policy trigger and the customer was re-scored.",
-    "debounced": "A matching trigger fired too recently — suppressed to stop alert storms.",
-    "no_trigger": "Stored, but this event type/amount matches no trigger in the policy.",
-    "not_yet_scored": "No score on record yet. Score the customer once first.",
-    "stale": "The stored score was too old to re-use as a base for re-scoring.",
-}
 
 SEGMENTS = ("retail", "sme", "private_banking", "corporate")
 OCCUPATIONS = (
@@ -138,6 +137,8 @@ COUNTRIES = (
     "CY", "MT", "AE", "TR", "HK", "PA", "KY", "VG", "SC", "BZ", "RU", "UA", "NG", "ZA",
     "SY", "YE", "AF", "MM", "VU", "HT", "SS", "LY",
 )
+# ISO country codes are language-neutral by construction — the same two/three
+# letters read the same in either language, so COUNTRIES needs no VOCAB entry.
 
 # Every field below is optional at the API boundary. What the UI sends as a
 # real value versus omits entirely is the whole point of the "unknown fields"
@@ -146,6 +147,9 @@ COUNTRIES = (
 # archetypes the Operations Queue's demo book is jittered from (see
 # `generate_book` below) — no fabricated customer names anywhere in this file,
 # only the customer_id/segment/occupation fields the real schema carries.
+# Keys stay these exact English sentences (used as PRESETS lookups and demo
+# customer_id/archetype tags throughout); PRESET_LABEL_HE below is the only
+# thing that changes what an operator actually reads on screen.
 PRESETS: dict[str, dict[str, Any]] = {
     "Low risk — salaried, clean file": {
         "segment": "retail", "occupation": "software_engineer", "employment_status": "salaried",
@@ -223,6 +227,719 @@ PRESETS: dict[str, dict[str, Any]] = {
         },
     },
 }
+
+PRESET_LABEL_HE: dict[str, str] = {
+    "Low risk — salaried, clean file": "סיכון נמוך — שכיר/ה, תיק נקי",
+    "Credit stress — thin buffer, recent arrears": "מצוקת אשראי — כרית דלה, פיגורים אחרונים",
+    "AML concern — opaque funds, offshore links": "חשש הלבנת הון — כספים לא שקופים, קשרים אופשוריים",
+}
+
+
+# --------------------------------------------------------------------------
+# i18n — every user-facing string in this file is looked up through t() or
+# vocab_label() rather than hardcoded, so the sidebar's language toggle can
+# switch the whole app on the same rerun. Hebrew is the default language (see
+# the App shell section's session_state.setdefault) per the brief; English is
+# the fallback both when a key is missing from the active table and for the
+# vocabulary tuples above (SEGMENTS, OCCUPATIONS, ...), where the English
+# label is derived from the value itself rather than hand-written twice.
+# --------------------------------------------------------------------------
+
+I18N: dict[str, dict[str, str]] = {
+    "en": {
+        "sidebar.title": "Customer Risk Rating",
+        "sidebar.subtitle": "Enterprise Risk & Compliance Workflow",
+        "sidebar.api_label": "API:",
+        "sidebar.api_healthy": "API healthy · models: {models} · policy v{policy} · api {api}",
+        "sidebar.api_start_hint": "Start it with `python scripts/serve.py`, or set `CRR_API_URL` to a "
+                                  "running instance. Every page below needs it.",
+        "sidebar.language_label": "Language",
+        "sidebar.reviewer_name_label": "Reviewer name",
+        "sidebar.reviewer_name_help": "Attributed on every case decision you record below — session-local, "
+                                      "no login.",
+        "sidebar.nav_header": "Navigate",
+        "sidebar.nav_queue": "📋 Risk Operations Queue",
+        "sidebar.nav_customer360": "🔎 Customer 360 & Decision Center",
+        "sidebar.nav_simulator": "🧪 Event Simulator & Sandbox",
+        "sidebar.footer": "Scores, explanations and re-scoring all come from the live FastAPI service over "
+                          "its public endpoints — no model or policy logic is duplicated here. Case status, "
+                          "SLA and review notes are this session's workflow state only: nothing here is "
+                          "written to a case-management database.",
+
+        "common.band_prefix": "band",
+        "common.case_prefix": "case:",
+        "common.yes": "yes",
+        "common.no": "no",
+
+        "band.Low": "Low",
+        "band.Medium": "Medium",
+        "band.High": "High",
+        "band.Extreme": "Extreme",
+
+        "status.pending_review": "Pending Review",
+        "status.approved": "Approved",
+        "status.escalated_aml": "Escalated to AML",
+        "status.kyc_requested": "KYC Requested",
+        "status.blocked": "Blocked",
+
+        "archetype.sandbox": "sandbox ({preset})",
+
+        "reason_help.triggered": "The event matched a policy trigger and the customer was re-scored.",
+        "reason_help.debounced": "A matching trigger fired too recently — suppressed to stop alert storms.",
+        "reason_help.no_trigger": "Stored, but this event type/amount matches no trigger in the policy.",
+        "reason_help.not_yet_scored": "No score on record yet. Score the customer once first.",
+        "reason_help.stale": "The stored score was too old to re-use as a base for re-scoring.",
+
+        "chart.model_band": "model band {band}",
+        "chart.policy_floored": " · policy floored to {band}",
+        "chart.score_word": "score",
+        "chart.axis_title": "← lowers risk    ·    raises risk →",
+        "chart.hover_contribution": "contribution",
+        "chart.hover_dimension": "dimension",
+        "chart.raises_risk": "raises risk",
+        "chart.lowers_risk": "lowers risk",
+        "chart.table_view": "Table view (exact values)",
+
+        "rules.header": "Policy rules that fired",
+        "rules.empty": "No deterministic policy rule matched this customer.",
+        "rules.caption": "Kept separate from the model factors above on purpose: a rule is a pass/fail "
+                         "policy override, not a learned contribution.",
+
+        "result.composite_score": "composite risk score (0-100)",
+        "result.credit_default": "Credit default (12m)",
+        "result.financial_crime": "Financial crime (12m)",
+        "result.latency": "Latency",
+        "result.flag_band_floor": "A policy rule raised this band above the model's own reading.",
+        "result.flag_review": "Flagged for human review by policy.",
+        "result.flag_degraded": "**Degraded**: narrative text was supplied but no extraction ran, so this "
+                                "score is tabular-only. The request did not fail — the gap is recorded.",
+        "result.caption": "model `{model}` · policy v{policy} · scored {scored_at}",
+
+        "profile.segment": "Segment",
+        "profile.occupation": "Occupation",
+        "profile.employment": "Employment",
+        "profile.residency": "Residency",
+        "profile.age": "Age",
+        "profile.account_age": "Account age",
+        "profile.account_age_unit": "mo",
+        "profile.products_held": "Products held",
+        "profile.source": "Source profile: {archetype}",
+
+        "timeline.empty": "No activity recorded yet.",
+        "timeline.scored": "<b>Scored</b> — {band} band, {score} — {note}",
+        "timeline.event": "<b>Event</b> <code>{event_type}</code> (amount {amount}) — {status}{change}",
+        "timeline.event_rescored": "re-scored",
+        "timeline.event_band_changed": "  ·  <b>band changed</b>",
+        "timeline.decision": "<b>{label}</b> by {actor} — &ldquo;{note}&rdquo;",
+
+        "queue.title": "Risk Operations Queue",
+        "queue.caption": "Every customer scored in this session, highest risk first. Score, band and "
+                         "factors come from the API; case status, SLA and notes are this session's "
+                         "workflow state (see the sidebar).",
+        "queue.empty": "The queue is empty.",
+        "queue.load_demo": "Load demo book (18 synthetic customers)",
+        "queue.load_fail": "Every candidate failed to score — is the API reachable? {detail}",
+        "queue.kpi_total": "Total scored",
+        "queue.kpi_high_risk": "High-risk pending review",
+        "queue.kpi_sla": "SLA breaches",
+        "queue.kpi_escalated": "Escalated to AML",
+        "queue.sla_caption": "SLA windows while a case sits at Pending Review (workflow convention, not "
+                             "API policy): Extreme {extreme}h · High {high}h · Medium {medium}h · "
+                             "Low {low}h from the scoring timestamp.",
+        "queue.search_label": "Search — Customer ID, segment, occupation or country",
+        "queue.band_filter_label": "Risk band",
+        "queue.status_filter_label": "Case status",
+        "queue.reload_button": "↻ Reload book",
+        "queue.reload_help": "Score a fresh synthetic book and refresh the demo customers in the queue",
+        "queue.no_match": "No customers match these filters.",
+        "queue.shown_caption": "{shown} of {total} customers shown. Click a row to open Customer 360.",
+        "queue.onboard_expander": "+ Onboard a new customer from a preset",
+        "queue.onboard_caption": "Loads a full, realistic pre-configured profile automatically — no manual "
+                                 "field entry. For hands-on control over every field, use the sandbox on "
+                                 "the Event Simulator page.",
+        "queue.onboard_profile_label": "Profile",
+        "queue.onboard_id_label": "Customer ID",
+        "queue.onboard_submit": "Score & add",
+        "queue.onboard_success": "{id} scored — {band} band — added to the queue.",
+
+        "col.customer_id": "Customer ID",
+        "col.band": "Band",
+        "col.score": "Score",
+        "col.segment": "Segment",
+        "col.country": "Country",
+        "col.credit_risk": "Credit risk",
+        "col.crime_risk": "Fin. crime risk",
+        "col.status": "Status",
+        "col.sla": "SLA",
+        "col.scored": "Scored",
+        "col.breached": "BREACHED",
+
+        "c360.title": "Customer 360 — {id}",
+        "c360.no_customer_title": "Customer 360 & Decision Center",
+        "c360.no_customer_info": "No customer selected. Pick one from the Risk Operations Queue.",
+        "c360.back_to_queue": "← Back to queue",
+        "c360.event_timeline_header": "Event timeline",
+        "c360.explainability_header": "Explainability engine",
+
+        "action.header": "Case decision",
+        "action.already_actioned": "This case has already been actioned. Recording another decision below "
+                                   "updates the status again and appends to the timeline.",
+        "action.note_label": "Review note (required)",
+        "action.note_placeholder": "Document the reason for this decision — required for the audit trail.",
+        "action.approve": "✅ Approve Customer",
+        "action.escalate": "🚨 Escalate to AML",
+        "action.kyc": "📋 Request KYC Verification",
+        "action.block": "⛔ Block Account",
+        "action.note_required": "A review note is required before recording this decision.",
+        "action.recorded": "Recorded: {label}.",
+
+        "explain.caption": "The stored explanation for this customer's most recent score — read back from "
+                           "the API rather than recomputed, so this is provably the same event as the "
+                           "score above.",
+        "explain.internal_header": "Internal reviewer · {n} codes",
+        "explain.customer_header": "Customer-facing · {n} codes",
+        "explain.no_codes": "No reason codes on record.",
+        "explain.no_customer_codes": "No reason code on this decision may be shown to the customer.",
+        "explain.withheld_codes": "**{n} reason code(s) withheld:** {codes}",
+        "explain.withheld_rules": "**{n} policy rule(s) withheld:** {rules}",
+        "explain.not_shown_prefix": "Not shown to the customer — {detail}",
+        "explain.all_disclosable": "Every reason code and rule on this decision is disclosable to the "
+                                   "customer.",
+        "explain.filter_expander": "Filter all reason codes",
+        "explain.no_codes_decision": "No reason codes on this decision.",
+        "explain.dimension_label": "Dimension",
+        "explain.direction_label": "Direction",
+        "explain.visibility_label": "Visibility",
+        "explain.customer_visible": "customer-visible",
+        "explain.internal_only": "internal-only",
+        "explain.shown_count": "{shown} of {total} reason codes shown.",
+
+        "sim.title": "Real-Time Event Simulator & Sandbox",
+        "sim.caption": "For testing rules and the API directly — push a single event against any customer "
+                       "on record, or score a fully custom payload without touching the Operations Queue.",
+        "sim.tab_event": "Push an event",
+        "sim.tab_sandbox": "Sandbox: score a custom payload",
+
+        "sim.event_intro": "Push a single event and watch the re-scoring engine decide. The caller does "
+                           "**not** resend the customer's profile — the engine rebuilds the input from the "
+                           "last stored snapshot plus the event log, which is the whole point of the "
+                           "endpoint.",
+        "sim.event_caption": "The customer must already have a score on record — onboard them first "
+                             "(Queue page or the sandbox tab). Trigger thresholds live in the policy file; "
+                             "the `reason` in the response is the authoritative account of what happened.",
+        "sim.customer_other": "— type a different ID —",
+        "sim.customer_label": "Customer",
+        "sim.customer_id_label": "Customer ID",
+        "sim.event_type_label": "Event type",
+        "sim.usually_trigger": "usually a trigger",
+        "sim.amount_label": "Amount",
+        "sim.counterparty_label": "Counterparty country",
+        "sim.channel_label": "Channel",
+        "sim.occurred_label": "Occurred (minutes ago)",
+        "sim.send_event": "Send event",
+        "sim.outcome_label": "Outcome",
+        "sim.rescored_label": "Re-scored",
+        "sim.band_changed_label": "Band changed",
+        "sim.notified_label": "Notified",
+        "sim.new_score_header": "New score after `{trigger}`",
+        "sim.score_before": "Score before",
+        "sim.score_after": "Score after",
+        "sim.band_label": "Band",
+        "sim.narrative_dropped_warning": "**The narrative-derived factor(s) {codes} are absent from this "
+                                         "re-score.** An event re-score rebuilds the input from the "
+                                         "customer's stored snapshot plus the event log, and narrative "
+                                         "notes are not part of that snapshot — so text signal present in "
+                                         "the original `/score` call does not carry over. Note the response "
+                                         "is *not* marked `degraded`: no narratives were supplied to this "
+                                         "call, and by design that counts as a normal request rather than a "
+                                         "failed extraction. Worth knowing before reading the delta above "
+                                         "as a real change in the customer's risk.",
+        "sim.why_internal": "Why — top factors (internal view)",
+        "sim.no_factor": "No factor cleared the policy's minimum contribution threshold.",
+        "sim.event_stored_not_scored": "The event was stored. Onboard this customer first (Queue page, or "
+                                       "the sandbox tab), then send the event again.",
+        "sim.event_stored_no_score": "The event was stored, but no new score was computed — see the reason "
+                                     "above.",
+
+        "sim.sandbox_intro": "Full manual control over every field the API accepts — a tool for testing "
+                             "rules and the API directly, not the primary way to bring a customer into the "
+                             "queue. **Anything left marked unknown is sent as a genuine missing value**, "
+                             "never as a zero.",
+        "sim.start_from_profile": "Start from a profile",
+        "sim.snapshot_date_label": "Snapshot date",
+        "sim.audience_label": "Audience",
+        "sim.audience_help": "`customer` suppresses reason codes that may not lawfully be disclosed to the "
+                             "subject — AML concerns, prior SARs, adverse media.",
+
+        "sim.expander_profile": "Profile",
+        "sim.expander_income": "Income & credit",
+        "sim.expander_txn": "Transaction behaviour",
+        "sim.expander_aml": "AML / KYC",
+        "sim.expander_narrative": "Narrative notes (free text)",
+
+        "field.segment": "Segment",
+        "field.occupation": "Occupation",
+        "field.employment": "Employment",
+        "field.age": "Age",
+        "field.years_at_employer": "Years at employer",
+        "field.account_age_months": "Account age (months)",
+        "field.residency": "Residency",
+        "field.country": "Country",
+        "field.products_held": "Products held",
+        "field.declared_income": "Declared annual income",
+        "field.verified_income_ratio": "Verified income ratio",
+        "field.income_volatility": "Income volatility (CV)",
+        "field.bureau_score": "Bureau score",
+        "field.total_credit_limit": "Total credit limit",
+        "field.credit_utilization": "Credit utilisation",
+        "field.dti": "Debt-to-income",
+        "field.savings_to_income": "Savings-to-income",
+        "field.open_loans": "Open loans",
+        "field.credit_inquiries": "Credit inquiries (12m)",
+        "field.delinq_30d": "30d delinquencies (12m)",
+        "field.delinq_90d": "90d delinquencies (24m)",
+        "field.max_days_past_due": "Max days past due (24m)",
+        "field.prior_default": "Prior default",
+        "field.bounced_payments": "Bounced payments (12m)",
+        "field.overdraft_events": "Overdraft events (12m)",
+        "field.balance_volatility": "Balance volatility",
+        "field.txn_count": "Transactions (90d)",
+        "field.cash_intensity": "Cash intensity",
+        "field.cross_border": "Cross-border ratio",
+        "field.night_txn": "Night-time ratio",
+        "field.structuring_score": "Structuring score",
+        "field.crypto_exposure": "Crypto exposure",
+        "field.gambling_spend": "Gambling spend",
+        "field.new_counterparties": "New counterparties",
+        "field.pep": "PEP",
+        "field.sanctions_hits": "Sanctions hits",
+        "field.adverse_media": "Adverse media (12m)",
+        "field.offshore_links": "Offshore links",
+        "field.high_risk_jurisdiction": "High-risk jurisdiction",
+        "field.medium_risk_jurisdiction": "Medium-risk jurisdiction",
+        "field.prior_sar": "Prior SAR",
+        "field.edd_required": "EDD required",
+        "field.source_of_funds": "Source of funds",
+        "field.source_verified": "Source verified",
+        "field.kyc_completeness": "KYC completeness",
+        "field.kyc_refresh_overdue": "KYC refresh overdue (days)",
+
+        "sim.narrative_caption": "Treated as untrusted input. Text reaches the extractor inside a data "
+                                 "envelope, and the schema it must answer through has no field that means "
+                                 "a score or a band — an instruction hidden in a note cannot become a "
+                                 "decision. Try it.",
+        "field.support_call": "Support call summary",
+        "field.underwriter_note": "Underwriter note",
+        "field.kyc_extract": "KYC document extract",
+
+        "sim.unknown_label": "Send these fields as unknown (null, not zero)",
+        "sim.unknown_help": "Demonstrates the missing-data contract: an omitted field reaches the model as "
+                            "NaN plus a missing-indicator, never as a fabricated 0.",
+        "sim.score_customer": "Score customer",
+        "sim.unknown_sent": "{n} field(s) sent as unknown: {fields}",
+        "sim.why_audience": "Why — top factors ({audience} view)",
+        "sim.overwrite_warning": "`{id}` already exists in the queue — adding will overwrite its profile, "
+                                 "score and timeline with this sandbox result. Its case status and prior "
+                                 "decisions are preserved.",
+        "sim.add_to_queue": "➕ Add this result to the Operations Queue",
+        "sim.added_to_queue": "{id} added to the queue.",
+    },
+    "he": {
+        "sidebar.title": "דירוג סיכון לקוחות",
+        "sidebar.subtitle": "מערכת ניהול סיכונים וציות ארגונית",
+        "sidebar.api_label": "API:",
+        "sidebar.api_healthy": "ה-API תקין · מודלים: {models} · מדיניות גרסה {policy} · api {api}",
+        "sidebar.api_start_hint": "הפעל אותו עם `python scripts/serve.py`, או הגדר `CRR_API_URL` למופע "
+                                  "פעיל. כל עמוד למטה זקוק לו.",
+        "sidebar.language_label": "שפה",
+        "sidebar.reviewer_name_label": "שם הבודק",
+        "sidebar.reviewer_name_help": "מיוחס לכל החלטת תיק שתתעד למטה — מקומי לסשן זה בלבד, ללא התחברות.",
+        "sidebar.nav_header": "ניווט",
+        "sidebar.nav_queue": "📋 תור פעולות סיכון",
+        "sidebar.nav_customer360": "🔎 תמונת לקוח 360 ומרכז החלטות",
+        "sidebar.nav_simulator": "🧪 סימולטור אירועים וארגז חול",
+        "sidebar.footer": "כל הציונים, ההסברים והניקוד מחדש מגיעים משירות ה-FastAPI החי דרך נקודות "
+                          "הקצה הציבוריות שלו — אין כאן שכפול של לוגיקת מודל או מדיניות. סטטוס התיק, "
+                          "ה-SLA והערות הסקירה הם מצב עבודה של הסשן הנוכחי בלבד: דבר מכאן אינו נכתב "
+                          "למסד נתוני ניהול תיקים.",
+
+        "common.band_prefix": "רמה",
+        "common.case_prefix": "תיק:",
+        "common.yes": "כן",
+        "common.no": "לא",
+
+        "band.Low": "נמוך",
+        "band.Medium": "בינוני",
+        "band.High": "גבוה",
+        "band.Extreme": "קיצוני",
+
+        "status.pending_review": "ממתין לבדיקה",
+        "status.approved": "אושר",
+        "status.escalated_aml": "הוסלם להלבנת הון",
+        "status.kyc_requested": "נדרש KYC",
+        "status.blocked": "חסום",
+
+        "archetype.sandbox": "ארגז חול ({preset})",
+
+        "reason_help.triggered": "האירוע תאם מפעיל במדיניות והלקוח נוקד מחדש.",
+        "reason_help.debounced": "מפעיל תואם הופעל לאחרונה מדי — הודחק כדי למנוע גל התראות.",
+        "reason_help.no_trigger": "נשמר, אך סוג/סכום האירוע אינו תואם אף מפעיל במדיניות.",
+        "reason_help.not_yet_scored": "אין ציון רשום עדיין. נקד את הלקוח פעם אחת קודם.",
+        "reason_help.stale": "הציון השמור היה ישן מדי לשמש כבסיס לניקוד מחדש.",
+
+        "chart.model_band": "רמת מודל {band}",
+        "chart.policy_floored": " · מדיניות הורידה לרמה {band}",
+        "chart.score_word": "ציון",
+        "chart.axis_title": "← מוריד סיכון    ·    מעלה סיכון →",
+        "chart.hover_contribution": "תרומה",
+        "chart.hover_dimension": "ממד",
+        "chart.raises_risk": "מעלה סיכון",
+        "chart.lowers_risk": "מוריד סיכון",
+        "chart.table_view": "תצוגת טבלה (ערכים מדויקים)",
+
+        "rules.header": "כללי מדיניות שהופעלו",
+        "rules.empty": "אין כלל מדיניות דטרמיניסטי שהתאים ללקוח זה.",
+        "rules.caption": "נשמר בנפרד מגורמי המודל למעלה בכוונה: כלל הוא דריסת מדיניות של עובר/נכשל, "
+                         "לא תרומה נלמדת.",
+
+        "result.composite_score": "ציון סיכון מצרפי (0-100)",
+        "result.credit_default": "כשל אשראי (12 חודשים)",
+        "result.financial_crime": "פשע פיננסי (12 חודשים)",
+        "result.latency": "זמן תגובה",
+        "result.flag_band_floor": "כלל מדיניות העלה את הרמה מעל הקריאה של המודל עצמו.",
+        "result.flag_review": "סומן לבדיקה אנושית על ידי המדיניות.",
+        "result.flag_degraded": "**נחלש**: סופק טקסט נרטיבי אך לא בוצעה חילוץ, כך שהציון הזה מבוסס נתונים "
+                                "טבלאיים בלבד. הבקשה לא נכשלה — הפער תועד.",
+        "result.caption": "מודל `{model}` · מדיניות גרסה {policy} · נוקד {scored_at}",
+
+        "profile.segment": "מגזר",
+        "profile.occupation": "עיסוק",
+        "profile.employment": "תעסוקה",
+        "profile.residency": "מעמד תושבות",
+        "profile.age": "גיל",
+        "profile.account_age": "ותק חשבון",
+        "profile.account_age_unit": "חודשים",
+        "profile.products_held": "מוצרים מוחזקים",
+        "profile.source": "פרופיל מקור: {archetype}",
+
+        "timeline.empty": "טרם נרשמה פעילות.",
+        "timeline.scored": "<b>נוקד</b> — רמה {band}, {score} — {note}",
+        "timeline.event": "<b>אירוע</b> <code>{event_type}</code> (סכום {amount}) — {status}{change}",
+        "timeline.event_rescored": "נוקד מחדש",
+        "timeline.event_band_changed": "  ·  <b>הרמה השתנתה</b>",
+        "timeline.decision": "<b>{label}</b> על ידי {actor} — &ldquo;{note}&rdquo;",
+
+        "queue.title": "תור פעולות סיכון",
+        "queue.caption": "כל לקוח שנוקד בסשן זה, מהסיכון הגבוה ביותר תחילה. הציון, הרמה והגורמים מגיעים "
+                         "מה-API; סטטוס התיק, ה-SLA וההערות הם מצב העבודה של הסשן הזה (ראו בסרגל הצד).",
+        "queue.empty": "התור ריק.",
+        "queue.load_demo": "טען ספר הדגמה (18 לקוחות סינתטיים)",
+        "queue.load_fail": "כל המועמדים נכשלו בניקוד — האם ה-API זמין? {detail}",
+        "queue.kpi_total": "סה״כ נוקדו",
+        "queue.kpi_high_risk": "סיכון גבוה ממתין לבדיקה",
+        "queue.kpi_sla": "חריגות SLA",
+        "queue.kpi_escalated": "הוסלם להלבנת הון",
+        "queue.sla_caption": "חלונות SLA בזמן שתיק נמצא בסטטוס ממתין לבדיקה (מוסכמת עבודה, לא מדיניות "
+                             "API): קיצוני {extreme} שעות · גבוה {high} שעות · בינוני {medium} שעות · "
+                             "נמוך {low} שעות ממועד הניקוד.",
+        "queue.search_label": "חיפוש — מזהה לקוח, מגזר, עיסוק או מדינה",
+        "queue.band_filter_label": "רמת סיכון",
+        "queue.status_filter_label": "סטטוס תיק",
+        "queue.reload_button": "↻ טען מחדש",
+        "queue.reload_help": "נקד ספר סינתטי חדש ורענן את לקוחות ההדגמה בתור",
+        "queue.no_match": "אין לקוחות התואמים למסננים אלו.",
+        "queue.shown_caption": "{shown} מתוך {total} לקוחות מוצגים. לחץ על שורה כדי לפתוח תמונת לקוח 360.",
+        "queue.onboard_expander": "+ קליטת לקוח חדש מפרופיל מוכן",
+        "queue.onboard_caption": "טוען פרופיל ריאליסטי מוכן מראש באופן אוטומטי — ללא הזנת שדות ידנית. "
+                                 "לשליטה מלאה בכל שדה, השתמש בארגז החול בעמוד סימולטור האירועים.",
+        "queue.onboard_profile_label": "פרופיל",
+        "queue.onboard_id_label": "מזהה לקוח",
+        "queue.onboard_submit": "נקד והוסף",
+        "queue.onboard_success": "{id} נוקד — רמה {band} — נוסף לתור.",
+
+        "col.customer_id": "מזהה לקוח",
+        "col.band": "רמה",
+        "col.score": "ציון",
+        "col.segment": "מגזר",
+        "col.country": "מדינה",
+        "col.credit_risk": "סיכון אשראי",
+        "col.crime_risk": "סיכון פשע פיננסי",
+        "col.status": "סטטוס",
+        "col.sla": "SLA",
+        "col.scored": "מועד ניקוד",
+        "col.breached": "חריגה",
+
+        "c360.title": "תמונת לקוח 360 — {id}",
+        "c360.no_customer_title": "תמונת לקוח 360 ומרכז החלטות",
+        "c360.no_customer_info": "לא נבחר לקוח. בחר לקוח מתור פעולות הסיכון.",
+        "c360.back_to_queue": "← חזרה לתור",
+        "c360.event_timeline_header": "ציר זמן אירועים",
+        "c360.explainability_header": "מנוע הסבר",
+
+        "action.header": "החלטת תיק",
+        "action.already_actioned": "תיק זה כבר טופל. רישום החלטה נוספת למטה יעדכן את הסטטוס שוב "
+                                   "ויתווסף לציר הזמן.",
+        "action.note_label": "הערת סקירה (חובה)",
+        "action.note_placeholder": "תעד את הסיבה להחלטה זו — נדרש למסלול הביקורת.",
+        "action.approve": "✅ אשר לקוח",
+        "action.escalate": "🚨 הסלם להלבנת הון",
+        "action.kyc": "📋 בקש אימות KYC",
+        "action.block": "⛔ חסום חשבון",
+        "action.note_required": "נדרשת הערת סקירה לפני רישום החלטה זו.",
+        "action.recorded": "נרשם: {label}.",
+
+        "explain.caption": "ההסבר השמור לציון האחרון של לקוח זה — נקרא בחזרה מה-API ולא חושב מחדש, כך "
+                           "שזהו באופן מוכח אותו אירוע כמו הציון למעלה.",
+        "explain.internal_header": "סוקר פנימי · {n} קודים",
+        "explain.customer_header": "פונה ללקוח · {n} קודים",
+        "explain.no_codes": "אין קודי נימוק רשומים.",
+        "explain.no_customer_codes": "אין קוד נימוק בהחלטה זו שניתן להציג ללקוח.",
+        "explain.withheld_codes": "**{n} קוד/י נימוק לא נחשפו:** {codes}",
+        "explain.withheld_rules": "**{n} כלל/י מדיניות לא נחשפו:** {rules}",
+        "explain.not_shown_prefix": "לא מוצג ללקוח — {detail}",
+        "explain.all_disclosable": "כל קוד נימוק וכלל בהחלטה זו ניתנים לחשיפה ללקוח.",
+        "explain.filter_expander": "סינון כל קודי הנימוק",
+        "explain.no_codes_decision": "אין קודי נימוק בהחלטה זו.",
+        "explain.dimension_label": "ממד",
+        "explain.direction_label": "כיוון",
+        "explain.visibility_label": "חשיפה",
+        "explain.customer_visible": "גלוי ללקוח",
+        "explain.internal_only": "פנימי בלבד",
+        "explain.shown_count": "{shown} מתוך {total} קודי נימוק מוצגים.",
+
+        "sim.title": "סימולטור אירועים בזמן אמת וארגז חול",
+        "sim.caption": "לבדיקת כללים וה-API ישירות — שלח אירוע בודד כנגד לקוח קיים, או נקד נתונים "
+                       "מותאמים אישית לחלוטין מבלי לגעת בתור הפעולות.",
+        "sim.tab_event": "שליחת אירוע",
+        "sim.tab_sandbox": "ארגז חול: ניקוד נתונים מותאמים אישית",
+
+        "sim.event_intro": "שלח אירוע בודד וצפה במנוע הניקוד מחדש מחליט. הקורא **אינו** שולח מחדש את "
+                           "פרופיל הלקוח — המנוע בונה מחדש את הקלט מהתמונה השמורה האחרונה בתוספת יומן "
+                           "האירועים, וזה כל הרעיון של נקודת הקצה.",
+        "sim.event_caption": "ללקוח כבר חייב להיות ציון רשום — קלוט אותו קודם (עמוד התור או לשונית ארגז "
+                             "החול). ספי ההפעלה נמצאים בקובץ המדיניות; ה-`reason` בתשובה הוא הדיווח "
+                             "הרשמי של מה שקרה.",
+        "sim.customer_other": "— הקלד מזהה אחר —",
+        "sim.customer_label": "לקוח",
+        "sim.customer_id_label": "מזהה לקוח",
+        "sim.event_type_label": "סוג אירוע",
+        "sim.usually_trigger": "בדרך כלל מפעיל",
+        "sim.amount_label": "סכום",
+        "sim.counterparty_label": "מדינת הצד שכנגד",
+        "sim.channel_label": "ערוץ",
+        "sim.occurred_label": "התרחש (לפני כמה דקות)",
+        "sim.send_event": "שלח אירוע",
+        "sim.outcome_label": "תוצאה",
+        "sim.rescored_label": "נוקד מחדש",
+        "sim.band_changed_label": "הרמה השתנתה",
+        "sim.notified_label": "נשלחה התראה",
+        "sim.new_score_header": "ציון חדש לאחר `{trigger}`",
+        "sim.score_before": "ציון לפני",
+        "sim.score_after": "ציון אחרי",
+        "sim.band_label": "רמה",
+        "sim.narrative_dropped_warning": "**גורם/י הנרטיב {codes} נעדרים מהניקוד מחדש הזה.** ניקוד מחדש "
+                                         "של אירוע בונה את הקלט מהתמונה השמורה של הלקוח בתוספת יומן "
+                                         "האירועים, והערות נרטיביות אינן חלק מאותה תמונה — כך שאות טקסט "
+                                         "שהיה נוכח בקריאת `/score` המקורית אינו עובר הלאה. שים לב שהתשובה "
+                                         "*אינה* מסומנת `degraded`: לא סופקו נרטיבים לקריאה זו, ומעצם "
+                                         "העיצוב זה נחשב לבקשה רגילה ולא לחילוץ שנכשל. כדאי לדעת זאת לפני "
+                                         "שקוראים את ההפרש למעלה כשינוי אמיתי בסיכון של הלקוח.",
+        "sim.why_internal": "מדוע — גורמים מובילים (תצוגה פנימית)",
+        "sim.no_factor": "אף גורם לא עבר את סף התרומה המינימלי של המדיניות.",
+        "sim.event_stored_not_scored": "האירוע נשמר. קלוט לקוח זה קודם (עמוד התור, או לשונית ארגז החול), "
+                                       "ואז שלח את האירוע שוב.",
+        "sim.event_stored_no_score": "האירוע נשמר, אך לא חושב ציון חדש — ראה את הסיבה למעלה.",
+
+        "sim.sandbox_intro": "שליטה ידנית מלאה בכל שדה שה-API מקבל — כלי לבדיקת כללים וה-API ישירות, "
+                             "לא הדרך העיקרית להביא לקוח לתור. **כל מה שמסומן כלא ידוע נשלח כערך חסר "
+                             "אמיתי**, לעולם לא כאפס.",
+        "sim.start_from_profile": "התחל מפרופיל",
+        "sim.snapshot_date_label": "תאריך תמונת מצב",
+        "sim.audience_label": "קהל יעד",
+        "sim.audience_help": "`customer` מדחיק קודי נימוק שאסור לחשוף כדין לנשוא — חששות הלבנת הון, "
+                             "דיווחים קודמים, תקשורת שלילית.",
+
+        "sim.expander_profile": "פרופיל",
+        "sim.expander_income": "הכנסה ואשראי",
+        "sim.expander_txn": "התנהגות עסקאות",
+        "sim.expander_aml": "הלבנת הון / KYC",
+        "sim.expander_narrative": "הערות נרטיביות (טקסט חופשי)",
+
+        "field.segment": "מגזר",
+        "field.occupation": "עיסוק",
+        "field.employment": "תעסוקה",
+        "field.age": "גיל",
+        "field.years_at_employer": "שנות ותק אצל המעסיק",
+        "field.account_age_months": "ותק חשבון (חודשים)",
+        "field.residency": "מעמד תושבות",
+        "field.country": "מדינה",
+        "field.products_held": "מוצרים מוחזקים",
+        "field.declared_income": "הכנסה שנתית מוצהרת",
+        "field.verified_income_ratio": "יחס הכנסה מאומתת",
+        "field.income_volatility": "תנודתיות הכנסה (CV)",
+        "field.bureau_score": "ציון לשכת אשראי",
+        "field.total_credit_limit": "מסגרת אשראי כוללת",
+        "field.credit_utilization": "ניצול אשראי",
+        "field.dti": "יחס חוב להכנסה",
+        "field.savings_to_income": "יחס חיסכון להכנסה",
+        "field.open_loans": "הלוואות פתוחות",
+        "field.credit_inquiries": "פניות אשראי (12 חודשים)",
+        "field.delinq_30d": "פיגורי 30 יום (12 חודשים)",
+        "field.delinq_90d": "פיגורי 90 יום (24 חודשים)",
+        "field.max_days_past_due": "מקסימום ימי פיגור (24 חודשים)",
+        "field.prior_default": "כשל קודם",
+        "field.bounced_payments": "תשלומים שחזרו (12 חודשים)",
+        "field.overdraft_events": "אירועי חריגה ממסגרת (12 חודשים)",
+        "field.balance_volatility": "תנודתיות יתרה",
+        "field.txn_count": "עסקאות (90 יום)",
+        "field.cash_intensity": "עצימות מזומן",
+        "field.cross_border": "יחס חוצה גבולות",
+        "field.night_txn": "יחס פעילות לילית",
+        "field.structuring_score": "ציון פיצול עסקאות",
+        "field.crypto_exposure": "חשיפה לקריפטו",
+        "field.gambling_spend": "הוצאות הימורים",
+        "field.new_counterparties": "צדדים שכנגד חדשים",
+        "field.pep": "גורם פוליטי חשוף (PEP)",
+        "field.sanctions_hits": "פגיעות בסנקציות",
+        "field.adverse_media": "תקשורת שלילית (12 חודשים)",
+        "field.offshore_links": "קשרים אופשוריים",
+        "field.high_risk_jurisdiction": "סמכות שיפוט בסיכון גבוה",
+        "field.medium_risk_jurisdiction": "סמכות שיפוט בסיכון בינוני",
+        "field.prior_sar": "דיווח קודם (SAR)",
+        "field.edd_required": "נדרשת בדיקת נאותות מוגברת (EDD)",
+        "field.source_of_funds": "מקור כספים",
+        "field.source_verified": "מקור מאומת",
+        "field.kyc_completeness": "שלמות מסמכי KYC",
+        "field.kyc_refresh_overdue": "עדכון KYC באיחור (ימים)",
+
+        "sim.narrative_caption": "מטופל כקלט לא מהימן. הטקסט מגיע לחולץ בתוך מעטפת נתונים, והסכימה שהוא "
+                                 "חייב לענות דרכה אינה כוללת שדה שמשמעותו ציון או רמה — הוראה מוסתרת "
+                                 "בהערה אינה יכולה להפוך להחלטה. נסה זאת.",
+        "field.support_call": "סיכום שיחת תמיכה",
+        "field.underwriter_note": "הערת חתם",
+        "field.kyc_extract": "תמצית מסמך KYC",
+
+        "sim.unknown_label": "שלח שדות אלו כלא ידועים (ריק, לא אפס)",
+        "sim.unknown_help": "מדגים את חוזה הנתונים החסרים: שדה שהושמט מגיע למודל כ-NaN בתוספת מחוון "
+                            "חוסר, לעולם לא כ-0 מזויף.",
+        "sim.score_customer": "נקד לקוח",
+        "sim.unknown_sent": "{n} שדה/שדות נשלחו כלא ידועים: {fields}",
+        "sim.why_audience": "מדוע — גורמים מובילים (תצוגת {audience})",
+        "sim.overwrite_warning": "`{id}` כבר קיים בתור — ההוספה תחליף את הפרופיל, הציון וציר הזמן שלו "
+                                 "בתוצאת ארגז החול הזו. סטטוס התיק וההחלטות הקודמות שלו נשמרים.",
+        "sim.add_to_queue": "➕ הוסף תוצאה זו לתור הפעולות",
+        "sim.added_to_queue": "{id} נוסף לתור.",
+    },
+}
+
+
+def t(key: str, **kwargs: Any) -> str:
+    """Look up a UI string in the active language, falling back to English
+    for a key missing from Hebrew and to the raw key if missing from English
+    too — a translation gap degrades to readable text, never a crash or a
+    blank label."""
+    lang = st.session_state.get("language", "he")
+    table = I18N.get(lang, I18N["en"])
+    text = table.get(key, I18N["en"].get(key, key))
+    return text.format(**kwargs) if kwargs else text
+
+
+def band_label(band: str) -> str:
+    return t(f"band.{band}")
+
+
+def status_label(status: str) -> str:
+    return t(f"status.{status}")
+
+
+def preset_label(key: str) -> str:
+    if st.session_state.get("language", "he") == "he":
+        return PRESET_LABEL_HE.get(key, key)
+    return key
+
+
+def archetype_label(archetype: str) -> str:
+    """Translate an ``entry["archetype"]`` tag for display: a bare preset key,
+    the ``sandbox ({preset})`` composite the sandbox tab writes, or an
+    untranslatable fallback (e.g. ``"custom"``) passed straight through."""
+    if archetype in PRESETS:
+        return preset_label(archetype)
+    if archetype.startswith("sandbox (") and archetype.endswith(")"):
+        inner = archetype[len("sandbox ("):-1]
+        if inner in PRESETS:
+            return t("archetype.sandbox", preset=preset_label(inner))
+    return archetype
+
+
+def yes_no_label(value: int) -> str:
+    return t("common.yes") if value == 1 else t("common.no")
+
+
+# Hebrew labels for the domain-vocabulary tuples above (SEGMENTS, OCCUPATIONS,
+# ...) used via format_func wherever they populate a selectbox. English has
+# no equivalent hand-written table: _humanize derives "Private Banking" from
+# "private_banking" mechanically, which is exactly what these already showed
+# before this file had a language toggle — nothing to translate twice.
+VOCAB: dict[str, dict[str, str]] = {
+    "segment": {
+        "retail": "קמעונאות", "sme": "עסקים קטנים ובינוניים",
+        "private_banking": "בנקאות פרטית", "corporate": "תאגידי",
+    },
+    "occupation": {
+        "software_engineer": "מהנדס/ת תוכנה", "physician": "רופא/ה", "nurse": "אח/ות",
+        "teacher": "מורה", "accountant": "רואה חשבון", "lawyer": "עורך/ת דין",
+        "construction_worker": "פועל/ת בניין", "retail_worker": "עובד/ת קמעונאות",
+        "driver": "נהג/ת", "chef": "שף/ית", "business_owner": "בעל/ת עסק",
+        "consultant": "יועץ/ת", "civil_servant": "עובד/ת ציבור", "police_officer": "שוטר/ת",
+        "military": "חייל/ת", "artist": "אמן/ית", "researcher": "חוקר/ת",
+        "sales_manager": "מנהל/ת מכירות", "real_estate_agent": "סוכן/ת נדל\"ן",
+        "jeweller": "תכשיטן/ית", "import_exporter": "יבואן/ית-יצואן/ית",
+        "crypto_trader": "סוחר/ת קריפטו", "casino_employee": "עובד/ת קזינו",
+        "money_changer": "חלפן/ית כספים", "student": "סטודנט/ית", "retired": "גמלאי/ת",
+        "unemployed": "מובטל/ת", "homemaker": "עקר/ת בית", "freelancer": "עצמאי/ת (פרילנס)",
+        "other": "אחר",
+    },
+    "employment_status": {
+        "salaried": "שכיר/ה", "self_employed": "עצמאי/ת", "business_owner": "בעל/ת עסק",
+        "unemployed": "מובטל/ת", "retired": "גמלאי/ת", "student": "סטודנט/ית",
+    },
+    "residency_status": {
+        "citizen": "אזרח/ית", "permanent_resident": "תושב/ת קבע",
+        "temporary_visa": "ויזה זמנית", "non_resident": "תושב/ת חוץ",
+    },
+    "source_of_funds": {
+        "salary": "משכורת", "business_income": "הכנסה עסקית",
+        "investment_returns": "תשואות השקעה", "inheritance": "ירושה",
+        "property_sale": "מכירת נכס", "gift": "מתנה", "loan_proceeds": "תמורת הלוואה",
+        "crypto_disposal": "מימוש קריפטו", "undeclared": "לא מוצהר",
+    },
+    "event_type": {
+        "missed_payment": "תשלום שהוחמץ", "overdraft_breach": "חריגה ממסגרת אשראי",
+        "chargeback": "חיוב חוזר (צ'רג'בק)", "cash_deposit": "הפקדת מזומן",
+        "wire_transfer_out": "העברה בנקאית יוצאת", "crypto_transfer": "העברת קריפטו",
+        "card_purchase": "רכישה בכרטיס", "atm_withdrawal": "משיכה מכספומט",
+        "salary_credit": "זיכוי משכורת", "wire_transfer_in": "העברה בנקאית נכנסת",
+        "direct_debit": "הוראת קבע", "loan_repayment": "החזר הלוואה",
+    },
+    "channel": {
+        "online": "אונליין", "branch": "סניף", "mobile": "נייד",
+        "atm": "כספומט", "wire": "העברה בנקאית",
+    },
+    "audience": {"internal": "פנימי", "customer": "לקוח"},
+}
+
+_HUMANIZE_OVERRIDES = {"sme": "SME", "pep": "PEP", "kyc": "KYC", "edd": "EDD",
+                        "sar": "SAR", "aml": "AML", "atm": "ATM"}
+
+
+def _humanize(value: str) -> str:
+    return " ".join(_HUMANIZE_OVERRIDES.get(w, w.capitalize()) for w in value.split("_"))
+
+
+def vocab_label(category: str, value: str) -> str:
+    if st.session_state.get("language", "he") == "he":
+        return VOCAB.get(category, {}).get(value, _humanize(value))
+    return _humanize(value)
 
 
 # --------------------------------------------------------------------------
@@ -358,13 +1075,13 @@ def api_event(customer_id: str, event: dict[str, Any]) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 
 
-def band_chip(band: str, label: str = "") -> str:
+def band_chip(band: str, show_prefix: bool = False) -> str:
     colour = BAND_COLOUR.get(band, INK_MUTED)
-    prefix = f"{label} " if label else ""
+    prefix = f"{t('common.band_prefix')} " if show_prefix else ""
     return (
         f'<span style="display:inline-block;padding:2px 10px;border-radius:999px;'
         f'background:{colour};color:#fff;font-weight:600;font-size:0.85rem;'
-        f'font-family:{FONT_STACK};">{prefix}{band}</span>'
+        f'font-family:{FONT_STACK};">{prefix}{band_label(band)}</span>'
     )
 
 
@@ -378,11 +1095,10 @@ def status_chip(status: str) -> str:
     of a span while the tag name itself satisfies that rule.
     """
     colour = STATUS_COLOUR.get(status, INK_MUTED)
-    label = STATUS_LABEL.get(status, status)
     return (
         f'<div style="display:inline-block;padding:2px 10px;border-radius:999px;'
         f'background:{colour};color:#fff;font-weight:600;font-size:0.85rem;'
-        f'font-family:{FONT_STACK};">case: {label}</div>'
+        f'font-family:{FONT_STACK};">{t("common.case_prefix")} {status_label(status)}</div>'
     )
 
 
@@ -436,7 +1152,7 @@ def score_position_strip(score: float, model_band: str, risk_band: str) -> go.Fi
             fillcolor=BAND_COLOUR[band], opacity=0.16, line=dict(width=0), layer="below",
         )
         fig.add_annotation(
-            x=(lower + upper) / 2, y=-0.55, text=band, showarrow=False,
+            x=(lower + upper) / 2, y=-0.55, text=band_label(band), showarrow=False,
             font=dict(size=11, color=INK_MUTED, family=FONT_STACK),
         )
         lower = upper
@@ -451,16 +1167,16 @@ def score_position_strip(score: float, model_band: str, risk_band: str) -> go.Fi
     fig.add_trace(go.Scatter(
         x=list(range(0, 101, 5)), y=[0.5] * 21, mode="markers",
         marker=dict(size=1, color="rgba(0,0,0,0)"),
-        hovertemplate="score %{x}<extra></extra>",
+        hovertemplate=f"{t('chart.score_word')} %{{x}}<extra></extra>",
     ))
     fig.update_xaxes(
         range=[0, 100], tickvals=[0, 25, 50, 75, 100], showgrid=False,
         zeroline=False, linecolor=AXIS_LINE, tickfont=dict(size=11, color=INK_MUTED),
     )
     fig.update_yaxes(range=[-1.0, 2.1], visible=False)
-    caption = f"model band {model_band}"
+    caption = t("chart.model_band", band=band_label(model_band))
     if model_band != risk_band:
-        caption += f" · policy floored to {risk_band}"
+        caption += t("chart.policy_floored", band=band_label(risk_band))
     fig.add_annotation(x=0, y=2.0, text=caption, showarrow=False, xanchor="left",
                        font=dict(size=11, color=INK_MUTED, family=FONT_STACK))
     return _base_layout(fig, 150)
@@ -489,6 +1205,10 @@ def factor_chart(factors: list[dict[str, Any]]) -> go.Figure:
     colours = [RAISES_RISK if v > 0 else LOWERS_RISK for v in values]
     dimensions = [f.get("dimension", "") for f in ordered]
 
+    hover = (
+        f"<b>%{{customdata[1]}}</b><br>{t('chart.hover_contribution')} %{{x:+.4f}} (log-odds)"
+        f"<br>{t('chart.hover_dimension')}: %{{customdata[0]}}<extra></extra>"
+    )
     fig = go.Figure(go.Bar(
         x=values, y=labels, orientation="h",
         marker=dict(color=colours, cornerradius=4),
@@ -497,8 +1217,7 @@ def factor_chart(factors: list[dict[str, Any]]) -> go.Figure:
         textfont=dict(size=11, color=INK_SECONDARY, family=FONT_STACK),
         cliponaxis=False,
         customdata=[[d, f["statement"]] for d, f in zip(dimensions, ordered, strict=True)],
-        hovertemplate="<b>%{customdata[1]}</b><br>contribution %{x:+.4f} (log-odds)"
-                      "<br>dimension: %{customdata[0]}<extra></extra>",
+        hovertemplate=hover,
     ))
     # Generous headroom on both arms: these charts sit two-to-a-row, so an
     # outside value label on a negative bar has little space before it runs
@@ -507,7 +1226,7 @@ def factor_chart(factors: list[dict[str, Any]]) -> go.Figure:
     fig.update_xaxes(
         range=[-span, span], gridcolor=GRIDLINE, griddash="solid", zeroline=True,
         zerolinecolor=AXIS_LINE, zerolinewidth=2, linecolor=AXIS_LINE,
-        title=dict(text="← lowers risk    ·    raises risk →",
+        title=dict(text=t("chart.axis_title"),
                    font=dict(size=11, color=INK_MUTED, family=FONT_STACK)),
         tickfont=dict(size=11, color=INK_MUTED),
     )
@@ -535,24 +1254,21 @@ def render_factor_block(factors: list[dict[str, Any]], empty_note: str) -> None:
     st.plotly_chart(factor_chart(factors), use_container_width=True, config={"displayModeBar": False})
     st.markdown(
         f'<span style="color:{RAISES_RISK};font-weight:600;">■</span> '
-        f'<span style="color:{INK_SECONDARY};font-size:0.85rem;">raises risk</span>'
+        f'<span style="color:{INK_SECONDARY};font-size:0.85rem;">{t("chart.raises_risk")}</span>'
         f'&nbsp;&nbsp;&nbsp;<span style="color:{LOWERS_RISK};font-weight:600;">■</span> '
-        f'<span style="color:{INK_SECONDARY};font-size:0.85rem;">lowers risk</span>',
+        f'<span style="color:{INK_SECONDARY};font-size:0.85rem;">{t("chart.lowers_risk")}</span>',
         unsafe_allow_html=True,
     )
-    with st.expander("Table view (exact values)"):
+    with st.expander(t("chart.table_view")):
         st.dataframe(factor_frame(factors), use_container_width=True, hide_index=True)
 
 
 def render_fired_rules(rules: list[dict[str, Any]]) -> None:
-    st.markdown("##### Policy rules that fired")
+    st.markdown(f"##### {t('rules.header')}")
     if not rules:
-        st.caption("No deterministic policy rule matched this customer.")
+        st.caption(t("rules.empty"))
         return
-    st.caption(
-        "Kept separate from the model factors above on purpose: a rule is a "
-        "pass/fail policy override, not a learned contribution."
-    )
+    st.caption(t("rules.caption"))
     st.dataframe(
         pd.DataFrame(rules)[["id", "reason_code", "description", "floor_band", "require_review"]],
         use_container_width=True, hide_index=True,
@@ -567,15 +1283,15 @@ def render_result_header(result: dict[str, Any]) -> None:
             f'<div style="font-size:3.4rem;line-height:1.05;font-weight:650;color:{INK};'
             f'font-family:{FONT_STACK};">{score:.1f}</div>'
             f'<div style="color:{INK_MUTED};font-size:0.85rem;margin-bottom:8px;'
-            f'font-family:{FONT_STACK};">composite risk score (0-100)</div>'
-            + band_chip(result["risk_band"], "band"),
+            f'font-family:{FONT_STACK};">{t("result.composite_score")}</div>'
+            + band_chip(result["risk_band"], show_prefix=True),
             unsafe_allow_html=True,
         )
     with right:
         a, b, c = st.columns(3)
-        a.metric("Credit default (12m)", f"{result['credit']['probability']:.2%}")
-        b.metric("Financial crime (12m)", f"{result['financial_crime']['probability']:.2%}")
-        c.metric("Latency", f"{result['latency_ms']:.0f} ms")
+        a.metric(t("result.credit_default"), f"{result['credit']['probability']:.2%}")
+        b.metric(t("result.financial_crime"), f"{result['financial_crime']['probability']:.2%}")
+        c.metric(t("result.latency"), f"{result['latency_ms']:.0f} ms")
 
     st.plotly_chart(
         score_position_strip(score, result["model_band"], result["risk_band"]),
@@ -584,36 +1300,40 @@ def render_result_header(result: dict[str, Any]) -> None:
 
     flags = []
     if result.get("band_floor_applied"):
-        flags.append("A policy rule raised this band above the model's own reading.")
+        flags.append(t("result.flag_band_floor"))
     if result.get("requires_review"):
-        flags.append("Flagged for human review by policy.")
+        flags.append(t("result.flag_review"))
     if result.get("degraded"):
-        flags.append(
-            "**Degraded**: narrative text was supplied but no extraction ran, so this "
-            "score is tabular-only. The request did not fail — the gap is recorded."
-        )
+        flags.append(t("result.flag_degraded"))
     for flag in flags:
         st.warning(flag)
 
-    st.caption(
-        f"model `{result['model_version']}` · policy v{result['policy_version']} · "
-        f"scored {result['scored_at']}"
-    )
+    st.caption(t("result.caption", model=result["model_version"], policy=result["policy_version"],
+                  scored_at=result["scored_at"]))
 
 
 def render_profile_summary(entry: dict[str, Any]) -> None:
     p = entry["profile"]
+    dash = "—"
     st.markdown(
-        f"**Segment** {p.get('segment', '—')}&nbsp;&nbsp;·&nbsp;&nbsp;"
-        f"**Occupation** {p.get('occupation', '—')}&nbsp;&nbsp;·&nbsp;&nbsp;"
-        f"**Employment** {p.get('employment_status', '—')}&nbsp;&nbsp;·&nbsp;&nbsp;"
-        f"**Residency** {p.get('residency_status', '—')} ({p.get('country_of_residence', '—')})"
-        f"&nbsp;&nbsp;·&nbsp;&nbsp;**Age** {p.get('age', '—')}"
-        f"&nbsp;&nbsp;·&nbsp;&nbsp;**Account age** {p.get('account_age_months', '—')} mo"
-        f"&nbsp;&nbsp;·&nbsp;&nbsp;**Products held** {p.get('num_products_held', '—')}",
+        f"**{t('profile.segment')}** {vocab_label('segment', p['segment']) if p.get('segment') else dash}"
+        f"&nbsp;&nbsp;·&nbsp;&nbsp;"
+        f"**{t('profile.occupation')}** "
+        f"{vocab_label('occupation', p['occupation']) if p.get('occupation') else dash}"
+        f"&nbsp;&nbsp;·&nbsp;&nbsp;"
+        f"**{t('profile.employment')}** "
+        f"{vocab_label('employment_status', p['employment_status']) if p.get('employment_status') else dash}"
+        f"&nbsp;&nbsp;·&nbsp;&nbsp;"
+        f"**{t('profile.residency')}** "
+        f"{vocab_label('residency_status', p['residency_status']) if p.get('residency_status') else dash} "
+        f"({p.get('country_of_residence', dash)})"
+        f"&nbsp;&nbsp;·&nbsp;&nbsp;**{t('profile.age')}** {p.get('age', dash)}"
+        f"&nbsp;&nbsp;·&nbsp;&nbsp;**{t('profile.account_age')}** "
+        f"{p.get('account_age_months', dash)} {t('profile.account_age_unit')}"
+        f"&nbsp;&nbsp;·&nbsp;&nbsp;**{t('profile.products_held')}** {p.get('num_products_held', dash)}",
         unsafe_allow_html=True,
     )
-    st.caption(f"Source profile: {entry.get('archetype', 'custom')}")
+    st.caption(t("profile.source", archetype=archetype_label(entry.get("archetype", "custom"))))
 
 
 _DECISION_ICON = {"approved": "✅", "escalated_aml": "🚨", "kyc_requested": "📋", "blocked": "⛔"}
@@ -626,23 +1346,25 @@ def render_timeline(entries: list[dict[str, Any]]) -> None:
     before going into an ``unsafe_allow_html`` block; everything else here is
     an enum-like value this module controls."""
     if not entries:
-        st.caption("No activity recorded yet.")
+        st.caption(t("timeline.empty"))
         return
     for item in sorted(entries, key=lambda e: _parse_dt(e["at"]), reverse=True):
         at = _parse_dt(item["at"]).strftime("%Y-%m-%d %H:%M UTC")
         kind = item["kind"]
         if kind == "scored":
             icon = "📊"
-            text = f"<b>Scored</b> — {item['risk_band']} band, {item['risk_score']:.1f} — {html.escape(item.get('note', ''))}"
+            text = t("timeline.scored", band=band_label(item["risk_band"]), score=f"{item['risk_score']:.1f}",
+                      note=html.escape(item.get("note", "")))
         elif kind == "event":
-            status_txt = "re-scored" if item["rescored"] else item["reason"]
-            change = "  ·  <b>band changed</b>" if item.get("band_changed") else ""
+            status_txt = t("timeline.event_rescored") if item["rescored"] else item["reason"]
+            change = t("timeline.event_band_changed") if item.get("band_changed") else ""
             icon = "🔔"
-            text = f"<b>Event</b> <code>{item['event_type']}</code> (amount {item['amount']:,.0f}) — {status_txt}{change}"
+            text = t("timeline.event", event_type=vocab_label("event_type", item["event_type"]),
+                      amount=f"{item['amount']:,.0f}", status=status_txt, change=change)
         else:
             icon = _DECISION_ICON.get(item["action"], "📌")
-            text = (f"<b>{STATUS_LABEL.get(item['action'], item['action'])}</b> by {html.escape(item['actor'])}"
-                    f" — &ldquo;{html.escape(item['note'])}&rdquo;")
+            text = t("timeline.decision", label=status_label(item["action"]), actor=html.escape(item["actor"]),
+                      note=html.escape(item["note"]))
         st.markdown(
             f'<div style="padding:8px 0;border-bottom:1px solid {HAIRLINE};">'
             f'<span style="color:{INK_MUTED};font-size:0.8rem;">{at}</span><br>'
@@ -769,22 +1491,24 @@ def queue_dataframe(
         due = scored_at + dt.timedelta(hours=SLA_HOURS.get(band, 72))
         breached = status == "pending_review" and now > due
         rows.append({
-            "Customer ID": entry["customer_id"],
-            "Band": f"{BAND_DOT.get(band, '⚪')} {band}",
-            "Score": round(result["risk_score"], 1),
-            "Segment": entry["profile"].get("segment", "—"),
-            "Country": entry["profile"].get("country_of_residence", "—"),
-            "Credit risk": f"{result['credit']['probability']:.1%}",
-            "Fin. crime risk": f"{result['financial_crime']['probability']:.1%}",
-            "Status": STATUS_LABEL.get(status, status),
-            "SLA": "BREACHED" if breached else due.strftime("%Y-%m-%d %H:%M UTC"),
-            "Scored": scored_at.strftime("%Y-%m-%d %H:%M UTC"),
+            t("col.customer_id"): entry["customer_id"],
+            t("col.band"): f"{BAND_DOT.get(band, '⚪')} {band_label(band)}",
+            t("col.score"): round(result["risk_score"], 1),
+            t("col.segment"): vocab_label("segment", entry["profile"]["segment"])
+                              if entry["profile"].get("segment") else "—",
+            t("col.country"): entry["profile"].get("country_of_residence", "—"),
+            t("col.credit_risk"): f"{result['credit']['probability']:.1%}",
+            t("col.crime_risk"): f"{result['financial_crime']['probability']:.1%}",
+            t("col.status"): status_label(status),
+            t("col.sla"): t("col.breached") if breached else due.strftime("%Y-%m-%d %H:%M UTC"),
+            t("col.scored"): scored_at.strftime("%Y-%m-%d %H:%M UTC"),
             "_band_rank": BAND_RANK.get(band, 9),
+            "_customer_id": entry["customer_id"],
         })
     frame = pd.DataFrame(rows)
     if frame.empty:
         return frame
-    return frame.sort_values(["_band_rank", "Score"], ascending=[True, False], ignore_index=True)
+    return frame.sort_values(["_band_rank", t("col.score")], ascending=[True, False], ignore_index=True)
 
 
 # --------------------------------------------------------------------------
@@ -793,80 +1517,79 @@ def queue_dataframe(
 
 
 def page_queue() -> None:
-    st.title("Risk Operations Queue")
-    st.caption(
-        "Every customer scored in this session, highest risk first. Score, band and factors come "
-        "from the API; case status, SLA and notes are this session's workflow state (see the sidebar)."
-    )
+    st.title(t("queue.title"))
+    st.caption(t("queue.caption"))
     show_flash("queue")
 
     if not st.session_state.queue:
-        st.info("The queue is empty.")
-        if st.button("Load demo book (18 synthetic customers)", type="primary"):
-            with st.spinner("Scoring demo book against the live API…"):
+        st.info(t("queue.empty"))
+        if st.button(t("queue.load_demo"), type="primary"):
+            with st.spinner("…"):
                 ok, errors = seed_queue()
             if ok:
                 st.rerun()
             else:
-                st.error("Every candidate failed to score — is the API reachable? " + (errors[0] if errors else ""))
+                st.error(t("queue.load_fail", detail=errors[0] if errors else ""))
         return
 
     kpis = compute_kpis(st.session_state.queue)
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Total scored", kpis["total"])
-    k2.metric("High-risk pending review", kpis["high_risk_pending"])
-    k3.metric("SLA breaches", kpis["sla_breaches"])
-    k4.metric("Escalated to AML", kpis["escalated"])
-    st.caption(
-        "SLA windows while a case sits at Pending Review (workflow convention, not API policy): "
-        f"Extreme {SLA_HOURS['Extreme']}h · High {SLA_HOURS['High']}h · "
-        f"Medium {SLA_HOURS['Medium']}h · Low {SLA_HOURS['Low']}h from the scoring timestamp."
-    )
+    k1.metric(t("queue.kpi_total"), kpis["total"])
+    k2.metric(t("queue.kpi_high_risk"), kpis["high_risk_pending"])
+    k3.metric(t("queue.kpi_sla"), kpis["sla_breaches"])
+    k4.metric(t("queue.kpi_escalated"), kpis["escalated"])
+    st.caption(t("queue.sla_caption", extreme=SLA_HOURS["Extreme"], high=SLA_HOURS["High"],
+                  medium=SLA_HOURS["Medium"], low=SLA_HOURS["Low"]))
 
     st.divider()
     f1, f2, f3, f4 = st.columns([2.2, 1.3, 1.3, 0.9])
-    search = f1.text_input("Search — Customer ID, segment, occupation or country", "")
-    bands = f2.multiselect("Risk band", BAND_ORDER, default=list(BAND_ORDER))
-    statuses = f3.multiselect(
-        "Case status", list(STATUS_LABEL), default=list(STATUS_LABEL), format_func=lambda s: STATUS_LABEL[s]
-    )
+    search = f1.text_input(t("queue.search_label"), "")
+    bands = f2.multiselect(t("queue.band_filter_label"), BAND_ORDER, default=list(BAND_ORDER),
+                            format_func=band_label)
+    statuses = f3.multiselect(t("queue.status_filter_label"), list(STATUS_KEYS), default=list(STATUS_KEYS),
+                               format_func=status_label)
     f4.markdown("<div style='height:1.85rem'></div>", unsafe_allow_html=True)
-    if f4.button("↻ Reload book", use_container_width=True,
-                 help="Score a fresh synthetic book and refresh the demo customers in the queue"):
+    if f4.button(t("queue.reload_button"), use_container_width=True, help=t("queue.reload_help")):
         st.session_state.book_seed = st.session_state.get("book_seed", 42) + 1
-        with st.spinner("Scoring…"):
+        with st.spinner("…"):
             seed_queue()
         st.rerun()
 
     frame = queue_dataframe(st.session_state.queue, search, bands, statuses)
     if frame.empty:
-        st.caption("No customers match these filters.")
+        st.caption(t("queue.no_match"))
     else:
-        display_cols = ["Customer ID", "Band", "Score", "Segment", "Country",
-                         "Credit risk", "Fin. crime risk", "Status", "SLA", "Scored"]
+        display_cols = [t(k) for k in ("col.customer_id", "col.band", "col.score", "col.segment",
+                                        "col.country", "col.credit_risk", "col.crime_risk", "col.status",
+                                        "col.sla", "col.scored")]
         event = st.dataframe(
             frame[display_cols], use_container_width=True, hide_index=True,
             on_select="rerun", selection_mode="single-row",
-            column_config={"Score": st.column_config.NumberColumn(format="%.1f")},
+            column_config={t("col.score"): st.column_config.NumberColumn(format="%.1f")},
         )
-        st.caption(f"{len(frame)} of {len(st.session_state.queue)} customers shown. Click a row to open Customer 360.")
+        st.caption(t("queue.shown_caption", shown=len(frame), total=len(st.session_state.queue)))
         if event.selection.rows:
-            st.session_state.selected_customer = frame.iloc[event.selection.rows[0]]["Customer ID"]
+            st.session_state.selected_customer = frame.iloc[event.selection.rows[0]]["_customer_id"]
             st.session_state.nav = "customer360"
             st.rerun()
 
     st.divider()
-    with st.expander("+ Onboard a new customer from a preset"):
-        st.caption(
-            "Loads a full, realistic pre-configured profile automatically — no manual field entry. "
-            "For hands-on control over every field, use the sandbox on the Event Simulator page."
-        )
+    with st.expander(t("queue.onboard_expander")):
+        st.caption(t("queue.onboard_caption"))
         next_id = f"CUS-{100000 + len(st.session_state.queue) + 1}"
         c1, c2, c3 = st.columns([2, 1, 1])
-        onboard_preset = c1.selectbox("Profile", list(PRESETS), key="onboard_preset")
-        onboard_id = c2.text_input("Customer ID", value=next_id, key="onboard_id")
+        # Keying on language too: a stable key across a language switch makes
+        # Streamlit treat this as the same widget and keep showing the PRIOR
+        # run's format_func output for the already-selected option (observed
+        # directly — the other selects below have no explicit key and do not
+        # have this problem, which is what points at the key as the cause).
+        # Resetting to the first preset on a language switch is a cheap,
+        # acceptable trade for never showing a stale-language label.
+        onboard_preset = c1.selectbox(t("queue.onboard_profile_label"), list(PRESETS),
+                                       format_func=preset_label, key=f"onboard_preset_{st.session_state.language}")
+        onboard_id = c2.text_input(t("queue.onboard_id_label"), value=next_id, key="onboard_id")
         c3.markdown("<div style='height:1.85rem'></div>", unsafe_allow_html=True)
-        if c3.button("Score & add", type="primary", use_container_width=True, key="onboard_submit"):
+        if c3.button(t("queue.onboard_submit"), type="primary", use_container_width=True, key="onboard_submit"):
             base = PRESETS[onboard_preset]
             values = {k: v for k, v in base.items() if k != "_narratives"}
             payload = {
@@ -876,38 +1599,36 @@ def page_queue() -> None:
                 "audience": "internal",
             }
             try:
-                with st.spinner("Scoring…"):
+                with st.spinner("…"):
                     result = api_score(payload)
             except ApiError as exc:
                 st.error(str(exc))
             else:
                 add_to_queue(onboard_id, values, base["_narratives"], result, archetype=onboard_preset)
                 st.session_state.selected_customer = onboard_id
-                flash_success("queue", f"{onboard_id} scored — {result['risk_band']} band — added to the queue.")
+                flash_success("queue", t("queue.onboard_success", id=onboard_id, band=band_label(result["risk_band"])))
                 st.rerun()
 
 
 def render_action_panel(entry: dict[str, Any]) -> None:
-    st.markdown("##### Case decision")
+    st.markdown(f"##### {t('action.header')}")
     show_flash(f"decision_{entry['customer_id']}")
     st.markdown(status_chip(entry["status"]), unsafe_allow_html=True)
     if entry["status"] != "pending_review":
-        st.caption("This case has already been actioned. Recording another decision below updates the "
-                   "status again and appends to the timeline.")
+        st.caption(t("action.already_actioned"))
 
     cid = entry["customer_id"]
     with st.form(f"decision_form_{cid}"):
         note = st.text_area(
-            "Review note (required)",
-            placeholder="Document the reason for this decision — required for the audit trail.",
+            t("action.note_label"), placeholder=t("action.note_placeholder"),
             height=90, key=f"decision_note_{cid}",
         )
         b1, b2 = st.columns(2)
         b3, b4 = st.columns(2)
-        approve = b1.form_submit_button("✅ Approve Customer", use_container_width=True)
-        escalate = b2.form_submit_button("🚨 Escalate to AML", use_container_width=True)
-        kyc = b3.form_submit_button("📋 Request KYC Verification", use_container_width=True)
-        block = b4.form_submit_button("⛔ Block Account", use_container_width=True)
+        approve = b1.form_submit_button(t("action.approve"), use_container_width=True)
+        escalate = b2.form_submit_button(t("action.escalate"), use_container_width=True)
+        kyc = b3.form_submit_button(t("action.kyc"), use_container_width=True)
+        block = b4.form_submit_button(t("action.block"), use_container_width=True)
 
     action = None
     if approve:
@@ -921,22 +1642,19 @@ def render_action_panel(entry: dict[str, Any]) -> None:
 
     if action:
         if not note.strip():
-            st.error("A review note is required before recording this decision.")
+            st.error(t("action.note_required"))
         else:
             entry["status"] = action
             entry["timeline"].append({
                 "kind": "decision", "at": dt.datetime.now(dt.UTC), "action": action,
                 "note": note.strip(), "actor": st.session_state.get("reviewer_name", "Risk Analyst"),
             })
-            flash_success(f"decision_{cid}", f"Recorded: {STATUS_LABEL[action]}.")
+            flash_success(f"decision_{cid}", t("action.recorded", label=status_label(action)))
             st.rerun()
 
 
 def render_explainability(customer_id: str) -> None:
-    st.caption(
-        "The stored explanation for this customer's most recent score — read back from the API rather "
-        "than recomputed, so this is provably the same event as the score above."
-    )
+    st.caption(t("explain.caption"))
     try:
         internal = api_explain(customer_id, "internal")
         customer_view = api_explain(customer_id, "customer")
@@ -951,11 +1669,11 @@ def render_explainability(customer_id: str) -> None:
 
     left, right = st.columns(2, gap="large")
     with left:
-        st.markdown(f"##### Internal reviewer · {len(all_factors)} codes")
-        render_factor_block(all_factors, "No reason codes on record.")
+        st.markdown(f"##### {t('explain.internal_header', n=len(all_factors))}")
+        render_factor_block(all_factors, t("explain.no_codes"))
     with right:
-        st.markdown(f"##### Customer-facing · {len(customer_all)} codes")
-        render_factor_block(customer_all, "No reason code on this decision may be shown to the customer.")
+        st.markdown(f"##### {t('explain.customer_header', n=len(customer_all))}")
+        render_factor_block(customer_all, t("explain.no_customer_codes"))
 
     visible_rule_ids = {r["id"] for r in customer_view["fired_rules"]}
     suppressed_rules = [r for r in internal["fired_rules"] if r["id"] not in visible_rule_ids]
@@ -963,37 +1681,41 @@ def render_explainability(customer_id: str) -> None:
     if suppressed or suppressed_rules:
         parts = []
         if suppressed:
-            parts.append(f"**{len(suppressed)} reason code(s) withheld:** " + ", ".join(f"`{f['code']}`" for f in suppressed))
+            parts.append(t("explain.withheld_codes", n=len(suppressed),
+                            codes=", ".join(f"`{f['code']}`" for f in suppressed)))
         if suppressed_rules:
-            parts.append(f"**{len(suppressed_rules)} policy rule(s) withheld:** " + ", ".join(f"`{r['id']}`" for r in suppressed_rules))
-        st.warning("Not shown to the customer — " + "  \n".join(parts))
+            parts.append(t("explain.withheld_rules", n=len(suppressed_rules),
+                            rules=", ".join(f"`{r['id']}`" for r in suppressed_rules)))
+        st.warning(t("explain.not_shown_prefix", detail="  \n".join(parts)))
         if suppressed:
             st.dataframe(factor_frame(suppressed), use_container_width=True, hide_index=True)
         if suppressed_rules:
             st.dataframe(pd.DataFrame(suppressed_rules)[["id", "reason_code", "description", "floor_band"]],
                          use_container_width=True, hide_index=True)
     else:
-        st.success("Every reason code and rule on this decision is disclosable to the customer.")
+        st.success(t("explain.all_disclosable"))
 
-    with st.expander("Filter all reason codes"):
+    with st.expander(t("explain.filter_expander")):
         frame = factor_frame(all_factors)
         if frame.empty:
-            st.caption("No reason codes on this decision.")
+            st.caption(t("explain.no_codes_decision"))
         else:
             frame["customer_visible"] = frame["code"].isin(visible_codes)
             f1, f2, f3 = st.columns(3)
-            dimensions = f1.multiselect("Dimension", sorted(frame["dimension"].unique()),
+            dimensions = f1.multiselect(t("explain.dimension_label"), sorted(frame["dimension"].unique()),
                                         default=list(sorted(frame["dimension"].unique())), key=f"dim_{customer_id}")
-            directions = f2.multiselect("Direction", sorted(frame["direction"].unique()),
+            directions = f2.multiselect(t("explain.direction_label"), sorted(frame["direction"].unique()),
                                         default=list(sorted(frame["direction"].unique())), key=f"dir_{customer_id}")
-            audiences = f3.multiselect("Visibility", ["customer-visible", "internal-only"],
-                                       default=["customer-visible", "internal-only"], key=f"vis_{customer_id}")
+            audiences = f3.multiselect(
+                t("explain.visibility_label"), [t("explain.customer_visible"), t("explain.internal_only")],
+                default=[t("explain.customer_visible"), t("explain.internal_only")], key=f"vis_{customer_id}")
             mask = frame["dimension"].isin(dimensions) & frame["direction"].isin(directions)
-            wanted = [v for v, name in ((True, "customer-visible"), (False, "internal-only")) if name in audiences]
+            wanted = [v for v, name in ((True, t("explain.customer_visible")), (False, t("explain.internal_only")))
+                      if name in audiences]
             mask &= frame["customer_visible"].isin(wanted)
             filtered = frame[mask]
             st.dataframe(filtered, use_container_width=True, hide_index=True)
-            st.caption(f"{len(filtered)} of {len(frame)} reason codes shown.")
+            st.caption(t("explain.shown_count", shown=len(filtered), total=len(frame)))
 
     render_fired_rules(internal["fired_rules"])
 
@@ -1002,16 +1724,16 @@ def page_customer360() -> None:
     cid = st.session_state.get("selected_customer")
     entry = st.session_state.queue.get(cid) if cid else None
     if entry is None:
-        st.title("Customer 360 & Decision Center")
-        st.info("No customer selected. Pick one from the Risk Operations Queue.")
-        if st.button("← Back to queue"):
+        st.title(t("c360.no_customer_title"))
+        st.info(t("c360.no_customer_info"))
+        if st.button(t("c360.back_to_queue")):
             st.session_state.nav = "queue"
             st.rerun()
         return
 
     head_l, head_r = st.columns([5, 1])
-    head_l.title(f"Customer 360 — {cid}")
-    if head_r.button("← Back to queue", use_container_width=True):
+    head_l.title(t("c360.title", id=cid))
+    if head_r.button(t("c360.back_to_queue"), use_container_width=True):
         st.session_state.nav = "queue"
         st.rerun()
 
@@ -1024,59 +1746,67 @@ def page_customer360() -> None:
     st.divider()
     left, right = st.columns([3, 2], gap="large")
     with left:
-        st.markdown("#### Event timeline")
+        st.markdown(f"#### {t('c360.event_timeline_header')}")
         render_timeline(entry["timeline"])
     with right:
         render_action_panel(entry)
 
     st.divider()
-    st.markdown("### Explainability engine")
+    st.markdown(f"### {t('c360.explainability_header')}")
     render_explainability(cid)
 
 
 def page_simulator() -> None:
-    st.title("Real-Time Event Simulator & Sandbox")
-    st.caption("For testing rules and the API directly — push a single event against any customer on "
-               "record, or score a fully custom payload without touching the Operations Queue.")
+    st.title(t("sim.title"))
+    st.caption(t("sim.caption"))
 
-    tab_event, tab_sandbox = st.tabs(["Push an event", "Sandbox: score a custom payload"])
+    # A manual tab pair, not st.tabs(): st.tabs() ties a tab group's identity
+    # to the exact label strings passed in, and those strings change with the
+    # language toggle — switching language while on the second tab would
+    # otherwise silently reset the view to the first one. Session state here
+    # keeps the active tab stable across that rerun the same way the sidebar
+    # page nav already does.
+    st.session_state.setdefault("sim_active_tab", "event")
+    tc1, tc2 = st.columns(2)
+    if tc1.button(t("sim.tab_event"), use_container_width=True,
+                  type="primary" if st.session_state.sim_active_tab == "event" else "secondary"):
+        st.session_state.sim_active_tab = "event"
+        st.rerun()
+    if tc2.button(t("sim.tab_sandbox"), use_container_width=True,
+                  type="primary" if st.session_state.sim_active_tab == "sandbox" else "secondary"):
+        st.session_state.sim_active_tab = "sandbox"
+        st.rerun()
+    st.divider()
 
     # ---- push an event ----------------------------------------------------
-    with tab_event:
-        st.markdown(
-            "Push a single event and watch the re-scoring engine decide. The caller does **not** resend "
-            "the customer's profile — the engine rebuilds the input from the last stored snapshot plus "
-            "the event log, which is the whole point of the endpoint."
-        )
-        st.caption(
-            "The customer must already have a score on record — onboard them first (Queue page or the "
-            "sandbox tab). Trigger thresholds live in the policy file; the `reason` in the response is "
-            "the authoritative account of what happened."
-        )
+    if st.session_state.sim_active_tab == "event":
+        st.markdown(t("sim.event_intro"))
+        st.caption(t("sim.event_caption"))
 
         queue_ids = list(st.session_state.queue)
-        options = queue_ids + ["— type a different ID —"]
+        options = queue_ids + [t("sim.customer_other")]
         default_idx = options.index(st.session_state["selected_customer"]) \
             if st.session_state.get("selected_customer") in queue_ids else 0
-        picked = st.selectbox("Customer", options, index=default_idx, key="sim_customer_picker")
+        picked = st.selectbox(t("sim.customer_label"), options, index=default_idx, key="sim_customer_picker")
         event_customer = (
-            st.text_input("Customer ID", value=st.session_state.get("selected_customer") or "CUS-DEMO-001",
+            st.text_input(t("sim.customer_id_label"), value=st.session_state.get("selected_customer") or "CUS-DEMO-001",
                           key="sim_customer_manual")
-            if picked == "— type a different ID —" else picked
+            if picked == t("sim.customer_other") else picked
         )
 
         with st.form("event_form"):
             c1, c2, c3 = st.columns(3)
             event_type = c1.selectbox(
-                "Event type", EVENT_TYPES,
-                format_func=lambda t: f"{t}  ·  usually a trigger" if t in LIKELY_TRIGGERS else t,
+                t("sim.event_type_label"), EVENT_TYPES,
+                format_func=lambda ev: f"{vocab_label('event_type', ev)}  ·  {t('sim.usually_trigger')}"
+                                       if ev in LIKELY_TRIGGERS else vocab_label("event_type", ev),
             )
-            amount = c2.number_input("Amount", 0.0, 100_000_000.0, 75_000.0, step=1_000.0)
-            counterparty = c3.selectbox("Counterparty country", COUNTRIES)
+            amount = c2.number_input(t("sim.amount_label"), 0.0, 100_000_000.0, 75_000.0, step=1_000.0)
+            counterparty = c3.selectbox(t("sim.counterparty_label"), COUNTRIES)
             c1, c2 = st.columns(2)
-            channel = c1.selectbox("Channel", ["online", "branch", "mobile", "atm", "wire"])
-            minutes_ago = c2.slider("Occurred (minutes ago)", 0, 720, 0)
-            send_event = st.form_submit_button("Send event", type="primary")
+            channel = c1.selectbox(t("sim.channel_label"), CHANNELS, format_func=lambda c: vocab_label("channel", c))
+            minutes_ago = c2.slider(t("sim.occurred_label"), 0, 720, 0)
+            send_event = st.form_submit_button(t("sim.send_event"), type="primary")
 
         if send_event:
             event = {
@@ -1094,7 +1824,7 @@ def page_simulator() -> None:
                 before = None
 
             try:
-                with st.spinner("Sending…"):
+                with st.spinner("…"):
                     outcome = api_event(event_customer, event)
             except ApiError as exc:
                 st.error(str(exc))
@@ -1104,24 +1834,24 @@ def page_simulator() -> None:
                 st.divider()
                 reason = outcome["reason"]
                 c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Outcome", reason)
-                c2.metric("Re-scored", "yes" if outcome["rescored"] else "no")
-                c3.metric("Band changed", "yes" if outcome["band_changed"] else "no")
-                c4.metric("Notified", "yes" if outcome["notified"] else "no")
-                st.caption(REASON_HELP.get(reason, ""))
+                c1.metric(t("sim.outcome_label"), reason)
+                c2.metric(t("sim.rescored_label"), t("common.yes") if outcome["rescored"] else t("common.no"))
+                c3.metric(t("sim.band_changed_label"), t("common.yes") if outcome["band_changed"] else t("common.no"))
+                c4.metric(t("sim.notified_label"), t("common.yes") if outcome["notified"] else t("common.no"))
+                st.caption(t(f"reason_help.{reason}"))
 
                 if outcome["rescored"] and outcome.get("result"):
                     result = outcome["result"]
                     st.divider()
-                    st.markdown(f"##### New score after `{outcome['triggered_by']}`")
+                    st.markdown(f"##### {t('sim.new_score_header', trigger=outcome['triggered_by'])}")
 
                     if before is not None:
                         d1, d2, d3 = st.columns(3)
                         delta = result["risk_score"] - before["risk_score"]
-                        d1.metric("Score before", f"{before['risk_score']:.1f}")
-                        d2.metric("Score after", f"{result['risk_score']:.1f}", delta=f"{delta:+.1f}")
+                        d1.metric(t("sim.score_before"), f"{before['risk_score']:.1f}")
+                        d2.metric(t("sim.score_after"), f"{result['risk_score']:.1f}", delta=f"{delta:+.1f}")
                         d3.markdown(
-                            f"<div style='color:{INK_MUTED};font-size:0.8rem;margin-bottom:6px;'>Band</div>"
+                            f"<div style='color:{INK_MUTED};font-size:0.8rem;margin-bottom:6px;'>{t('sim.band_label')}</div>"
                             + band_chip(before["risk_band"]) + " → " + band_chip(result["risk_band"]),
                             unsafe_allow_html=True,
                         )
@@ -1130,44 +1860,27 @@ def page_simulator() -> None:
                         after_codes = {f["code"] for f in result["top_factors"]}
                         dropped_text = {c for c in before_codes - after_codes if c.startswith("TX")}
                         if dropped_text:
-                            st.warning(
-                                "**The narrative-derived factor(s) "
-                                + ", ".join(f"`{c}`" for c in sorted(dropped_text))
-                                + " are absent from this re-score.** An event re-score rebuilds "
-                                "the input from the customer's stored snapshot plus the event log, "
-                                "and narrative notes are not part of that snapshot — so text signal "
-                                "present in the original `/score` call does not carry over. Note the "
-                                "response is *not* marked `degraded`: no narratives were supplied to "
-                                "this call, and by design that counts as a normal request rather than "
-                                "a failed extraction. Worth knowing before reading the delta above as "
-                                "a real change in the customer's risk."
-                            )
+                            st.warning(t("sim.narrative_dropped_warning",
+                                          codes=", ".join(f"`{c}`" for c in sorted(dropped_text))))
 
                     render_result_header(result)
-                    st.markdown("##### Why — top factors (internal view)")
-                    render_factor_block(
-                        result["top_factors"],
-                        "No factor cleared the policy's minimum contribution threshold.",
-                    )
+                    st.markdown(f"##### {t('sim.why_internal')}")
+                    render_factor_block(result["top_factors"], t("sim.no_factor"))
                     render_fired_rules(result["fired_rules"])
                 elif reason == "not_yet_scored":
-                    st.info(
-                        "The event was stored. Onboard this customer first (Queue page, or the sandbox "
-                        "tab), then send the event again."
-                    )
+                    st.info(t("sim.event_stored_not_scored"))
                 else:
-                    st.info("The event was stored, but no new score was computed — see the reason above.")
+                    st.info(t("sim.event_stored_no_score"))
 
     # ---- sandbox ------------------------------------------------------------
-    with tab_sandbox:
+    else:
         show_flash("sandbox")
-        st.markdown(
-            "Full manual control over every field the API accepts — a tool for testing rules and the API "
-            "directly, not the primary way to bring a customer into the queue. **Anything left marked "
-            "unknown is sent as a genuine missing value**, never as a zero."
-        )
+        st.markdown(t("sim.sandbox_intro"))
 
-        preset_name = st.selectbox("Start from a profile", list(PRESETS), key="sandbox_preset")
+        # See the onboarding preset selectbox above for why the key includes
+        # the language.
+        preset_name = st.selectbox(t("sim.start_from_profile"), list(PRESETS), format_func=preset_label,
+                                    key=f"sandbox_preset_{st.session_state.language}")
         preset = PRESETS[preset_name]
         preset_narratives = preset["_narratives"]
 
@@ -1179,115 +1892,141 @@ def page_simulator() -> None:
             # one careless "Add to Queue" click away from silently overwriting
             # that customer's real profile, score and timeline under the same ID.
             default_sandbox_id = f"CUS-SANDBOX-{len(st.session_state.queue) + 1:03d}"
-            customer_id = head_a.text_input("Customer ID", value=default_sandbox_id)
-            snapshot_date = head_b.date_input("Snapshot date", value=dt.date.today())
-            audience = head_c.selectbox(
-                "Audience", ["internal", "customer"],
-                help="`customer` suppresses reason codes that may not lawfully be disclosed "
-                     "to the subject — AML concerns, prior SARs, adverse media.",
-            )
+            customer_id = head_a.text_input(t("sim.customer_id_label"), value=default_sandbox_id)
+            snapshot_date = head_b.date_input(t("sim.snapshot_date_label"), value=dt.date.today())
+            audience = head_c.selectbox(t("sim.audience_label"), AUDIENCES, help=t("sim.audience_help"),
+                                        format_func=lambda a: vocab_label("audience", a))
 
             values: dict[str, Any] = {}
 
-            with st.expander("Profile", expanded=True):
+            with st.expander(t("sim.expander_profile"), expanded=True):
                 c1, c2, c3, c4 = st.columns(4)
-                values["segment"] = c1.selectbox("Segment", SEGMENTS, index=SEGMENTS.index(preset["segment"]))
-                values["occupation"] = c2.selectbox("Occupation", OCCUPATIONS, index=OCCUPATIONS.index(preset["occupation"]))
+                values["segment"] = c1.selectbox(t("field.segment"), SEGMENTS, index=SEGMENTS.index(preset["segment"]),
+                                                  format_func=lambda v: vocab_label("segment", v))
+                values["occupation"] = c2.selectbox(t("field.occupation"), OCCUPATIONS,
+                                                     index=OCCUPATIONS.index(preset["occupation"]),
+                                                     format_func=lambda v: vocab_label("occupation", v))
                 values["employment_status"] = c3.selectbox(
-                    "Employment", EMPLOYMENT_STATUSES, index=EMPLOYMENT_STATUSES.index(preset["employment_status"]))
-                values["age"] = c4.slider("Age", 18, 95, preset["age"])
+                    t("field.employment"), EMPLOYMENT_STATUSES,
+                    index=EMPLOYMENT_STATUSES.index(preset["employment_status"]),
+                    format_func=lambda v: vocab_label("employment_status", v))
+                values["age"] = c4.slider(t("field.age"), 18, 95, preset["age"])
                 c1, c2, c3, c4 = st.columns(4)
-                values["years_at_employer"] = c1.slider("Years at employer", 0.0, 40.0, preset["years_at_employer"], 0.5)
-                values["account_age_months"] = c2.slider("Account age (months)", 0, 480, preset["account_age_months"])
+                values["years_at_employer"] = c1.slider(t("field.years_at_employer"), 0.0, 40.0,
+                                                          preset["years_at_employer"], 0.5)
+                values["account_age_months"] = c2.slider(t("field.account_age_months"), 0, 480,
+                                                           preset["account_age_months"])
                 values["residency_status"] = c3.selectbox(
-                    "Residency", RESIDENCY_STATUSES, index=RESIDENCY_STATUSES.index(preset["residency_status"]))
+                    t("field.residency"), RESIDENCY_STATUSES,
+                    index=RESIDENCY_STATUSES.index(preset["residency_status"]),
+                    format_func=lambda v: vocab_label("residency_status", v))
                 values["country_of_residence"] = c4.selectbox(
-                    "Country", COUNTRIES, index=COUNTRIES.index(preset["country_of_residence"]))
-                values["num_products_held"] = st.slider("Products held", 0, 15, preset["num_products_held"])
+                    t("field.country"), COUNTRIES, index=COUNTRIES.index(preset["country_of_residence"]))
+                values["num_products_held"] = st.slider(t("field.products_held"), 0, 15, preset["num_products_held"])
 
-            with st.expander("Income & credit", expanded=True):
+            with st.expander(t("sim.expander_income"), expanded=True):
                 c1, c2, c3, c4 = st.columns(4)
                 values["declared_annual_income"] = c1.number_input(
-                    "Declared annual income", 0.0, 50_000_000.0, preset["declared_annual_income"], step=10_000.0)
-                values["verified_income_ratio"] = c2.slider("Verified income ratio", 0.0, 2.0, preset["verified_income_ratio"], 0.05)
-                values["income_volatility_cv"] = c3.slider("Income volatility (CV)", 0.0, 2.0, preset["income_volatility_cv"], 0.02)
-                values["bureau_score"] = c4.slider("Bureau score", 300, 850, preset["bureau_score"])
+                    t("field.declared_income"), 0.0, 50_000_000.0, preset["declared_annual_income"], step=10_000.0)
+                values["verified_income_ratio"] = c2.slider(t("field.verified_income_ratio"), 0.0, 2.0,
+                                                              preset["verified_income_ratio"], 0.05)
+                values["income_volatility_cv"] = c3.slider(t("field.income_volatility"), 0.0, 2.0,
+                                                             preset["income_volatility_cv"], 0.02)
+                values["bureau_score"] = c4.slider(t("field.bureau_score"), 300, 850, preset["bureau_score"])
                 c1, c2, c3, c4 = st.columns(4)
                 values["total_credit_limit"] = c1.number_input(
-                    "Total credit limit", 0.0, 20_000_000.0, preset["total_credit_limit"], step=5_000.0)
+                    t("field.total_credit_limit"), 0.0, 20_000_000.0, preset["total_credit_limit"], step=5_000.0)
                 values["credit_utilization_ratio"] = c2.slider(
-                    "Credit utilisation", 0.0, 2.0, preset["credit_utilization_ratio"], 0.01)
-                values["dti_ratio"] = c3.slider("Debt-to-income", 0.0, 2.0, preset["dti_ratio"], 0.01)
+                    t("field.credit_utilization"), 0.0, 2.0, preset["credit_utilization_ratio"], 0.01)
+                values["dti_ratio"] = c3.slider(t("field.dti"), 0.0, 2.0, preset["dti_ratio"], 0.01)
                 values["savings_to_income_ratio"] = c4.slider(
-                    "Savings-to-income", 0.0, 3.0, preset["savings_to_income_ratio"], 0.05)
+                    t("field.savings_to_income"), 0.0, 3.0, preset["savings_to_income_ratio"], 0.05)
                 c1, c2, c3, c4 = st.columns(4)
-                values["num_open_loans"] = c1.slider("Open loans", 0, 20, preset["num_open_loans"])
-                values["num_credit_inquiries_12m"] = c2.slider("Credit inquiries (12m)", 0, 30, preset["num_credit_inquiries_12m"])
-                values["delinquencies_30d_12m"] = c3.slider("30d delinquencies (12m)", 0, 20, preset["delinquencies_30d_12m"])
-                values["delinquencies_90d_24m"] = c4.slider("90d delinquencies (24m)", 0, 20, preset["delinquencies_90d_24m"])
+                values["num_open_loans"] = c1.slider(t("field.open_loans"), 0, 20, preset["num_open_loans"])
+                values["num_credit_inquiries_12m"] = c2.slider(t("field.credit_inquiries"), 0, 30,
+                                                                 preset["num_credit_inquiries_12m"])
+                values["delinquencies_30d_12m"] = c3.slider(t("field.delinq_30d"), 0, 20,
+                                                              preset["delinquencies_30d_12m"])
+                values["delinquencies_90d_24m"] = c4.slider(t("field.delinq_90d"), 0, 20,
+                                                              preset["delinquencies_90d_24m"])
                 c1, c2, c3, c4 = st.columns(4)
-                values["max_days_past_due_24m"] = c1.slider("Max days past due (24m)", 0, 365, preset["max_days_past_due_24m"])
-                values["prior_default_flag"] = c2.selectbox("Prior default", [0, 1], index=preset["prior_default_flag"])
-                values["num_bounced_payments_12m"] = c3.slider("Bounced payments (12m)", 0, 30, preset["num_bounced_payments_12m"])
-                values["overdraft_events_12m"] = c4.slider("Overdraft events (12m)", 0, 60, preset["overdraft_events_12m"])
-                values["balance_volatility"] = st.slider("Balance volatility", 0.0, 2.0, preset["balance_volatility"], 0.02)
+                values["max_days_past_due_24m"] = c1.slider(t("field.max_days_past_due"), 0, 365,
+                                                              preset["max_days_past_due_24m"])
+                values["prior_default_flag"] = c2.selectbox(t("field.prior_default"), [0, 1],
+                                                              index=preset["prior_default_flag"],
+                                                              format_func=yes_no_label)
+                values["num_bounced_payments_12m"] = c3.slider(t("field.bounced_payments"), 0, 30,
+                                                                 preset["num_bounced_payments_12m"])
+                values["overdraft_events_12m"] = c4.slider(t("field.overdraft_events"), 0, 60,
+                                                             preset["overdraft_events_12m"])
+                values["balance_volatility"] = st.slider(t("field.balance_volatility"), 0.0, 2.0,
+                                                           preset["balance_volatility"], 0.02)
 
-            with st.expander("Transaction behaviour"):
+            with st.expander(t("sim.expander_txn")):
                 c1, c2, c3, c4 = st.columns(4)
-                values["txn_count_90d"] = c1.slider("Transactions (90d)", 0, 2000, preset["txn_count_90d"])
-                values["cash_intensity_ratio"] = c2.slider("Cash intensity", 0.0, 1.0, preset["cash_intensity_ratio"], 0.01)
-                values["cross_border_txn_ratio"] = c3.slider("Cross-border ratio", 0.0, 1.0, preset["cross_border_txn_ratio"], 0.01)
-                values["night_txn_ratio"] = c4.slider("Night-time ratio", 0.0, 1.0, preset["night_txn_ratio"], 0.01)
+                values["txn_count_90d"] = c1.slider(t("field.txn_count"), 0, 2000, preset["txn_count_90d"])
+                values["cash_intensity_ratio"] = c2.slider(t("field.cash_intensity"), 0.0, 1.0,
+                                                             preset["cash_intensity_ratio"], 0.01)
+                values["cross_border_txn_ratio"] = c3.slider(t("field.cross_border"), 0.0, 1.0,
+                                                               preset["cross_border_txn_ratio"], 0.01)
+                values["night_txn_ratio"] = c4.slider(t("field.night_txn"), 0.0, 1.0, preset["night_txn_ratio"], 0.01)
                 c1, c2, c3, c4 = st.columns(4)
-                values["structuring_score"] = c1.slider("Structuring score", 0.0, 1.0, preset["structuring_score"], 0.01)
-                values["crypto_exposure_ratio_90d"] = c2.slider("Crypto exposure", 0.0, 1.0, preset["crypto_exposure_ratio_90d"], 0.01)
-                values["gambling_spend_ratio_90d"] = c3.slider("Gambling spend", 0.0, 1.0, preset["gambling_spend_ratio_90d"], 0.01)
+                values["structuring_score"] = c1.slider(t("field.structuring_score"), 0.0, 1.0,
+                                                          preset["structuring_score"], 0.01)
+                values["crypto_exposure_ratio_90d"] = c2.slider(t("field.crypto_exposure"), 0.0, 1.0,
+                                                                  preset["crypto_exposure_ratio_90d"], 0.01)
+                values["gambling_spend_ratio_90d"] = c3.slider(t("field.gambling_spend"), 0.0, 1.0,
+                                                                 preset["gambling_spend_ratio_90d"], 0.01)
                 values["new_counterparty_ratio_90d"] = c4.slider(
-                    "New counterparties", 0.0, 1.0, preset["new_counterparty_ratio_90d"], 0.01)
+                    t("field.new_counterparties"), 0.0, 1.0, preset["new_counterparty_ratio_90d"], 0.01)
 
-            with st.expander("AML / KYC"):
+            with st.expander(t("sim.expander_aml")):
                 c1, c2, c3, c4 = st.columns(4)
-                values["pep_flag"] = c1.selectbox("PEP", [0, 1], index=preset["pep_flag"])
-                values["sanctions_screen_hits"] = c2.slider("Sanctions hits", 0, 10, preset["sanctions_screen_hits"])
-                values["adverse_media_hits_12m"] = c3.slider("Adverse media (12m)", 0, 20, preset["adverse_media_hits_12m"])
-                values["offshore_entity_links"] = c4.slider("Offshore links", 0, 20, preset["offshore_entity_links"])
+                values["pep_flag"] = c1.selectbox(t("field.pep"), [0, 1], index=preset["pep_flag"],
+                                                   format_func=yes_no_label)
+                values["sanctions_screen_hits"] = c2.slider(t("field.sanctions_hits"), 0, 10,
+                                                              preset["sanctions_screen_hits"])
+                values["adverse_media_hits_12m"] = c3.slider(t("field.adverse_media"), 0, 20,
+                                                               preset["adverse_media_hits_12m"])
+                values["offshore_entity_links"] = c4.slider(t("field.offshore_links"), 0, 20,
+                                                              preset["offshore_entity_links"])
                 c1, c2, c3, c4 = st.columns(4)
                 values["high_risk_jurisdiction_exposure"] = c1.selectbox(
-                    "High-risk jurisdiction", [0, 1], index=preset["high_risk_jurisdiction_exposure"])
+                    t("field.high_risk_jurisdiction"), [0, 1], index=preset["high_risk_jurisdiction_exposure"],
+                    format_func=yes_no_label)
                 values["medium_risk_jurisdiction_exposure"] = c2.selectbox(
-                    "Medium-risk jurisdiction", [0, 1], index=preset["medium_risk_jurisdiction_exposure"])
-                values["sar_filed_prior"] = c3.selectbox("Prior SAR", [0, 1], index=preset["sar_filed_prior"])
-                values["edd_required"] = c4.selectbox("EDD required", [0, 1], index=preset["edd_required"])
+                    t("field.medium_risk_jurisdiction"), [0, 1], index=preset["medium_risk_jurisdiction_exposure"],
+                    format_func=yes_no_label)
+                values["sar_filed_prior"] = c3.selectbox(t("field.prior_sar"), [0, 1], index=preset["sar_filed_prior"],
+                                                          format_func=yes_no_label)
+                values["edd_required"] = c4.selectbox(t("field.edd_required"), [0, 1], index=preset["edd_required"],
+                                                        format_func=yes_no_label)
                 c1, c2, c3 = st.columns(3)
                 values["source_of_funds_declared"] = c1.selectbox(
-                    "Source of funds", SOURCE_OF_FUNDS, index=SOURCE_OF_FUNDS.index(preset["source_of_funds_declared"]))
+                    t("field.source_of_funds"), SOURCE_OF_FUNDS,
+                    index=SOURCE_OF_FUNDS.index(preset["source_of_funds_declared"]),
+                    format_func=lambda v: vocab_label("source_of_funds", v))
                 values["source_of_funds_verified"] = c2.selectbox(
-                    "Source verified", [0, 1], index=preset["source_of_funds_verified"])
+                    t("field.source_verified"), [0, 1], index=preset["source_of_funds_verified"],
+                    format_func=yes_no_label)
                 values["kyc_document_completeness"] = c3.slider(
-                    "KYC completeness", 0.0, 1.0, preset["kyc_document_completeness"], 0.05)
+                    t("field.kyc_completeness"), 0.0, 1.0, preset["kyc_document_completeness"], 0.05)
                 values["kyc_refresh_overdue_days"] = st.slider(
-                    "KYC refresh overdue (days)", 0, 1000, preset["kyc_refresh_overdue_days"])
+                    t("field.kyc_refresh_overdue"), 0, 1000, preset["kyc_refresh_overdue_days"])
 
-            with st.expander("Narrative notes (free text)"):
-                st.caption(
-                    "Treated as untrusted input. Text reaches the extractor inside a data "
-                    "envelope, and the schema it must answer through has no field that "
-                    "means a score or a band — an instruction hidden in a note cannot "
-                    "become a decision. Try it."
-                )
+            with st.expander(t("sim.expander_narrative")):
+                st.caption(t("sim.narrative_caption"))
                 n1, n2 = st.columns(2)
-                support_call = n1.text_area("Support call summary", preset_narratives["support_call_summary"], height=110)
-                underwriter = n2.text_area("Underwriter note", preset_narratives["underwriter_note"], height=110)
-                kyc_extract = st.text_area("KYC document extract", preset_narratives["kyc_document_extract"], height=80)
+                support_call = n1.text_area(t("field.support_call"), preset_narratives["support_call_summary"],
+                                             height=110)
+                underwriter = n2.text_area(t("field.underwriter_note"), preset_narratives["underwriter_note"],
+                                            height=110)
+                kyc_extract = st.text_area(t("field.kyc_extract"), preset_narratives["kyc_document_extract"],
+                                            height=80)
 
-            unknown = st.multiselect(
-                "Send these fields as unknown (null, not zero)",
-                options=sorted(values),
-                help="Demonstrates the missing-data contract: an omitted field reaches "
-                     "the model as NaN plus a missing-indicator, never as a fabricated 0.",
-            )
+            unknown = st.multiselect(t("sim.unknown_label"), options=sorted(values), help=t("sim.unknown_help"))
 
-            submitted = st.form_submit_button("Score customer", type="primary")
+            submitted = st.form_submit_button(t("sim.score_customer"), type="primary")
 
         if submitted:
             narratives = {
@@ -1313,7 +2052,7 @@ def page_simulator() -> None:
                 payload["narratives"] = narratives
 
             try:
-                with st.spinner("Scoring…"):
+                with st.spinner("…"):
                     result = api_score(payload)
             except ApiError as exc:
                 st.error(str(exc))
@@ -1326,29 +2065,22 @@ def page_simulator() -> None:
                 st.divider()
                 render_result_header(result)
                 if unknown:
-                    st.caption(f"{len(unknown)} field(s) sent as unknown: {', '.join(sorted(unknown))}")
+                    st.caption(t("sim.unknown_sent", n=len(unknown), fields=", ".join(sorted(unknown))))
                 st.divider()
-                st.markdown(f"##### Why — top factors ({audience} view)")
-                render_factor_block(
-                    result["top_factors"],
-                    "No factor cleared the policy's minimum contribution threshold.",
-                )
+                st.markdown(f"##### {t('sim.why_audience', audience=vocab_label('audience', audience))}")
+                render_factor_block(result["top_factors"], t("sim.no_factor"))
                 render_fired_rules(result["fired_rules"])
 
         last = st.session_state.get("sandbox_last_result")
         if last:
             st.divider()
             if last["customer_id"] in st.session_state.queue:
-                st.warning(
-                    f"`{last['customer_id']}` already exists in the queue — adding will overwrite its "
-                    "profile, score and timeline with this sandbox result. Its case status and prior "
-                    "decisions are preserved."
-                )
-            if st.button("➕ Add this result to the Operations Queue", key="sandbox_add_to_queue"):
+                st.warning(t("sim.overwrite_warning", id=last["customer_id"]))
+            if st.button(t("sim.add_to_queue"), key="sandbox_add_to_queue"):
                 add_to_queue(last["customer_id"], last["profile"], last["narratives"], last["result"],
                              archetype=f"sandbox ({last['preset']})")
                 st.session_state.sandbox_last_result = None
-                flash_success("sandbox", f"{last['customer_id']} added to the queue.")
+                flash_success("sandbox", t("sim.added_to_queue", id=last["customer_id"]))
                 st.rerun()
 
 
@@ -1357,6 +2089,46 @@ def page_simulator() -> None:
 # --------------------------------------------------------------------------
 
 st.set_page_config(page_title="Customer Risk Rating", page_icon="◑", layout="wide")
+
+
+def _inject_notranslate() -> None:
+    """Stop the browser's own translate UI (Chrome's Google Translate prompt
+    and similar features elsewhere) from rewriting this page's text nodes.
+    Machine translation mutates the DOM out from under React's own
+    reconciliation — Streamlit's frontend is a React app — and the two
+    fighting over the same nodes is what throws the `removeChild` crash.
+    `components.v1.html` renders in a same-origin iframe (Streamlit serves it
+    from its own server), so its script can reach the PARENT document — the
+    actual page Streamlit built — via `window.parent` and add the standard
+    "don't translate me" signals there: the literal
+    `<meta name="google" content="notranslate">` tag the brief asks for, plus
+    the `translate="no"` attribute and the `notranslate` CSS class — three
+    different mechanisms because different translate implementations respect
+    different ones, and this app already ships its own Hebrew/English
+    toggle, so there is nothing for a browser's translator to usefully add.
+    """
+    components_html(
+        """
+        <script>
+        (function () {
+            var d = window.parent.document;
+            if (!d.querySelector('meta[name="google"]')) {
+                var meta = d.createElement('meta');
+                meta.name = 'google';
+                meta.content = 'notranslate';
+                d.head.appendChild(meta);
+            }
+            d.documentElement.setAttribute('translate', 'no');
+            d.documentElement.classList.add('notranslate');
+            if (d.body) { d.body.classList.add('notranslate'); }
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+
+_inject_notranslate()
 
 st.markdown(
     f"""
@@ -1377,53 +2149,75 @@ st.session_state.setdefault("nav", "queue")
 st.session_state.setdefault("book_load_attempted", False)
 st.session_state.setdefault("book_seed", 42)
 st.session_state.setdefault("reviewer_name", "Risk Analyst")
+st.session_state.setdefault("language", "he")
 
 with st.sidebar:
-    st.markdown("### Customer Risk Rating")
-    st.caption("Enterprise Risk & Compliance Workflow")
-    st.caption(f"API: `{API_URL}`")
+    st.selectbox(
+        "🌐", options=["he", "en"], format_func=lambda code: {"he": "עברית", "en": "English"}[code],
+        key="language", label_visibility="collapsed",
+    )
+    st.markdown(f"### {t('sidebar.title')}")
+    st.caption(t("sidebar.subtitle"))
+    st.caption(f"{t('sidebar.api_label')} `{API_URL}`")
     api_up = False
     try:
         health = api_health()
-        st.success(
-            f"API healthy · models: {', '.join(health['models_loaded'])} · "
-            f"policy v{health['policy_version']} · api {health['version']}"
-        )
+        st.success(t("sidebar.api_healthy", models=", ".join(health["models_loaded"]),
+                      policy=health["policy_version"], api=health["version"]))
         api_up = True
     except ApiError as exc:
         st.error(str(exc))
-        st.caption(
-            "Start it with `python scripts/serve.py`, or set `CRR_API_URL` to a "
-            "running instance. Every page below needs it."
-        )
+        st.caption(t("sidebar.api_start_hint"))
 
     st.divider()
-    st.text_input("Reviewer name", key="reviewer_name",
-                  help="Attributed on every case decision you record below — session-local, no login.")
+    st.text_input(t("sidebar.reviewer_name_label"), key="reviewer_name", help=t("sidebar.reviewer_name_help"))
 
     st.divider()
-    st.markdown("##### Navigate")
-    for key, label in (
-        ("queue", "📋 Risk Operations Queue"),
-        ("customer360", "🔎 Customer 360 & Decision Center"),
-        ("simulator", "🧪 Event Simulator & Sandbox"),
+    st.markdown(f"##### {t('sidebar.nav_header')}")
+    for key, label_key in (
+        ("queue", "sidebar.nav_queue"),
+        ("customer360", "sidebar.nav_customer360"),
+        ("simulator", "sidebar.nav_simulator"),
     ):
         disabled = key == "customer360" and not st.session_state.get("selected_customer")
-        if st.button(label, key=f"nav_{key}", use_container_width=True,
+        if st.button(t(label_key), key=f"nav_{key}", use_container_width=True,
                      type="primary" if st.session_state.nav == key else "secondary", disabled=disabled):
             st.session_state.nav = key
             st.rerun()
 
     st.divider()
-    st.caption(
-        "Scores, explanations and re-scoring all come from the live FastAPI service over its public "
-        "endpoints — no model or policy logic is duplicated here. Case status, SLA and review notes are "
-        "this session's workflow state only: nothing here is written to a case-management database."
+    st.caption(t("sidebar.footer"))
+
+# RTL for Hebrew: applied to the app's text flow (headers, captions, labels,
+# markdown) so prose reads naturally right-to-left, but deliberately NOT to
+# canvas/grid-rendered widgets — the dataframe grid, sliders, Plotly SVGs —
+# where mirroring a risk-score slider or a chart axis would confuse rather
+# than help (e.g. "low" no longer on the side a reviewer expects). Numeric/
+# code inputs stay right-aligned like the rest of the form, which is the
+# normal convention for RTL sites and does not affect what gets typed or
+# sent to the API.
+if st.session_state.language == "he":
+    st.markdown(
+        """
+        <style>
+          .stApp, .stApp p, .stApp span, .stApp label,
+          div[data-testid="stCaptionContainer"], div[data-testid="stMarkdownContainer"],
+          div[data-testid="stMetricLabel"], div[data-testid="stWidgetLabel"] {
+            direction: rtl;
+            text-align: right;
+          }
+          div[data-testid="stSlider"], div[data-testid="stDataFrame"], div[data-testid="stPlotlyChart"],
+          div[data-testid="stNumberInput"], div[data-testid="stDataFrame"] * {
+            direction: ltr;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
 if api_up and not st.session_state.book_load_attempted:
     st.session_state.book_load_attempted = True
-    with st.spinner("Loading risk operations queue — scoring demo book against the live API…"):
+    with st.spinner("…"):
         seed_queue()
 
 if st.session_state.nav == "customer360":
