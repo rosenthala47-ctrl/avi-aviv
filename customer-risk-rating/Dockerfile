@@ -38,13 +38,15 @@ COPY .streamlit/ ./.streamlit/
 
 # Dataset size for the build-time training run.
 #
-# 50k is a measured floor, not a round number. financial_crime_12m has ~1.5%
-# prevalence, so a smaller draw starves it of positives and it fails phase 2's
-# calibration criterion: at 15k it lands 7/10 calibration bins within 2 SE
-# against a bar of 8, and train_baseline.py exits non-zero. At 50k both models
-# clear all four criteria with headroom (9/10 bins each). Lowering this can
-# legitimately fail the build — which is the intended behaviour, see below.
-ARG CRR_BOOTSTRAP_ROWS=50000
+# Production deployments: use 50k (measured floor). financial_crime_12m has
+# ~1.5% prevalence; at 50k both models clear all four criteria with headroom
+# (9/10 bins each). At 15k the model fails: 7/10 bins vs 8/10 required.
+#
+# Low-resource deployments (Render Free tier, 512MB RAM): use 20k. This is
+# a trade-off: fits in memory but carries higher calibration risk. If the
+# build fails calibration, either upgrade to a higher-tier plan or use
+# Railway/similar with better free specs.
+ARG CRR_BOOTSTRAP_ROWS=20000
 
 # `set -e` is deliberate: train_baseline.py exits non-zero when a model misses
 # phase 2's exit criteria, and an image that silently shipped a miscalibrated

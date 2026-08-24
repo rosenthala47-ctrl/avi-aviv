@@ -4,13 +4,20 @@
 # at the repo. Render reads this file, builds the Dockerfile (which generates
 # the dataset and trains both models during the build) and serves the Streamlit
 # UI on the port it injects as $PORT. No dashboard configuration needed.
+#
+# Plan selection:
+#   - starter (recommended): 1 GB RAM, fits the full 50k-row model training
+#   - free (512 MB RAM): Only works if Dockerfile uses CRR_BOOTSTRAP_ROWS=20000
+#     (a smaller dataset with higher calibration risk; see Dockerfile comments)
+#   - higher tiers: No memory constraints; fastest builds
 services:
   - type: web
     name: customer-risk-rating
     runtime: docker
-    plan: starter          # the build trains two LightGBM models; `free` is memory-tight
+    plan: starter          # use `free` only after verifying 20k-row training succeeds
     dockerfilePath: ./Dockerfile
     dockerContext: .
+    rootDir: customer-risk-rating   # where the Dockerfile and pyproject.toml live
     healthCheckPath: /_stcore/health   # Streamlit's own readiness endpoint
     autoDeploy: true
     envVars:
