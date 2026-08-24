@@ -2091,44 +2091,52 @@ def page_simulator() -> None:
 st.set_page_config(page_title="Customer Risk Rating", page_icon="◑", layout="wide")
 
 
-def _inject_notranslate() -> None:
+def _inject_head_signals(lang: str) -> None:
     """Stop the browser's own translate UI (Chrome's Google Translate prompt
-    and similar features elsewhere) from rewriting this page's text nodes.
-    Machine translation mutates the DOM out from under React's own
-    reconciliation — Streamlit's frontend is a React app — and the two
-    fighting over the same nodes is what throws the `removeChild` crash.
-    `components.v1.html` renders in a same-origin iframe (Streamlit serves it
-    from its own server), so its script can reach the PARENT document — the
-    actual page Streamlit built — via `window.parent` and add the standard
-    "don't translate me" signals there: the literal
-    `<meta name="google" content="notranslate">` tag the brief asks for, plus
-    the `translate="no"` attribute and the `notranslate` CSS class — three
-    different mechanisms because different translate implementations respect
-    different ones, and this app already ships its own Hebrew/English
-    toggle, so there is nothing for a browser's translator to usefully add.
+    and similar features elsewhere) from rewriting this page's text nodes,
+    and set the real `dir`/`lang` attributes Streamlit's own markup never
+    exposes a way to set. Machine translation mutates the DOM out from under
+    React's own reconciliation — Streamlit's frontend is a React app — and
+    the two fighting over the same nodes is what throws the `removeChild`
+    crash. `components.v1.html` renders in a same-origin iframe (Streamlit
+    serves it from its own server), so its script can reach the PARENT
+    document — the actual page Streamlit built — via `window.parent` and add
+    the standard "don't translate me" signals there: the literal
+    `<meta name="google" content="notranslate">` tag, the `translate="no"`
+    attribute and the `notranslate` CSS class — three different mechanisms
+    because different translate implementations respect different ones, and
+    this app already ships its own Hebrew/English toggle, so there is
+    nothing for a browser's translator to usefully add.
+
+    `dir`/`lang` are set here rather than left to the RTL stylesheet below
+    for the same reason: it is the one place with access to the real
+    `<html>` element, and this runs on every rerun (language switches
+    included), so it always reflects the language just rendered.
     """
     components_html(
-        """
+        f"""
         <script>
-        (function () {
+        (function () {{
             var d = window.parent.document;
-            if (!d.querySelector('meta[name="google"]')) {
+            if (!d.querySelector('meta[name="google"]')) {{
                 var meta = d.createElement('meta');
                 meta.name = 'google';
                 meta.content = 'notranslate';
                 d.head.appendChild(meta);
-            }
+            }}
             d.documentElement.setAttribute('translate', 'no');
             d.documentElement.classList.add('notranslate');
-            if (d.body) { d.body.classList.add('notranslate'); }
-        })();
+            if (d.body) {{ d.body.classList.add('notranslate'); }}
+            d.documentElement.setAttribute('dir', {'rtl' if lang == 'he' else 'ltr'!r});
+            d.documentElement.setAttribute('lang', {lang!r});
+        }})();
         </script>
         """,
         height=0,
     )
 
 
-_inject_notranslate()
+_inject_head_signals(st.session_state.get("language", "he"))
 
 st.markdown(
     f"""
@@ -2196,11 +2204,32 @@ with st.sidebar:
 # code inputs stay right-aligned like the rest of the form, which is the
 # normal convention for RTL sites and does not affect what gets typed or
 # sent to the API.
+#
+# [data-testid="stAppViewContainer"] — the flex row that holds the sidebar
+# and the main content side by side — is deliberately kept LTR and excluded
+# from the RTL rules below, even though it is the .stApp ancestor of
+# everything else here. Streamlit's mobile sidebar collapse is a hardcoded
+# `translateX(-300px)` on [data-testid="stSidebar"] that assumes the
+# sidebar's un-transformed position is flush against the LEFT edge (x=0).
+# Flipping this container's flex order to RTL relocates that un-transformed
+# position to the RIGHT edge instead, so the same fixed offset no longer
+# clears the sidebar off-screen on a narrow viewport — it lands as a ~40px
+# sliver still on screen, and Hebrew text wraps one character per line
+# inside it (reproduced directly at a 390px viewport width). Keeping this
+# one container LTR keeps Streamlit's own collapse math correct in both
+# languages; RTL is then re-applied to the actual content areas inside it
+# (stMain, stSidebarContent), which have no such transform and were never
+# the problem.
 if st.session_state.language == "he":
     st.markdown(
         """
         <style>
-          .stApp, .stApp p, .stApp span, .stApp label,
+          [data-testid="stAppViewContainer"] { direction: ltr; }
+
+          [data-testid="stMain"], [data-testid="stSidebarContent"],
+          [data-testid="stMain"] p, [data-testid="stMain"] span, [data-testid="stMain"] label,
+          [data-testid="stSidebarContent"] p, [data-testid="stSidebarContent"] span,
+          [data-testid="stSidebarContent"] label,
           div[data-testid="stCaptionContainer"], div[data-testid="stMarkdownContainer"],
           div[data-testid="stMetricLabel"], div[data-testid="stWidgetLabel"] {
             direction: rtl;
