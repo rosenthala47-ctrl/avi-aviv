@@ -1,12 +1,28 @@
 # Customer Risk Rating — API + Streamlit front end in one image.
 #
-# The models are TRAINED AT BUILD TIME rather than committed to the repo.
-# data/ and models/ are git-ignored on purpose (the dataset is reproducible
-# from a seed, and binary model artefacts do not belong in version control),
-# so a fresh clone has no model to serve — and `ModelBundle.load` fails loudly
-# rather than silently serving nothing. Generating and training during the
-# build keeps the image self-contained and reproducible from the seed, and
-# costs well under a minute at the default size.
+# The models are PRE-TRAINED AND COMMITTED, not trained during the build.
+# models/default_12m/ and models/financial_crime_12m/ are real, tracked files
+# in this repo (~650 KB total — see .gitignore) rather than generated here.
+#
+# This used to run generate_synthetic_data.py + train_baseline.py as a build
+# step, which is what a self-contained, reproducible-from-a-seed image sounds
+# like it should do — but LightGBM training on enough rows to calibrate
+# financial_crime_12m's ~1.5% prevalence needs several hundred MB of peak RSS
+# (measured directly, see git history on this file for the numbers), and a
+# free-tier PaaS build container (Render Free: 512 MB) either OOMs or times
+# out trying to do that inside `docker build`. No row count both fits that
+# budget and clears the calibration bar, so the honest fix is to stop asking
+# the build to train at all: train offline where memory isn't the constraint
+# (`make data && make train`, or CI), commit the resulting models/ directory,
+# and let the build be what it now is below — copy files, install deps, done.
+# That also means build time no longer depends on dataset size or CPU
+# contention on a shared free-tier builder.
+#
+# To ship a freshly retrained model: run `make data train` locally (or in any
+# environment without a tight memory ceiling), confirm PHASE 2 EXIT CRITERIA
+# prints PASS for both targets (train_baseline.py exits non-zero if not —
+# see its --allow-degraded-build for the one legitimate reason to override
+# that), then commit the updated models/ directory.
 FROM python:3.11-slim
 
 # libgomp1 is LightGBM's OpenMP runtime; curl is used by the healthcheck and
@@ -36,46 +52,15 @@ COPY scripts/ ./scripts/
 COPY app.py ./
 COPY .streamlit/ ./.streamlit/
 
-# Dataset size for the build-time training run.
-#
-# Production deployments (Render Starter/1GB+, Railway, any host with >=1GB
-# during build): use 50k, the measured floor for calibration. financial_crime_12m
-# runs at ~1.5% prevalence, so a smaller draw starves it of positives; at 50k
-# both models clear all four phase-2 criteria with headroom (9/10 bins each).
-#
-# Low-resource deployments (Render Free tier, 512MB RAM): use 15k. Peak RSS was
-# measured directly (RUSAGE_CHILDREN, this repo's actual deps, not estimated)
-# by running generate_synthetic_data.py and train_baseline.py standalone at
-# several sizes:
-#     rows    generate    train (financial_crime_12m, the larger of the two)
-#     10,000   244 MB      345 MB   -> 4/10 calibration bins (fails badly)
-#     15,000   304 MB      396 MB   -> 7/10 calibration bins (fails)
-#     20,000   366 MB      440 MB   -> 7/10 calibration bins (fails, no better)
-#     50,000   ~unmeasured, extrapolates past 700 MB -> 9/10 (passes, but OOMs 512MB)
-# 15k and 20k land on the same 7/10 result — the low prevalence needs a much
-# bigger jump than either gives, and that jump costs more memory than a 512MB
-# container has. So no row count both fits 512MB and clears financial_crime_12m's
-# calibration bar; 15k is the choice that gets the best headroom (~115 MB, 23%)
-# for the calibration quality actually available at this memory budget.
-# --allow-degraded-build below is what makes that an explicit trade-off
-# instead of a build failure — see its --help text in train_baseline.py.
-ARG CRR_BOOTSTRAP_ROWS=15000
+# The pre-trained artefacts (see the top-of-file note). Trained on 50,000
+# rows — the measured floor for financial_crime_12m's ~1.5% prevalence to
+# calibrate — so both targets clear all four phase-2 criteria with headroom
+# (9/10 calibration bins each; models/*/metadata.json has the full numbers).
+COPY models/ ./models/
 
-# `set -e` is deliberate: train_baseline.py exits non-zero when a model misses
-# phase 2's exit criteria, and an image that silently shipped a miscalibrated
-# model would be worse than one that failed to build. --allow-degraded-build
-# only applies below the 50k floor, so it never softens that guarantee for a
-# production-sized build — there, a real regression still fails the build.
-RUN set -eux; \
-    python scripts/generate_synthetic_data.py -n "${CRR_BOOTSTRAP_ROWS}" --language mixed; \
-    degraded_flag=""; \
-    if [ "${CRR_BOOTSTRAP_ROWS}" -lt 50000 ]; then degraded_flag="--allow-degraded-build"; fi; \
-    python scripts/train_baseline.py --target default_12m $degraded_flag; \
-    python scripts/train_baseline.py --target financial_crime_12m $degraded_flag; \
-    # Serving needs models/ only. The generated dataset is ~130 MB at this size
-    # and nothing at runtime reads it, so drop it rather than ship it — it is
-    # reproducible from the seed in models/*/metadata.json with one command.
-    rm -rf data
+# Fail the build, not the first request, if a commit ever ships a models/
+# directory ModelBundle can't actually load (missing target, corrupt file).
+RUN python -c "from crr.api.scoring import ModelBundle; ModelBundle.load()"
 
 RUN chmod +x scripts/start_all.sh
 

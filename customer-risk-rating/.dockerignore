@@ -1,8 +1,13 @@
-# The image builds its own dataset and models (see Dockerfile), so never copy
-# a local one in — it would bloat the context and could silently ship a model
-# trained on data that is not in the repo.
+# The trained models (default_12m/, financial_crime_12m/) are committed to
+# the repo and copied straight into the image — see Dockerfile. The build no
+# longer trains, so the raw dataset that produced them has no runtime use and
+# would only bloat the context; same for anything else under models/ (local
+# retrain.py champion/challenger runs, experiments) that isn't one of the two
+# directories the API actually loads.
 data/
-models/
+models/*
+!models/default_12m/
+!models/financial_crime_12m/
 mlruns/
 
 .git/

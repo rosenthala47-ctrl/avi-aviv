@@ -124,7 +124,7 @@ Everything else below is local to `customer-risk-rating/`.
 ```
 customer-risk-rating/
 ├── app.py                       Streamlit front end — a pure HTTP client of the API
-├── Dockerfile                   API + UI in one image; trains the models at build time
+├── Dockerfile                   API + UI in one image; copies the pre-trained models in, no build-time training
 ├── railway.json                 Railway config (1-click deploy)
 ├── requirements.txt             flat deps for platforms that do not read pyproject
 ├── config/
@@ -133,6 +133,10 @@ customer-risk-rating/
 │   ├── risk_policy_proposed.example.yaml  a ready-to-try proposed edit for simulate_policy.py
 │   └── policy_history/                    every policy version ever loaded, immutable, archived
 ├── data/                        generated output (git-ignored, reproducible from seed)
+├── models/                      the two directories the API serves — committed (see Deployment); everything
+│   │                            else here (retrain.py's challenger runs, local experiments) stays git-ignored
+│   ├── default_12m/
+│   └── financial_crime_12m/
 ├── docs/
 │   ├── ROADMAP.md               eight phases with measurable exit criteria
 │   ├── ARCHITECTURE.md          system design and the decisions behind it
@@ -528,31 +532,41 @@ CRR_API_URL=https://api.example.com streamlit run app.py   # UI against a remote
 port, Streamlit on `$PORT`. One container because a PaaS web service exposes
 one port and this is a demo; at real scale they are two services.
 
-**The models are trained during the image build, not committed.** `data/` and
-`models/` are git-ignored on purpose — the dataset is reproducible from a seed
-and model binaries do not belong in version control — so a fresh clone has no
-model and `ModelBundle.load` fails loudly rather than serving nothing. The
-build generates a seeded 50,000-customer dataset and trains both targets
-(~75 s), then deletes the dataset, which is ~130 MB and is not read at runtime.
+**The models are pre-trained and committed, not trained during the image
+build.** `models/default_12m/` and `models/financial_crime_12m/` are real,
+tracked files (~650 KB total — see `.gitignore`); `data/` stays git-ignored,
+since the dataset that produced them is reproducible from the seed in
+`models/*/metadata.json` and has no runtime use. The build now just installs
+dependencies and copies those two directories in, then runs a one-line sanity
+check (`ModelBundle.load()`) so a commit that ever ships a broken or missing
+model directory fails the build rather than the first request.
 
-50,000 is a measured floor, not a round number: `financial_crime_12m` runs at
-~1.5% prevalence, and a smaller draw starves it of positives. At 15,000 it
-lands 7 of 10 calibration bins within 2 SE against a bar of 8 and
-`train_baseline.py` exits non-zero; at 50,000 both models clear all four phase-2
-criteria with 9/10. The build deliberately keeps `set -e`, so a model that
-misses its own exit criteria fails the build rather than shipping miscalibrated
-— for a production-sized build. That guarantee cannot be met on a 512MB free
-tier at all: peak RSS during training was measured directly (see the Dockerfile's
-`CRR_BOOTSTRAP_ROWS` comment for the numbers), and no row count both fits 512MB
-and reaches 8/10 calibration bins for `financial_crime_12m` — 15k and 20k give
-the identical 7/10, and the jump to 9/10 needs memory only the 50k/1GB+ path
-has. So on the free-tier path only, the Dockerfile passes
-`train_baseline.py --allow-degraded-build`, which turns that specific,
-already-measured shortfall into a loud logged warning and a `degraded_build:
-true` / `exit_criteria` record in `metadata.json` instead of a failed build —
-never a silent one. A production-sized build (`CRR_BOOTSTRAP_ROWS=50000`, the
-starter-plan default) does not pass that flag, so a real regression there still
-fails the build exactly as before.
+This used to run `generate_synthetic_data.py` + `train_baseline.py` as a build
+step — self-contained and reproducible-from-a-seed, in principle. In practice,
+training enough rows to calibrate `financial_crime_12m`'s ~1.5% prevalence
+needs several hundred MB of peak RSS, and a free-tier PaaS build container
+(Render Free: 512 MB) either OOMs or times out doing that inside `docker
+build`; no row count both fit that budget and cleared the calibration bar (see
+this repo's git history for the measurements that pinned that down). The fix
+is to stop asking the build to train at all — train offline where memory isn't
+the constraint, commit the result, let the build be a copy. Build time no
+longer depends on dataset size, and it no longer varies with CPU contention on
+a shared free-tier builder either.
+
+**To ship a freshly retrained model:** run `make data train` (or just `python
+scripts/generate_synthetic_data.py -n 50000 --language mixed` followed by
+`python scripts/train_baseline.py --target <target>` for each target) anywhere
+without a tight memory ceiling — a laptop, a CI runner, this dev container.
+Confirm `PHASE 2 EXIT CRITERIA` prints `PASS` for all four criteria on both
+targets (`train_baseline.py` exits non-zero and the build's sanity check would
+never even get a chance to matter otherwise — `--allow-degraded-build` exists
+for a deliberately-labelled exception, not a default), then commit the updated
+`models/` directory.
+
+Measured steady-state RSS serving real requests — both processes, one worker
+each, no training ever in the picture — is ~330 MB, comfortably inside a
+512 MB free-tier container with real headroom; see `render.yaml`'s plan-
+selection note for when to move to a paid tier instead.
 
 | Platform | How |
 |---|---|

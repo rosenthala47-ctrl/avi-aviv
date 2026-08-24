@@ -6,10 +6,10 @@
 # customer-risk-rating/, which is why rootDir below points there.
 #
 # One-click: push this repo, then on Render choose New → Blueprint and point
-# it at the repo. Render reads this file, builds the Dockerfile (which
-# generates the dataset and trains both models during the build) and serves
-# the Streamlit UI on the port it injects as $PORT. No dashboard
-# configuration needed.
+# it at the repo. Render reads this file, builds the Dockerfile — which now
+# just copies in the pre-trained models committed at customer-risk-rating/
+# models/ (see that Dockerfile's top comment for why) — and serves the
+# Streamlit UI on the port it injects as $PORT. No dashboard config needed.
 #
 # If you already created the service manually (not via Blueprint), this file
 # will not retroactively apply — go to the service's Settings in the Render
@@ -17,20 +17,20 @@
 # delete the service and recreate it via New → Blueprint instead.
 #
 # Plan selection:
-#   - starter (recommended): 1 GB RAM, fits the full 50k-row model training,
-#     and financial_crime_12m actually clears its calibration bar (9/10 bins)
-#   - free (512 MB RAM): the Dockerfile's default CRR_BOOTSTRAP_ROWS=15000 fits
-#     this tier's memory (measured peak ~396 MB, see Dockerfile comments) but
-#     financial_crime_12m cannot clear its calibration bar at any row count
-#     that also fits 512 MB — train_baseline.py's --allow-degraded-build makes
-#     that an explicit, logged trade-off instead of a failed build. Fine for a
-#     demo; not a substitute for the starter plan's model quality.
-#   - higher tiers: No memory constraints; fastest builds
+#   - free (512 MB RAM) works: the build no longer trains anything (it only
+#     installs deps and copies committed files), and measured steady-state
+#     RSS serving real requests — both processes, one worker each — is
+#     ~330 MB, leaving real but not huge headroom under 512 MB. If Render's
+#     dashboard shows memory pressure under your actual traffic, move to
+#     starter rather than fight it.
+#   - starter (1 GB RAM): the same image, comfortable headroom instead of
+#     tight — no build or model-quality difference, just more room to grow
+#     (concurrent load, CRR_API_WORKERS > 1, a larger retrained model).
 services:
   - type: web
     name: customer-risk-rating
     runtime: docker
-    plan: starter          # switch to `free` only if the 512MB trade-off above is acceptable
+    plan: free              # see the headroom note above; switch to starter if you outgrow it
     rootDir: customer-risk-rating   # everything below (Dockerfile, dockerContext) is relative to this
     dockerfilePath: ./Dockerfile
     dockerContext: .
