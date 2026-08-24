@@ -1,11 +1,15 @@
-"""Streamlit front end for the Customer Risk Rating API.
+"""Streamlit front end for the Customer Risk Rating API — an operations console.
 
-A thin HTTP client, deliberately. Everything shown here comes from the live
-FastAPI service over the documented endpoints — this module holds no model, no
-policy, no scoring logic and no copy of the reason-code vocabulary. That keeps
-the demo honest: if the number on screen is wrong, the API is wrong, and there
-is no second implementation in the UI layer that could quietly disagree with
-the one a real integrator would call.
+A thin HTTP client, deliberately. Every score, band, SHAP factor and re-score
+shown here comes from the live FastAPI service over its documented endpoints —
+this module holds no model, no policy and no scoring logic that could quietly
+disagree with the API. That discipline extends to the workflow layer added in
+this file (the Operations Queue, case status, SLA clock and review notes): the
+API has no case-management endpoints, so that state is held in
+``st.session_state`` for this browser session only — it is not written to any
+database, and a page refresh or a new tab starts a fresh queue. It exists to
+demonstrate the reviewer workflow a real deployment would wire to a case
+system, not to replace one.
 
     streamlit run app.py
 
@@ -15,7 +19,9 @@ Set ``CRR_API_URL`` to point at a running API (default http://127.0.0.1:8000).
 from __future__ import annotations
 
 import datetime as dt
+import html
 import os
+import random
 from typing import Any
 
 import pandas as pd
@@ -36,7 +42,10 @@ REQUEST_TIMEOUT = float(os.environ.get("CRR_UI_TIMEOUT", "30"))
 # warm/cool diverging pair: it passes the colour-vision-deficiency separation
 # check on this surface (worst-pair ΔE 21.6 protan, 32.3 normal vision), and
 # direction is never carried by colour alone (every bar is labelled and the
-# table view below each chart repeats the value).
+# table view below each chart repeats the value). Case-status colours below
+# reuse this same palette rather than inventing new hues, and — like every
+# badge in this file — never carry meaning by colour alone: the label text
+# always sits right next to it.
 # --------------------------------------------------------------------------
 SURFACE = "#fcfcfb"
 PAGE_PLANE = "#f9f9f7"
@@ -54,6 +63,8 @@ LOWERS_RISK = "#2a78d6"
 # — and always beside their own name, never as colour alone.
 BAND_COLOUR = {"Low": "#0ca30c", "Medium": "#fab219", "High": "#ec835a", "Extreme": "#d03b3b"}
 BAND_ORDER = ("Low", "Medium", "High", "Extreme")
+BAND_RANK = {"Extreme": 0, "High": 1, "Medium": 2, "Low": 3}
+BAND_DOT = {"Extreme": "\U0001f534", "High": "\U0001f7e0", "Medium": "\U0001f7e1", "Low": "\U0001f7e2"}
 
 FONT_STACK = 'system-ui, -apple-system, "Segoe UI", sans-serif'
 
@@ -61,6 +72,31 @@ FONT_STACK = 'system-ui, -apple-system, "Segoe UI", sans-serif'
 # only. The API remains authoritative for the band a customer actually gets —
 # this is drawn from the returned band, never recomputed from these numbers.
 BAND_CUTOFFS = {"Low": 25.0, "Medium": 50.0, "High": 75.0, "Extreme": 100.0}
+
+# --------------------------------------------------------------------------
+# Workflow layer — case status and SLA. Neither exists in the API: there is no
+# case-management endpoint to call, so these are a UI-side convention (a
+# reasonable stand-in for what a real Unit21/Feedzai-style queue enforces
+# server-side) documented here rather than left implicit.
+# --------------------------------------------------------------------------
+STATUS_LABEL = {
+    "pending_review": "Pending Review",
+    "approved": "Approved",
+    "escalated_aml": "Escalated to AML",
+    "kyc_requested": "KYC Requested",
+    "blocked": "Blocked",
+}
+STATUS_COLOUR = {
+    "pending_review": INK_MUTED,
+    "approved": "#0ca30c",
+    "escalated_aml": "#d03b3b",
+    "kyc_requested": "#fab219",
+    "blocked": "#3a1414",
+}
+# Hours from the scoring timestamp a case may sit at "Pending Review" before
+# counting as an SLA breach, banded by risk the way a real triage queue would
+# prioritise review capacity — a workflow convention, not a compliance policy.
+SLA_HOURS = {"Extreme": 4, "High": 24, "Medium": 72, "Low": 168}
 
 EVENT_TYPES = (
     "missed_payment", "overdraft_breach", "chargeback", "cash_deposit",
@@ -78,7 +114,7 @@ REASON_HELP = {
     "triggered": "The event matched a policy trigger and the customer was re-scored.",
     "debounced": "A matching trigger fired too recently — suppressed to stop alert storms.",
     "no_trigger": "Stored, but this event type/amount matches no trigger in the policy.",
-    "not_yet_scored": "No score on record yet. Score the customer once on the Score tab first.",
+    "not_yet_scored": "No score on record yet. Score the customer once first.",
     "stale": "The stored score was too old to re-use as a base for re-scoring.",
 }
 
@@ -105,8 +141,11 @@ COUNTRIES = (
 
 # Every field below is optional at the API boundary. What the UI sends as a
 # real value versus omits entirely is the whole point of the "unknown fields"
-# control: an omitted field reaches the model as a genuine missing value, not
-# as a fabricated zero.
+# control on the sandbox tab: an omitted field reaches the model as a genuine
+# missing value, not as a fabricated zero. These three profiles double as the
+# archetypes the Operations Queue's demo book is jittered from (see
+# `generate_book` below) — no fabricated customer names anywhere in this file,
+# only the customer_id/segment/occupation fields the real schema carries.
 PRESETS: dict[str, dict[str, Any]] = {
     "Low risk — salaried, clean file": {
         "segment": "retail", "occupation": "software_engineer", "employment_status": "salaried",
@@ -187,6 +226,93 @@ PRESETS: dict[str, dict[str, Any]] = {
 
 
 # --------------------------------------------------------------------------
+# Demo book — jittered variants of the three archetypes above, used to seed
+# the Operations Queue with something that looks like a real morning's work
+# rather than an empty table. Every variant is still scored by the live API;
+# nothing about the score, band or factors is fabricated here, only the
+# *input* profile is synthesised, exactly as scripts/generate_synthetic_data.py
+# does for training — this is the same idea at UI scale. Jitter ranges are
+# kept inside CustomerPayload's own field constraints (crr.api.schemas) so a
+# generated variant can never fail validation at the API boundary.
+# --------------------------------------------------------------------------
+
+# field -> (relative pct jitter or None, absolute delta or None, lo, hi, integer?)
+_LOW_RISK_JITTER: dict[str, tuple[float | None, float | None, float, float | None, bool]] = {
+    "age": (None, 8, 18, 90, True),
+    "bureau_score": (None, 60, 300, 850, True),
+    "credit_utilization_ratio": (0.4, None, 0.0, 2.0, False),
+    "dti_ratio": (0.4, None, 0.0, 2.0, False),
+    "account_age_months": (0.4, None, 0, 480, True),
+    "declared_annual_income": (0.3, None, 0.0, None, False),
+    "txn_count_90d": (0.3, None, 0, 2000, True),
+    "cash_intensity_ratio": (0.5, None, 0.0, 1.0, False),
+    "num_products_held": (None, 2, 0, 15, True),
+}
+_CREDIT_STRESS_JITTER: dict[str, tuple[float | None, float | None, float, float | None, bool]] = {
+    "bureau_score": (None, 60, 300, 850, True),
+    "dti_ratio": (0.3, None, 0.0, 2.0, False),
+    "credit_utilization_ratio": (0.25, None, 0.0, 2.0, False),
+    "delinquencies_30d_12m": (None, 2, 0, 20, True),
+    "overdraft_events_12m": (None, 4, 0, 60, True),
+    "max_days_past_due_24m": (None, 20, 0, 365, True),
+    "num_bounced_payments_12m": (None, 2, 0, 30, True),
+    "balance_volatility": (0.4, None, 0.0, 2.0, False),
+}
+_AML_CONCERN_JITTER: dict[str, tuple[float | None, float | None, float, float | None, bool]] = {
+    "structuring_score": (0.4, None, 0.0, 1.0, False),
+    "cash_intensity_ratio": (0.3, None, 0.0, 1.0, False),
+    "cross_border_txn_ratio": (0.3, None, 0.0, 1.0, False),
+    "adverse_media_hits_12m": (None, 2, 0, 20, True),
+    "offshore_entity_links": (None, 2, 0, 20, True),
+    "kyc_document_completeness": (0.3, None, 0.0, 1.0, False),
+    "new_counterparty_ratio_90d": (0.3, None, 0.0, 1.0, False),
+    "txn_count_90d": (0.3, None, 0, 2000, True),
+}
+_ARCHETYPE_JITTER = {
+    "Low risk — salaried, clean file": _LOW_RISK_JITTER,
+    "Credit stress — thin buffer, recent arrears": _CREDIT_STRESS_JITTER,
+    "AML concern — opaque funds, offshore links": _AML_CONCERN_JITTER,
+}
+
+
+def _jitter_value(
+    value: float, rng: random.Random, *,
+    pct: float | None, delta: float | None, lo: float, hi: float | None, integer: bool,
+) -> float:
+    result = value * (1 + rng.uniform(-pct, pct)) if pct is not None else value + rng.uniform(-delta, delta)
+    result = max(lo, result)
+    if hi is not None:
+        result = min(hi, result)
+    return float(round(result)) if integer else round(float(result), 4)
+
+
+def make_variant(archetype: str, rng: random.Random) -> dict[str, Any]:
+    """One jittered copy of an archetype's field values (``_narratives`` excluded)."""
+    values = {k: v for k, v in PRESETS[archetype].items() if k != "_narratives"}
+    for field, (pct, delta, lo, hi, integer) in _ARCHETYPE_JITTER[archetype].items():
+        values[field] = _jitter_value(values[field], rng, pct=pct, delta=delta, lo=lo, hi=hi, integer=integer)
+    return values
+
+
+def generate_book(seed: int, per_archetype: int = 6) -> list[dict[str, Any]]:
+    """A deterministic (given ``seed``) list of synthetic candidate customers,
+    ``per_archetype`` variants of each of the three profiles above."""
+    rng = random.Random(seed)
+    book = []
+    counter = 1
+    for archetype in PRESETS:
+        for _ in range(per_archetype):
+            book.append({
+                "customer_id": f"CUS-{100000 + counter}",
+                "archetype": archetype,
+                "values": make_variant(archetype, rng),
+                "narratives": PRESETS[archetype]["_narratives"],
+            })
+            counter += 1
+    return book
+
+
+# --------------------------------------------------------------------------
 # API client
 # --------------------------------------------------------------------------
 
@@ -240,6 +366,44 @@ def band_chip(band: str, label: str = "") -> str:
         f'background:{colour};color:#fff;font-weight:600;font-size:0.85rem;'
         f'font-family:{FONT_STACK};">{prefix}{band}</span>'
     )
+
+
+def status_chip(status: str) -> str:
+    """Unlike ``band_chip``, this is always rendered as the sole content of its
+    own ``st.markdown`` call rather than concatenated onto a leading ``<div>``
+    — and CommonMark's raw-HTML-block rule only recognises a fixed list of
+    block-level tag names (``div`` among them) at the start of standalone
+    content; a bare ``<span>`` there gets treated as literal text and escaped
+    instead of rendered. ``display:inline-block`` keeps the compact pill look
+    of a span while the tag name itself satisfies that rule.
+    """
+    colour = STATUS_COLOUR.get(status, INK_MUTED)
+    label = STATUS_LABEL.get(status, status)
+    return (
+        f'<div style="display:inline-block;padding:2px 10px;border-radius:999px;'
+        f'background:{colour};color:#fff;font-weight:600;font-size:0.85rem;'
+        f'font-family:{FONT_STACK};">case: {label}</div>'
+    )
+
+
+def _parse_dt(value: str | dt.datetime) -> dt.datetime:
+    return value if isinstance(value, dt.datetime) else dt.datetime.fromisoformat(value)
+
+
+def flash_success(key: str, message: str) -> None:
+    """Queue a success message for the render right after the ``st.rerun()``
+    that normally follows an action like this. ``st.success(...)`` called
+    immediately before ``st.rerun()`` never gets a chance to paint — the
+    rerun tears down that render before the browser shows it — so the
+    message is stashed in session state and picked up by ``show_flash`` on
+    the next run instead."""
+    st.session_state[f"_flash_{key}"] = message
+
+
+def show_flash(key: str) -> None:
+    message = st.session_state.pop(f"_flash_{key}", None)
+    if message:
+        st.success(message)
 
 
 def _base_layout(fig: go.Figure, height: int) -> go.Figure:
@@ -437,6 +601,57 @@ def render_result_header(result: dict[str, Any]) -> None:
     )
 
 
+def render_profile_summary(entry: dict[str, Any]) -> None:
+    p = entry["profile"]
+    st.markdown(
+        f"**Segment** {p.get('segment', '—')}&nbsp;&nbsp;·&nbsp;&nbsp;"
+        f"**Occupation** {p.get('occupation', '—')}&nbsp;&nbsp;·&nbsp;&nbsp;"
+        f"**Employment** {p.get('employment_status', '—')}&nbsp;&nbsp;·&nbsp;&nbsp;"
+        f"**Residency** {p.get('residency_status', '—')} ({p.get('country_of_residence', '—')})"
+        f"&nbsp;&nbsp;·&nbsp;&nbsp;**Age** {p.get('age', '—')}"
+        f"&nbsp;&nbsp;·&nbsp;&nbsp;**Account age** {p.get('account_age_months', '—')} mo"
+        f"&nbsp;&nbsp;·&nbsp;&nbsp;**Products held** {p.get('num_products_held', '—')}",
+        unsafe_allow_html=True,
+    )
+    st.caption(f"Source profile: {entry.get('archetype', 'custom')}")
+
+
+_DECISION_ICON = {"approved": "✅", "escalated_aml": "🚨", "kyc_requested": "📋", "blocked": "⛔"}
+
+
+def render_timeline(entries: list[dict[str, Any]]) -> None:
+    """Newest first. Combines score events, pushed transactions/AML events and
+    case decisions into one chronological feed — the note text is the one
+    piece of this that is operator-typed free text, so it is HTML-escaped
+    before going into an ``unsafe_allow_html`` block; everything else here is
+    an enum-like value this module controls."""
+    if not entries:
+        st.caption("No activity recorded yet.")
+        return
+    for item in sorted(entries, key=lambda e: _parse_dt(e["at"]), reverse=True):
+        at = _parse_dt(item["at"]).strftime("%Y-%m-%d %H:%M UTC")
+        kind = item["kind"]
+        if kind == "scored":
+            icon = "📊"
+            text = f"<b>Scored</b> — {item['risk_band']} band, {item['risk_score']:.1f} — {html.escape(item.get('note', ''))}"
+        elif kind == "event":
+            status_txt = "re-scored" if item["rescored"] else item["reason"]
+            change = "  ·  <b>band changed</b>" if item.get("band_changed") else ""
+            icon = "🔔"
+            text = f"<b>Event</b> <code>{item['event_type']}</code> (amount {item['amount']:,.0f}) — {status_txt}{change}"
+        else:
+            icon = _DECISION_ICON.get(item["action"], "📌")
+            text = (f"<b>{STATUS_LABEL.get(item['action'], item['action'])}</b> by {html.escape(item['actor'])}"
+                    f" — &ldquo;{html.escape(item['note'])}&rdquo;")
+        st.markdown(
+            f'<div style="padding:8px 0;border-bottom:1px solid {HAIRLINE};">'
+            f'<span style="color:{INK_MUTED};font-size:0.8rem;">{at}</span><br>'
+            f'<span style="font-family:{FONT_STACK};font-size:0.92rem;color:{INK};">{icon} {text}</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+
 def build_customer_payload(values: dict[str, Any], unknown: list[str]) -> dict[str, Any]:
     """Drop the fields the operator marked unknown.
 
@@ -448,7 +663,697 @@ def build_customer_payload(values: dict[str, Any], unknown: list[str]) -> dict[s
 
 
 # --------------------------------------------------------------------------
-# Page
+# Workflow state — the Operations Queue. Session-local (see module docstring).
+# --------------------------------------------------------------------------
+
+
+def add_to_queue(
+    customer_id: str, profile: dict[str, Any], narratives: dict[str, Any],
+    result: dict[str, Any], *, archetype: str = "custom", note: str = "Initial scoring",
+) -> None:
+    existing = st.session_state.queue.get(customer_id)
+    timeline = existing["timeline"] if existing else []
+    timeline.append({
+        "kind": "scored", "at": dt.datetime.now(dt.UTC),
+        "risk_score": result["risk_score"], "risk_band": result["risk_band"], "note": note,
+    })
+    st.session_state.queue[customer_id] = {
+        "customer_id": customer_id,
+        "archetype": archetype,
+        "profile": profile,
+        "narratives": narratives,
+        "result": result,
+        "status": existing["status"] if existing else "pending_review",
+        "timeline": timeline,
+    }
+
+
+def seed_queue(per_archetype: int = 6) -> tuple[int, list[str]]:
+    """Score the synthetic demo book against the live API and populate the
+    queue. Returns (customers scored, error messages) — a per-customer
+    failure is skipped rather than aborting the whole batch."""
+    seed = st.session_state.get("book_seed", 42)
+    book = generate_book(seed, per_archetype=per_archetype)
+    snapshot = dt.date.today().isoformat()
+    errors: list[str] = []
+    succeeded = 0
+    for candidate in book:
+        payload = {
+            "customer": {"customer_id": candidate["customer_id"], "snapshot_date": snapshot, **candidate["values"]},
+            "narratives": candidate["narratives"],
+            "explain": True,
+            "audience": "internal",
+        }
+        try:
+            result = api_score(payload)
+        except ApiError as exc:
+            errors.append(f"{candidate['customer_id']}: {exc}")
+            continue
+        add_to_queue(candidate["customer_id"], candidate["values"], candidate["narratives"], result,
+                     archetype=candidate["archetype"])
+        succeeded += 1
+    return succeeded, errors
+
+
+def record_event(customer_id: str, event: dict[str, Any], outcome: dict[str, Any]) -> None:
+    entry = st.session_state.queue.get(customer_id)
+    if entry is None:
+        return
+    entry["timeline"].append({
+        "kind": "event", "at": dt.datetime.now(dt.UTC), "event_type": event["event_type"],
+        "amount": event["amount"], "reason": outcome["reason"], "rescored": outcome["rescored"],
+        "band_changed": outcome["band_changed"],
+    })
+    if outcome["rescored"] and outcome.get("result"):
+        entry["result"] = outcome["result"]
+
+
+def compute_kpis(queue: dict[str, dict[str, Any]]) -> dict[str, int]:
+    now = dt.datetime.now(dt.UTC)
+    high_risk_pending = sla_breaches = escalated = 0
+    for entry in queue.values():
+        band = entry["result"]["risk_band"]
+        status = entry["status"]
+        if status == "pending_review" and band in ("High", "Extreme"):
+            high_risk_pending += 1
+        if status == "pending_review":
+            due = _parse_dt(entry["result"]["scored_at"]) + dt.timedelta(hours=SLA_HOURS.get(band, 72))
+            if now > due:
+                sla_breaches += 1
+        if status == "escalated_aml":
+            escalated += 1
+    return {"total": len(queue), "high_risk_pending": high_risk_pending,
+            "sla_breaches": sla_breaches, "escalated": escalated}
+
+
+def queue_dataframe(
+    queue: dict[str, dict[str, Any]], search: str, bands: list[str], statuses: list[str],
+) -> pd.DataFrame:
+    now = dt.datetime.now(dt.UTC)
+    rows = []
+    for entry in queue.values():
+        result = entry["result"]
+        band = result["risk_band"]
+        status = entry["status"]
+        if bands and band not in bands:
+            continue
+        if statuses and status not in statuses:
+            continue
+        haystack = " ".join([
+            entry["customer_id"], str(entry["profile"].get("segment", "")),
+            str(entry["profile"].get("occupation", "")), str(entry["profile"].get("country_of_residence", "")),
+        ]).lower()
+        if search and search.lower() not in haystack:
+            continue
+        scored_at = _parse_dt(result["scored_at"])
+        due = scored_at + dt.timedelta(hours=SLA_HOURS.get(band, 72))
+        breached = status == "pending_review" and now > due
+        rows.append({
+            "Customer ID": entry["customer_id"],
+            "Band": f"{BAND_DOT.get(band, '⚪')} {band}",
+            "Score": round(result["risk_score"], 1),
+            "Segment": entry["profile"].get("segment", "—"),
+            "Country": entry["profile"].get("country_of_residence", "—"),
+            "Credit risk": f"{result['credit']['probability']:.1%}",
+            "Fin. crime risk": f"{result['financial_crime']['probability']:.1%}",
+            "Status": STATUS_LABEL.get(status, status),
+            "SLA": "BREACHED" if breached else due.strftime("%Y-%m-%d %H:%M UTC"),
+            "Scored": scored_at.strftime("%Y-%m-%d %H:%M UTC"),
+            "_band_rank": BAND_RANK.get(band, 9),
+        })
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return frame
+    return frame.sort_values(["_band_rank", "Score"], ascending=[True, False], ignore_index=True)
+
+
+# --------------------------------------------------------------------------
+# Pages
+# --------------------------------------------------------------------------
+
+
+def page_queue() -> None:
+    st.title("Risk Operations Queue")
+    st.caption(
+        "Every customer scored in this session, highest risk first. Score, band and factors come "
+        "from the API; case status, SLA and notes are this session's workflow state (see the sidebar)."
+    )
+    show_flash("queue")
+
+    if not st.session_state.queue:
+        st.info("The queue is empty.")
+        if st.button("Load demo book (18 synthetic customers)", type="primary"):
+            with st.spinner("Scoring demo book against the live API…"):
+                ok, errors = seed_queue()
+            if ok:
+                st.rerun()
+            else:
+                st.error("Every candidate failed to score — is the API reachable? " + (errors[0] if errors else ""))
+        return
+
+    kpis = compute_kpis(st.session_state.queue)
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Total scored", kpis["total"])
+    k2.metric("High-risk pending review", kpis["high_risk_pending"])
+    k3.metric("SLA breaches", kpis["sla_breaches"])
+    k4.metric("Escalated to AML", kpis["escalated"])
+    st.caption(
+        "SLA windows while a case sits at Pending Review (workflow convention, not API policy): "
+        f"Extreme {SLA_HOURS['Extreme']}h · High {SLA_HOURS['High']}h · "
+        f"Medium {SLA_HOURS['Medium']}h · Low {SLA_HOURS['Low']}h from the scoring timestamp."
+    )
+
+    st.divider()
+    f1, f2, f3, f4 = st.columns([2.2, 1.3, 1.3, 0.9])
+    search = f1.text_input("Search — Customer ID, segment, occupation or country", "")
+    bands = f2.multiselect("Risk band", BAND_ORDER, default=list(BAND_ORDER))
+    statuses = f3.multiselect(
+        "Case status", list(STATUS_LABEL), default=list(STATUS_LABEL), format_func=lambda s: STATUS_LABEL[s]
+    )
+    f4.markdown("<div style='height:1.85rem'></div>", unsafe_allow_html=True)
+    if f4.button("↻ Reload book", use_container_width=True,
+                 help="Score a fresh synthetic book and refresh the demo customers in the queue"):
+        st.session_state.book_seed = st.session_state.get("book_seed", 42) + 1
+        with st.spinner("Scoring…"):
+            seed_queue()
+        st.rerun()
+
+    frame = queue_dataframe(st.session_state.queue, search, bands, statuses)
+    if frame.empty:
+        st.caption("No customers match these filters.")
+    else:
+        display_cols = ["Customer ID", "Band", "Score", "Segment", "Country",
+                         "Credit risk", "Fin. crime risk", "Status", "SLA", "Scored"]
+        event = st.dataframe(
+            frame[display_cols], use_container_width=True, hide_index=True,
+            on_select="rerun", selection_mode="single-row",
+            column_config={"Score": st.column_config.NumberColumn(format="%.1f")},
+        )
+        st.caption(f"{len(frame)} of {len(st.session_state.queue)} customers shown. Click a row to open Customer 360.")
+        if event.selection.rows:
+            st.session_state.selected_customer = frame.iloc[event.selection.rows[0]]["Customer ID"]
+            st.session_state.nav = "customer360"
+            st.rerun()
+
+    st.divider()
+    with st.expander("+ Onboard a new customer from a preset"):
+        st.caption(
+            "Loads a full, realistic pre-configured profile automatically — no manual field entry. "
+            "For hands-on control over every field, use the sandbox on the Event Simulator page."
+        )
+        next_id = f"CUS-{100000 + len(st.session_state.queue) + 1}"
+        c1, c2, c3 = st.columns([2, 1, 1])
+        onboard_preset = c1.selectbox("Profile", list(PRESETS), key="onboard_preset")
+        onboard_id = c2.text_input("Customer ID", value=next_id, key="onboard_id")
+        c3.markdown("<div style='height:1.85rem'></div>", unsafe_allow_html=True)
+        if c3.button("Score & add", type="primary", use_container_width=True, key="onboard_submit"):
+            base = PRESETS[onboard_preset]
+            values = {k: v for k, v in base.items() if k != "_narratives"}
+            payload = {
+                "customer": {"customer_id": onboard_id, "snapshot_date": dt.date.today().isoformat(), **values},
+                "narratives": base["_narratives"],
+                "explain": True,
+                "audience": "internal",
+            }
+            try:
+                with st.spinner("Scoring…"):
+                    result = api_score(payload)
+            except ApiError as exc:
+                st.error(str(exc))
+            else:
+                add_to_queue(onboard_id, values, base["_narratives"], result, archetype=onboard_preset)
+                st.session_state.selected_customer = onboard_id
+                flash_success("queue", f"{onboard_id} scored — {result['risk_band']} band — added to the queue.")
+                st.rerun()
+
+
+def render_action_panel(entry: dict[str, Any]) -> None:
+    st.markdown("##### Case decision")
+    show_flash(f"decision_{entry['customer_id']}")
+    st.markdown(status_chip(entry["status"]), unsafe_allow_html=True)
+    if entry["status"] != "pending_review":
+        st.caption("This case has already been actioned. Recording another decision below updates the "
+                   "status again and appends to the timeline.")
+
+    cid = entry["customer_id"]
+    with st.form(f"decision_form_{cid}"):
+        note = st.text_area(
+            "Review note (required)",
+            placeholder="Document the reason for this decision — required for the audit trail.",
+            height=90, key=f"decision_note_{cid}",
+        )
+        b1, b2 = st.columns(2)
+        b3, b4 = st.columns(2)
+        approve = b1.form_submit_button("✅ Approve Customer", use_container_width=True)
+        escalate = b2.form_submit_button("🚨 Escalate to AML", use_container_width=True)
+        kyc = b3.form_submit_button("📋 Request KYC Verification", use_container_width=True)
+        block = b4.form_submit_button("⛔ Block Account", use_container_width=True)
+
+    action = None
+    if approve:
+        action = "approved"
+    elif escalate:
+        action = "escalated_aml"
+    elif kyc:
+        action = "kyc_requested"
+    elif block:
+        action = "blocked"
+
+    if action:
+        if not note.strip():
+            st.error("A review note is required before recording this decision.")
+        else:
+            entry["status"] = action
+            entry["timeline"].append({
+                "kind": "decision", "at": dt.datetime.now(dt.UTC), "action": action,
+                "note": note.strip(), "actor": st.session_state.get("reviewer_name", "Risk Analyst"),
+            })
+            flash_success(f"decision_{cid}", f"Recorded: {STATUS_LABEL[action]}.")
+            st.rerun()
+
+
+def render_explainability(customer_id: str) -> None:
+    st.caption(
+        "The stored explanation for this customer's most recent score — read back from the API rather "
+        "than recomputed, so this is provably the same event as the score above."
+    )
+    try:
+        internal = api_explain(customer_id, "internal")
+        customer_view = api_explain(customer_id, "customer")
+    except ApiError as exc:
+        st.error(str(exc))
+        return
+
+    visible_codes = {f["code"] for f in customer_view["top_factors"]} | {f["code"] for f in customer_view["protective_factors"]}
+    all_factors = internal["top_factors"] + internal["protective_factors"]
+    suppressed = [f for f in all_factors if f["code"] not in visible_codes]
+    customer_all = customer_view["top_factors"] + customer_view["protective_factors"]
+
+    left, right = st.columns(2, gap="large")
+    with left:
+        st.markdown(f"##### Internal reviewer · {len(all_factors)} codes")
+        render_factor_block(all_factors, "No reason codes on record.")
+    with right:
+        st.markdown(f"##### Customer-facing · {len(customer_all)} codes")
+        render_factor_block(customer_all, "No reason code on this decision may be shown to the customer.")
+
+    visible_rule_ids = {r["id"] for r in customer_view["fired_rules"]}
+    suppressed_rules = [r for r in internal["fired_rules"] if r["id"] not in visible_rule_ids]
+
+    if suppressed or suppressed_rules:
+        parts = []
+        if suppressed:
+            parts.append(f"**{len(suppressed)} reason code(s) withheld:** " + ", ".join(f"`{f['code']}`" for f in suppressed))
+        if suppressed_rules:
+            parts.append(f"**{len(suppressed_rules)} policy rule(s) withheld:** " + ", ".join(f"`{r['id']}`" for r in suppressed_rules))
+        st.warning("Not shown to the customer — " + "  \n".join(parts))
+        if suppressed:
+            st.dataframe(factor_frame(suppressed), use_container_width=True, hide_index=True)
+        if suppressed_rules:
+            st.dataframe(pd.DataFrame(suppressed_rules)[["id", "reason_code", "description", "floor_band"]],
+                         use_container_width=True, hide_index=True)
+    else:
+        st.success("Every reason code and rule on this decision is disclosable to the customer.")
+
+    with st.expander("Filter all reason codes"):
+        frame = factor_frame(all_factors)
+        if frame.empty:
+            st.caption("No reason codes on this decision.")
+        else:
+            frame["customer_visible"] = frame["code"].isin(visible_codes)
+            f1, f2, f3 = st.columns(3)
+            dimensions = f1.multiselect("Dimension", sorted(frame["dimension"].unique()),
+                                        default=list(sorted(frame["dimension"].unique())), key=f"dim_{customer_id}")
+            directions = f2.multiselect("Direction", sorted(frame["direction"].unique()),
+                                        default=list(sorted(frame["direction"].unique())), key=f"dir_{customer_id}")
+            audiences = f3.multiselect("Visibility", ["customer-visible", "internal-only"],
+                                       default=["customer-visible", "internal-only"], key=f"vis_{customer_id}")
+            mask = frame["dimension"].isin(dimensions) & frame["direction"].isin(directions)
+            wanted = [v for v, name in ((True, "customer-visible"), (False, "internal-only")) if name in audiences]
+            mask &= frame["customer_visible"].isin(wanted)
+            filtered = frame[mask]
+            st.dataframe(filtered, use_container_width=True, hide_index=True)
+            st.caption(f"{len(filtered)} of {len(frame)} reason codes shown.")
+
+    render_fired_rules(internal["fired_rules"])
+
+
+def page_customer360() -> None:
+    cid = st.session_state.get("selected_customer")
+    entry = st.session_state.queue.get(cid) if cid else None
+    if entry is None:
+        st.title("Customer 360 & Decision Center")
+        st.info("No customer selected. Pick one from the Risk Operations Queue.")
+        if st.button("← Back to queue"):
+            st.session_state.nav = "queue"
+            st.rerun()
+        return
+
+    head_l, head_r = st.columns([5, 1])
+    head_l.title(f"Customer 360 — {cid}")
+    if head_r.button("← Back to queue", use_container_width=True):
+        st.session_state.nav = "queue"
+        st.rerun()
+
+    render_profile_summary(entry)
+    st.markdown(status_chip(entry["status"]), unsafe_allow_html=True)
+    st.divider()
+
+    render_result_header(entry["result"])
+
+    st.divider()
+    left, right = st.columns([3, 2], gap="large")
+    with left:
+        st.markdown("#### Event timeline")
+        render_timeline(entry["timeline"])
+    with right:
+        render_action_panel(entry)
+
+    st.divider()
+    st.markdown("### Explainability engine")
+    render_explainability(cid)
+
+
+def page_simulator() -> None:
+    st.title("Real-Time Event Simulator & Sandbox")
+    st.caption("For testing rules and the API directly — push a single event against any customer on "
+               "record, or score a fully custom payload without touching the Operations Queue.")
+
+    tab_event, tab_sandbox = st.tabs(["Push an event", "Sandbox: score a custom payload"])
+
+    # ---- push an event ----------------------------------------------------
+    with tab_event:
+        st.markdown(
+            "Push a single event and watch the re-scoring engine decide. The caller does **not** resend "
+            "the customer's profile — the engine rebuilds the input from the last stored snapshot plus "
+            "the event log, which is the whole point of the endpoint."
+        )
+        st.caption(
+            "The customer must already have a score on record — onboard them first (Queue page or the "
+            "sandbox tab). Trigger thresholds live in the policy file; the `reason` in the response is "
+            "the authoritative account of what happened."
+        )
+
+        queue_ids = list(st.session_state.queue)
+        options = queue_ids + ["— type a different ID —"]
+        default_idx = options.index(st.session_state["selected_customer"]) \
+            if st.session_state.get("selected_customer") in queue_ids else 0
+        picked = st.selectbox("Customer", options, index=default_idx, key="sim_customer_picker")
+        event_customer = (
+            st.text_input("Customer ID", value=st.session_state.get("selected_customer") or "CUS-DEMO-001",
+                          key="sim_customer_manual")
+            if picked == "— type a different ID —" else picked
+        )
+
+        with st.form("event_form"):
+            c1, c2, c3 = st.columns(3)
+            event_type = c1.selectbox(
+                "Event type", EVENT_TYPES,
+                format_func=lambda t: f"{t}  ·  usually a trigger" if t in LIKELY_TRIGGERS else t,
+            )
+            amount = c2.number_input("Amount", 0.0, 100_000_000.0, 75_000.0, step=1_000.0)
+            counterparty = c3.selectbox("Counterparty country", COUNTRIES)
+            c1, c2 = st.columns(2)
+            channel = c1.selectbox("Channel", ["online", "branch", "mobile", "atm", "wire"])
+            minutes_ago = c2.slider("Occurred (minutes ago)", 0, 720, 0)
+            send_event = st.form_submit_button("Send event", type="primary")
+
+        if send_event:
+            event = {
+                "event_ts": (dt.datetime.now(dt.UTC) - dt.timedelta(minutes=minutes_ago)).isoformat(),
+                "event_type": event_type,
+                "amount": amount,
+                "counterparty_country": counterparty,
+                "channel": channel,
+            }
+            # Read the standing score first so the effect of the event can be shown
+            # as a before/after rather than a bare number with nothing to compare to.
+            try:
+                before = api_explain(event_customer, "internal")
+            except ApiError:
+                before = None
+
+            try:
+                with st.spinner("Sending…"):
+                    outcome = api_event(event_customer, event)
+            except ApiError as exc:
+                st.error(str(exc))
+            else:
+                record_event(event_customer, event, outcome)
+                st.session_state.selected_customer = event_customer
+                st.divider()
+                reason = outcome["reason"]
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Outcome", reason)
+                c2.metric("Re-scored", "yes" if outcome["rescored"] else "no")
+                c3.metric("Band changed", "yes" if outcome["band_changed"] else "no")
+                c4.metric("Notified", "yes" if outcome["notified"] else "no")
+                st.caption(REASON_HELP.get(reason, ""))
+
+                if outcome["rescored"] and outcome.get("result"):
+                    result = outcome["result"]
+                    st.divider()
+                    st.markdown(f"##### New score after `{outcome['triggered_by']}`")
+
+                    if before is not None:
+                        d1, d2, d3 = st.columns(3)
+                        delta = result["risk_score"] - before["risk_score"]
+                        d1.metric("Score before", f"{before['risk_score']:.1f}")
+                        d2.metric("Score after", f"{result['risk_score']:.1f}", delta=f"{delta:+.1f}")
+                        d3.markdown(
+                            f"<div style='color:{INK_MUTED};font-size:0.8rem;margin-bottom:6px;'>Band</div>"
+                            + band_chip(before["risk_band"]) + " → " + band_chip(result["risk_band"]),
+                            unsafe_allow_html=True,
+                        )
+
+                        before_codes = {f["code"] for f in before["top_factors"]}
+                        after_codes = {f["code"] for f in result["top_factors"]}
+                        dropped_text = {c for c in before_codes - after_codes if c.startswith("TX")}
+                        if dropped_text:
+                            st.warning(
+                                "**The narrative-derived factor(s) "
+                                + ", ".join(f"`{c}`" for c in sorted(dropped_text))
+                                + " are absent from this re-score.** An event re-score rebuilds "
+                                "the input from the customer's stored snapshot plus the event log, "
+                                "and narrative notes are not part of that snapshot — so text signal "
+                                "present in the original `/score` call does not carry over. Note the "
+                                "response is *not* marked `degraded`: no narratives were supplied to "
+                                "this call, and by design that counts as a normal request rather than "
+                                "a failed extraction. Worth knowing before reading the delta above as "
+                                "a real change in the customer's risk."
+                            )
+
+                    render_result_header(result)
+                    st.markdown("##### Why — top factors (internal view)")
+                    render_factor_block(
+                        result["top_factors"],
+                        "No factor cleared the policy's minimum contribution threshold.",
+                    )
+                    render_fired_rules(result["fired_rules"])
+                elif reason == "not_yet_scored":
+                    st.info(
+                        "The event was stored. Onboard this customer first (Queue page, or the sandbox "
+                        "tab), then send the event again."
+                    )
+                else:
+                    st.info("The event was stored, but no new score was computed — see the reason above.")
+
+    # ---- sandbox ------------------------------------------------------------
+    with tab_sandbox:
+        show_flash("sandbox")
+        st.markdown(
+            "Full manual control over every field the API accepts — a tool for testing rules and the API "
+            "directly, not the primary way to bring a customer into the queue. **Anything left marked "
+            "unknown is sent as a genuine missing value**, never as a zero."
+        )
+
+        preset_name = st.selectbox("Start from a profile", list(PRESETS), key="sandbox_preset")
+        preset = PRESETS[preset_name]
+        preset_narratives = preset["_narratives"]
+
+        with st.form("sandbox_score_form"):
+            head_a, head_b, head_c = st.columns([2, 1, 1])
+            # Deliberately not defaulted from st.session_state.selected_customer: a
+            # sandbox test is meant to be disposable, and pre-filling the ID of
+            # whichever customer the operator was just looking at would make it
+            # one careless "Add to Queue" click away from silently overwriting
+            # that customer's real profile, score and timeline under the same ID.
+            default_sandbox_id = f"CUS-SANDBOX-{len(st.session_state.queue) + 1:03d}"
+            customer_id = head_a.text_input("Customer ID", value=default_sandbox_id)
+            snapshot_date = head_b.date_input("Snapshot date", value=dt.date.today())
+            audience = head_c.selectbox(
+                "Audience", ["internal", "customer"],
+                help="`customer` suppresses reason codes that may not lawfully be disclosed "
+                     "to the subject — AML concerns, prior SARs, adverse media.",
+            )
+
+            values: dict[str, Any] = {}
+
+            with st.expander("Profile", expanded=True):
+                c1, c2, c3, c4 = st.columns(4)
+                values["segment"] = c1.selectbox("Segment", SEGMENTS, index=SEGMENTS.index(preset["segment"]))
+                values["occupation"] = c2.selectbox("Occupation", OCCUPATIONS, index=OCCUPATIONS.index(preset["occupation"]))
+                values["employment_status"] = c3.selectbox(
+                    "Employment", EMPLOYMENT_STATUSES, index=EMPLOYMENT_STATUSES.index(preset["employment_status"]))
+                values["age"] = c4.slider("Age", 18, 95, preset["age"])
+                c1, c2, c3, c4 = st.columns(4)
+                values["years_at_employer"] = c1.slider("Years at employer", 0.0, 40.0, preset["years_at_employer"], 0.5)
+                values["account_age_months"] = c2.slider("Account age (months)", 0, 480, preset["account_age_months"])
+                values["residency_status"] = c3.selectbox(
+                    "Residency", RESIDENCY_STATUSES, index=RESIDENCY_STATUSES.index(preset["residency_status"]))
+                values["country_of_residence"] = c4.selectbox(
+                    "Country", COUNTRIES, index=COUNTRIES.index(preset["country_of_residence"]))
+                values["num_products_held"] = st.slider("Products held", 0, 15, preset["num_products_held"])
+
+            with st.expander("Income & credit", expanded=True):
+                c1, c2, c3, c4 = st.columns(4)
+                values["declared_annual_income"] = c1.number_input(
+                    "Declared annual income", 0.0, 50_000_000.0, preset["declared_annual_income"], step=10_000.0)
+                values["verified_income_ratio"] = c2.slider("Verified income ratio", 0.0, 2.0, preset["verified_income_ratio"], 0.05)
+                values["income_volatility_cv"] = c3.slider("Income volatility (CV)", 0.0, 2.0, preset["income_volatility_cv"], 0.02)
+                values["bureau_score"] = c4.slider("Bureau score", 300, 850, preset["bureau_score"])
+                c1, c2, c3, c4 = st.columns(4)
+                values["total_credit_limit"] = c1.number_input(
+                    "Total credit limit", 0.0, 20_000_000.0, preset["total_credit_limit"], step=5_000.0)
+                values["credit_utilization_ratio"] = c2.slider(
+                    "Credit utilisation", 0.0, 2.0, preset["credit_utilization_ratio"], 0.01)
+                values["dti_ratio"] = c3.slider("Debt-to-income", 0.0, 2.0, preset["dti_ratio"], 0.01)
+                values["savings_to_income_ratio"] = c4.slider(
+                    "Savings-to-income", 0.0, 3.0, preset["savings_to_income_ratio"], 0.05)
+                c1, c2, c3, c4 = st.columns(4)
+                values["num_open_loans"] = c1.slider("Open loans", 0, 20, preset["num_open_loans"])
+                values["num_credit_inquiries_12m"] = c2.slider("Credit inquiries (12m)", 0, 30, preset["num_credit_inquiries_12m"])
+                values["delinquencies_30d_12m"] = c3.slider("30d delinquencies (12m)", 0, 20, preset["delinquencies_30d_12m"])
+                values["delinquencies_90d_24m"] = c4.slider("90d delinquencies (24m)", 0, 20, preset["delinquencies_90d_24m"])
+                c1, c2, c3, c4 = st.columns(4)
+                values["max_days_past_due_24m"] = c1.slider("Max days past due (24m)", 0, 365, preset["max_days_past_due_24m"])
+                values["prior_default_flag"] = c2.selectbox("Prior default", [0, 1], index=preset["prior_default_flag"])
+                values["num_bounced_payments_12m"] = c3.slider("Bounced payments (12m)", 0, 30, preset["num_bounced_payments_12m"])
+                values["overdraft_events_12m"] = c4.slider("Overdraft events (12m)", 0, 60, preset["overdraft_events_12m"])
+                values["balance_volatility"] = st.slider("Balance volatility", 0.0, 2.0, preset["balance_volatility"], 0.02)
+
+            with st.expander("Transaction behaviour"):
+                c1, c2, c3, c4 = st.columns(4)
+                values["txn_count_90d"] = c1.slider("Transactions (90d)", 0, 2000, preset["txn_count_90d"])
+                values["cash_intensity_ratio"] = c2.slider("Cash intensity", 0.0, 1.0, preset["cash_intensity_ratio"], 0.01)
+                values["cross_border_txn_ratio"] = c3.slider("Cross-border ratio", 0.0, 1.0, preset["cross_border_txn_ratio"], 0.01)
+                values["night_txn_ratio"] = c4.slider("Night-time ratio", 0.0, 1.0, preset["night_txn_ratio"], 0.01)
+                c1, c2, c3, c4 = st.columns(4)
+                values["structuring_score"] = c1.slider("Structuring score", 0.0, 1.0, preset["structuring_score"], 0.01)
+                values["crypto_exposure_ratio_90d"] = c2.slider("Crypto exposure", 0.0, 1.0, preset["crypto_exposure_ratio_90d"], 0.01)
+                values["gambling_spend_ratio_90d"] = c3.slider("Gambling spend", 0.0, 1.0, preset["gambling_spend_ratio_90d"], 0.01)
+                values["new_counterparty_ratio_90d"] = c4.slider(
+                    "New counterparties", 0.0, 1.0, preset["new_counterparty_ratio_90d"], 0.01)
+
+            with st.expander("AML / KYC"):
+                c1, c2, c3, c4 = st.columns(4)
+                values["pep_flag"] = c1.selectbox("PEP", [0, 1], index=preset["pep_flag"])
+                values["sanctions_screen_hits"] = c2.slider("Sanctions hits", 0, 10, preset["sanctions_screen_hits"])
+                values["adverse_media_hits_12m"] = c3.slider("Adverse media (12m)", 0, 20, preset["adverse_media_hits_12m"])
+                values["offshore_entity_links"] = c4.slider("Offshore links", 0, 20, preset["offshore_entity_links"])
+                c1, c2, c3, c4 = st.columns(4)
+                values["high_risk_jurisdiction_exposure"] = c1.selectbox(
+                    "High-risk jurisdiction", [0, 1], index=preset["high_risk_jurisdiction_exposure"])
+                values["medium_risk_jurisdiction_exposure"] = c2.selectbox(
+                    "Medium-risk jurisdiction", [0, 1], index=preset["medium_risk_jurisdiction_exposure"])
+                values["sar_filed_prior"] = c3.selectbox("Prior SAR", [0, 1], index=preset["sar_filed_prior"])
+                values["edd_required"] = c4.selectbox("EDD required", [0, 1], index=preset["edd_required"])
+                c1, c2, c3 = st.columns(3)
+                values["source_of_funds_declared"] = c1.selectbox(
+                    "Source of funds", SOURCE_OF_FUNDS, index=SOURCE_OF_FUNDS.index(preset["source_of_funds_declared"]))
+                values["source_of_funds_verified"] = c2.selectbox(
+                    "Source verified", [0, 1], index=preset["source_of_funds_verified"])
+                values["kyc_document_completeness"] = c3.slider(
+                    "KYC completeness", 0.0, 1.0, preset["kyc_document_completeness"], 0.05)
+                values["kyc_refresh_overdue_days"] = st.slider(
+                    "KYC refresh overdue (days)", 0, 1000, preset["kyc_refresh_overdue_days"])
+
+            with st.expander("Narrative notes (free text)"):
+                st.caption(
+                    "Treated as untrusted input. Text reaches the extractor inside a data "
+                    "envelope, and the schema it must answer through has no field that "
+                    "means a score or a band — an instruction hidden in a note cannot "
+                    "become a decision. Try it."
+                )
+                n1, n2 = st.columns(2)
+                support_call = n1.text_area("Support call summary", preset_narratives["support_call_summary"], height=110)
+                underwriter = n2.text_area("Underwriter note", preset_narratives["underwriter_note"], height=110)
+                kyc_extract = st.text_area("KYC document extract", preset_narratives["kyc_document_extract"], height=80)
+
+            unknown = st.multiselect(
+                "Send these fields as unknown (null, not zero)",
+                options=sorted(values),
+                help="Demonstrates the missing-data contract: an omitted field reaches "
+                     "the model as NaN plus a missing-indicator, never as a fabricated 0.",
+            )
+
+            submitted = st.form_submit_button("Score customer", type="primary")
+
+        if submitted:
+            narratives = {
+                k: v.strip()
+                for k, v in (
+                    ("support_call_summary", support_call),
+                    ("underwriter_note", underwriter),
+                    ("kyc_document_extract", kyc_extract),
+                )
+                if v and v.strip()
+            }
+            customer_payload = build_customer_payload(values, unknown)
+            payload = {
+                "customer": {
+                    "customer_id": customer_id,
+                    "snapshot_date": snapshot_date.isoformat(),
+                    **customer_payload,
+                },
+                "explain": True,
+                "audience": audience,
+            }
+            if narratives:
+                payload["narratives"] = narratives
+
+            try:
+                with st.spinner("Scoring…"):
+                    result = api_score(payload)
+            except ApiError as exc:
+                st.error(str(exc))
+            else:
+                st.session_state.selected_customer = customer_id
+                st.session_state.sandbox_last_result = {
+                    "customer_id": customer_id, "profile": customer_payload,
+                    "narratives": narratives, "result": result, "preset": preset_name,
+                }
+                st.divider()
+                render_result_header(result)
+                if unknown:
+                    st.caption(f"{len(unknown)} field(s) sent as unknown: {', '.join(sorted(unknown))}")
+                st.divider()
+                st.markdown(f"##### Why — top factors ({audience} view)")
+                render_factor_block(
+                    result["top_factors"],
+                    "No factor cleared the policy's minimum contribution threshold.",
+                )
+                render_fired_rules(result["fired_rules"])
+
+        last = st.session_state.get("sandbox_last_result")
+        if last:
+            st.divider()
+            if last["customer_id"] in st.session_state.queue:
+                st.warning(
+                    f"`{last['customer_id']}` already exists in the queue — adding will overwrite its "
+                    "profile, score and timeline with this sandbox result. Its case status and prior "
+                    "decisions are preserved."
+                )
+            if st.button("➕ Add this result to the Operations Queue", key="sandbox_add_to_queue"):
+                add_to_queue(last["customer_id"], last["profile"], last["narratives"], last["result"],
+                             archetype=f"sandbox ({last['preset']})")
+                st.session_state.sandbox_last_result = None
+                flash_success("sandbox", f"{last['customer_id']} added to the queue.")
+                st.rerun()
+
+
+# --------------------------------------------------------------------------
+# App shell
 # --------------------------------------------------------------------------
 
 st.set_page_config(page_title="Customer Risk Rating", page_icon="◑", layout="wide")
@@ -466,431 +1371,64 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-if "last_customer_id" not in st.session_state:
-    st.session_state.last_customer_id = "CUS-DEMO-001"
+st.session_state.setdefault("queue", {})
+st.session_state.setdefault("selected_customer", None)
+st.session_state.setdefault("nav", "queue")
+st.session_state.setdefault("book_load_attempted", False)
+st.session_state.setdefault("book_seed", 42)
+st.session_state.setdefault("reviewer_name", "Risk Analyst")
 
 with st.sidebar:
     st.markdown("### Customer Risk Rating")
+    st.caption("Enterprise Risk & Compliance Workflow")
     st.caption(f"API: `{API_URL}`")
+    api_up = False
     try:
         health = api_health()
         st.success(
             f"API healthy · models: {', '.join(health['models_loaded'])} · "
             f"policy v{health['policy_version']} · api {health['version']}"
         )
+        api_up = True
     except ApiError as exc:
         st.error(str(exc))
         st.caption(
             "Start it with `python scripts/serve.py`, or set `CRR_API_URL` to a "
-            "running instance. Every tab below needs it."
+            "running instance. Every page below needs it."
         )
+
+    st.divider()
+    st.text_input("Reviewer name", key="reviewer_name",
+                  help="Attributed on every case decision you record below — session-local, no login.")
+
+    st.divider()
+    st.markdown("##### Navigate")
+    for key, label in (
+        ("queue", "📋 Risk Operations Queue"),
+        ("customer360", "🔎 Customer 360 & Decision Center"),
+        ("simulator", "🧪 Event Simulator & Sandbox"),
+    ):
+        disabled = key == "customer360" and not st.session_state.get("selected_customer")
+        if st.button(label, key=f"nav_{key}", use_container_width=True,
+                     type="primary" if st.session_state.nav == key else "secondary", disabled=disabled):
+            st.session_state.nav = key
+            st.rerun()
+
     st.divider()
     st.caption(
-        "This page is a front end only. Scores, explanations and re-scoring all "
-        "come from the FastAPI service over its public endpoints — no model or "
-        "policy logic is duplicated here."
+        "Scores, explanations and re-scoring all come from the live FastAPI service over its public "
+        "endpoints — no model or policy logic is duplicated here. Case status, SLA and review notes are "
+        "this session's workflow state only: nothing here is written to a case-management database."
     )
 
-st.title("Customer Risk Rating")
+if api_up and not st.session_state.book_load_attempted:
+    st.session_state.book_load_attempted = True
+    with st.spinner("Loading risk operations queue — scoring demo book against the live API…"):
+        seed_queue()
 
-tab_score, tab_explain, tab_events = st.tabs(
-    ["Score a customer", "Explanation & reason codes", "Real-time re-scoring"]
-)
-
-# ---- Tab 1: score --------------------------------------------------------
-
-with tab_score:
-    st.markdown(
-        "Fill in what you know. **Anything you leave marked unknown is sent as a "
-        "genuine missing value**, never as a zero — a customer whose utilisation "
-        "we simply do not have must not be scored as if it were 0%."
-    )
-
-    preset_name = st.selectbox("Start from a profile", list(PRESETS), key="preset")
-    preset = PRESETS[preset_name]
-    preset_narratives = preset["_narratives"]
-
-    with st.form("score_form"):
-        head_a, head_b, head_c = st.columns([2, 1, 1])
-        customer_id = head_a.text_input("Customer ID", value=st.session_state.last_customer_id)
-        snapshot_date = head_b.date_input("Snapshot date", value=dt.date.today())
-        audience = head_c.selectbox(
-            "Audience", ["internal", "customer"],
-            help="`customer` suppresses reason codes that may not lawfully be disclosed "
-                 "to the subject — AML concerns, prior SARs, adverse media.",
-        )
-
-        values: dict[str, Any] = {}
-
-        with st.expander("Profile", expanded=True):
-            c1, c2, c3, c4 = st.columns(4)
-            values["segment"] = c1.selectbox("Segment", SEGMENTS, index=SEGMENTS.index(preset["segment"]))
-            values["occupation"] = c2.selectbox("Occupation", OCCUPATIONS, index=OCCUPATIONS.index(preset["occupation"]))
-            values["employment_status"] = c3.selectbox(
-                "Employment", EMPLOYMENT_STATUSES, index=EMPLOYMENT_STATUSES.index(preset["employment_status"]))
-            values["age"] = c4.slider("Age", 18, 95, preset["age"])
-            c1, c2, c3, c4 = st.columns(4)
-            values["years_at_employer"] = c1.slider("Years at employer", 0.0, 40.0, preset["years_at_employer"], 0.5)
-            values["account_age_months"] = c2.slider("Account age (months)", 0, 480, preset["account_age_months"])
-            values["residency_status"] = c3.selectbox(
-                "Residency", RESIDENCY_STATUSES, index=RESIDENCY_STATUSES.index(preset["residency_status"]))
-            values["country_of_residence"] = c4.selectbox(
-                "Country", COUNTRIES, index=COUNTRIES.index(preset["country_of_residence"]))
-            values["num_products_held"] = st.slider("Products held", 0, 15, preset["num_products_held"])
-
-        with st.expander("Income & credit", expanded=True):
-            c1, c2, c3, c4 = st.columns(4)
-            values["declared_annual_income"] = c1.number_input(
-                "Declared annual income", 0.0, 50_000_000.0, preset["declared_annual_income"], step=10_000.0)
-            values["verified_income_ratio"] = c2.slider("Verified income ratio", 0.0, 2.0, preset["verified_income_ratio"], 0.05)
-            values["income_volatility_cv"] = c3.slider("Income volatility (CV)", 0.0, 2.0, preset["income_volatility_cv"], 0.02)
-            values["bureau_score"] = c4.slider("Bureau score", 300, 850, preset["bureau_score"])
-            c1, c2, c3, c4 = st.columns(4)
-            values["total_credit_limit"] = c1.number_input(
-                "Total credit limit", 0.0, 20_000_000.0, preset["total_credit_limit"], step=5_000.0)
-            values["credit_utilization_ratio"] = c2.slider(
-                "Credit utilisation", 0.0, 2.0, preset["credit_utilization_ratio"], 0.01)
-            values["dti_ratio"] = c3.slider("Debt-to-income", 0.0, 2.0, preset["dti_ratio"], 0.01)
-            values["savings_to_income_ratio"] = c4.slider(
-                "Savings-to-income", 0.0, 3.0, preset["savings_to_income_ratio"], 0.05)
-            c1, c2, c3, c4 = st.columns(4)
-            values["num_open_loans"] = c1.slider("Open loans", 0, 20, preset["num_open_loans"])
-            values["num_credit_inquiries_12m"] = c2.slider("Credit inquiries (12m)", 0, 30, preset["num_credit_inquiries_12m"])
-            values["delinquencies_30d_12m"] = c3.slider("30d delinquencies (12m)", 0, 20, preset["delinquencies_30d_12m"])
-            values["delinquencies_90d_24m"] = c4.slider("90d delinquencies (24m)", 0, 20, preset["delinquencies_90d_24m"])
-            c1, c2, c3, c4 = st.columns(4)
-            values["max_days_past_due_24m"] = c1.slider("Max days past due (24m)", 0, 365, preset["max_days_past_due_24m"])
-            values["prior_default_flag"] = c2.selectbox("Prior default", [0, 1], index=preset["prior_default_flag"])
-            values["num_bounced_payments_12m"] = c3.slider("Bounced payments (12m)", 0, 30, preset["num_bounced_payments_12m"])
-            values["overdraft_events_12m"] = c4.slider("Overdraft events (12m)", 0, 60, preset["overdraft_events_12m"])
-            values["balance_volatility"] = st.slider("Balance volatility", 0.0, 2.0, preset["balance_volatility"], 0.02)
-
-        with st.expander("Transaction behaviour"):
-            c1, c2, c3, c4 = st.columns(4)
-            values["txn_count_90d"] = c1.slider("Transactions (90d)", 0, 2000, preset["txn_count_90d"])
-            values["cash_intensity_ratio"] = c2.slider("Cash intensity", 0.0, 1.0, preset["cash_intensity_ratio"], 0.01)
-            values["cross_border_txn_ratio"] = c3.slider("Cross-border ratio", 0.0, 1.0, preset["cross_border_txn_ratio"], 0.01)
-            values["night_txn_ratio"] = c4.slider("Night-time ratio", 0.0, 1.0, preset["night_txn_ratio"], 0.01)
-            c1, c2, c3, c4 = st.columns(4)
-            values["structuring_score"] = c1.slider("Structuring score", 0.0, 1.0, preset["structuring_score"], 0.01)
-            values["crypto_exposure_ratio_90d"] = c2.slider("Crypto exposure", 0.0, 1.0, preset["crypto_exposure_ratio_90d"], 0.01)
-            values["gambling_spend_ratio_90d"] = c3.slider("Gambling spend", 0.0, 1.0, preset["gambling_spend_ratio_90d"], 0.01)
-            values["new_counterparty_ratio_90d"] = c4.slider(
-                "New counterparties", 0.0, 1.0, preset["new_counterparty_ratio_90d"], 0.01)
-
-        with st.expander("AML / KYC"):
-            c1, c2, c3, c4 = st.columns(4)
-            values["pep_flag"] = c1.selectbox("PEP", [0, 1], index=preset["pep_flag"])
-            values["sanctions_screen_hits"] = c2.slider("Sanctions hits", 0, 10, preset["sanctions_screen_hits"])
-            values["adverse_media_hits_12m"] = c3.slider("Adverse media (12m)", 0, 20, preset["adverse_media_hits_12m"])
-            values["offshore_entity_links"] = c4.slider("Offshore links", 0, 20, preset["offshore_entity_links"])
-            c1, c2, c3, c4 = st.columns(4)
-            values["high_risk_jurisdiction_exposure"] = c1.selectbox(
-                "High-risk jurisdiction", [0, 1], index=preset["high_risk_jurisdiction_exposure"])
-            values["medium_risk_jurisdiction_exposure"] = c2.selectbox(
-                "Medium-risk jurisdiction", [0, 1], index=preset["medium_risk_jurisdiction_exposure"])
-            values["sar_filed_prior"] = c3.selectbox("Prior SAR", [0, 1], index=preset["sar_filed_prior"])
-            values["edd_required"] = c4.selectbox("EDD required", [0, 1], index=preset["edd_required"])
-            c1, c2, c3 = st.columns(3)
-            values["source_of_funds_declared"] = c1.selectbox(
-                "Source of funds", SOURCE_OF_FUNDS, index=SOURCE_OF_FUNDS.index(preset["source_of_funds_declared"]))
-            values["source_of_funds_verified"] = c2.selectbox(
-                "Source verified", [0, 1], index=preset["source_of_funds_verified"])
-            values["kyc_document_completeness"] = c3.slider(
-                "KYC completeness", 0.0, 1.0, preset["kyc_document_completeness"], 0.05)
-            values["kyc_refresh_overdue_days"] = st.slider(
-                "KYC refresh overdue (days)", 0, 1000, preset["kyc_refresh_overdue_days"])
-
-        with st.expander("Narrative notes (free text)"):
-            st.caption(
-                "Treated as untrusted input. Text reaches the extractor inside a data "
-                "envelope, and the schema it must answer through has no field that "
-                "means a score or a band — an instruction hidden in a note cannot "
-                "become a decision. Try it."
-            )
-            n1, n2 = st.columns(2)
-            support_call = n1.text_area("Support call summary", preset_narratives["support_call_summary"], height=110)
-            underwriter = n2.text_area("Underwriter note", preset_narratives["underwriter_note"], height=110)
-            kyc_extract = st.text_area("KYC document extract", preset_narratives["kyc_document_extract"], height=80)
-
-        unknown = st.multiselect(
-            "Send these fields as unknown (null, not zero)",
-            options=sorted(values),
-            help="Demonstrates the missing-data contract: an omitted field reaches "
-                 "the model as NaN plus a missing-indicator, never as a fabricated 0.",
-        )
-
-        submitted = st.form_submit_button("Score customer", type="primary")
-
-    if submitted:
-        narratives = {
-            k: v.strip()
-            for k, v in (
-                ("support_call_summary", support_call),
-                ("underwriter_note", underwriter),
-                ("kyc_document_extract", kyc_extract),
-            )
-            if v and v.strip()
-        }
-        payload = {
-            "customer": {
-                "customer_id": customer_id,
-                "snapshot_date": snapshot_date.isoformat(),
-                **build_customer_payload(values, unknown),
-            },
-            "explain": True,
-            "audience": audience,
-        }
-        if narratives:
-            payload["narratives"] = narratives
-
-        try:
-            with st.spinner("Scoring…"):
-                result = api_score(payload)
-        except ApiError as exc:
-            st.error(str(exc))
-        else:
-            st.session_state.last_customer_id = customer_id
-            st.session_state.last_audience = audience
-            st.divider()
-            render_result_header(result)
-            if unknown:
-                st.caption(f"{len(unknown)} field(s) sent as unknown: {', '.join(sorted(unknown))}")
-            st.divider()
-            st.markdown(f"##### Why — top factors ({audience} view)")
-            render_factor_block(
-                result["top_factors"],
-                "No factor cleared the policy's minimum contribution threshold.",
-            )
-            render_fired_rules(result["fired_rules"])
-            st.info(
-                "Open the **Explanation & reason codes** tab to compare what an "
-                "internal reviewer sees against what may be shown to the customer."
-            )
-
-# ---- Tab 2: explanation & reason codes -----------------------------------
-
-with tab_explain:
-    st.markdown(
-        "The **stored** explanation for a customer's most recent score — read back "
-        "from the API rather than recomputed, so the explanation shown to a reviewer "
-        "is provably the same event as the score that was served."
-    )
-
-    c1, c2 = st.columns([3, 1])
-    explain_id = c1.text_input("Customer ID", value=st.session_state.last_customer_id, key="explain_id")
-    fetch = c2.button("Fetch explanation", type="primary", use_container_width=True)
-
-    if fetch or st.session_state.get("explain_loaded") == explain_id:
-        try:
-            internal = api_explain(explain_id, "internal")
-            customer_view = api_explain(explain_id, "customer")
-        except ApiError as exc:
-            st.error(str(exc))
-        else:
-            st.session_state.explain_loaded = explain_id
-            st.divider()
-
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Risk score", f"{internal['risk_score']:.1f}")
-            m2.metric("Credit default", f"{internal['credit_probability']:.2%}")
-            m3.metric("Financial crime", f"{internal['financial_crime_probability']:.2%}")
-            m4.markdown(
-                f"<div style='color:{INK_MUTED};font-size:0.8rem;margin-bottom:6px;'>Band</div>"
-                + band_chip(internal["risk_band"]),
-                unsafe_allow_html=True,
-            )
-            st.caption(
-                f"model `{internal['model_version']}` · policy v{internal['policy_version']} · "
-                f"scored {internal['scored_at']}"
-            )
-
-            visible_codes = {f["code"] for f in customer_view["top_factors"]}
-            visible_codes |= {f["code"] for f in customer_view["protective_factors"]}
-            all_factors = internal["top_factors"] + internal["protective_factors"]
-            suppressed = [f for f in all_factors if f["code"] not in visible_codes]
-
-            st.divider()
-            st.markdown("#### Customer view vs internal view")
-            st.caption(
-                "Both views are filtered from one stored record by a single function, so "
-                "they can never disagree about what is safe to disclose. A code is "
-                "withheld when telling the subject would tip off an AML investigation — "
-                "not because it is unflattering."
-            )
-
-            customer_all = customer_view["top_factors"] + customer_view["protective_factors"]
-
-            left, right = st.columns(2, gap="large")
-            with left:
-                st.markdown(f"##### Internal reviewer · {len(all_factors)} codes")
-                render_factor_block(all_factors, "No reason codes on record.")
-            with right:
-                st.markdown(f"##### Customer-facing · {len(customer_all)} codes")
-                render_factor_block(
-                    customer_all, "No reason code on this decision may be shown to the customer."
-                )
-
-            visible_rule_ids = {r["id"] for r in customer_view["fired_rules"]}
-            suppressed_rules = [r for r in internal["fired_rules"] if r["id"] not in visible_rule_ids]
-
-            if suppressed or suppressed_rules:
-                parts = []
-                if suppressed:
-                    parts.append(
-                        f"**{len(suppressed)} reason code(s) withheld:** "
-                        + ", ".join(f"`{f['code']}`" for f in suppressed)
-                    )
-                if suppressed_rules:
-                    parts.append(
-                        f"**{len(suppressed_rules)} policy rule(s) withheld:** "
-                        + ", ".join(f"`{r['id']}`" for r in suppressed_rules)
-                    )
-                st.warning("Not shown to the customer — " + "  \n".join(parts))
-                if suppressed:
-                    st.dataframe(factor_frame(suppressed), use_container_width=True, hide_index=True)
-                if suppressed_rules:
-                    st.dataframe(
-                        pd.DataFrame(suppressed_rules)[["id", "reason_code", "description", "floor_band"]],
-                        use_container_width=True, hide_index=True,
-                    )
-            else:
-                st.success("Every reason code and rule on this decision is disclosable to the customer.")
-
-            st.divider()
-            st.markdown("#### Filter all reason codes")
-            frame = factor_frame(all_factors)
-            if frame.empty:
-                st.caption("No reason codes on this decision.")
-            else:
-                frame["customer_visible"] = frame["code"].isin(visible_codes)
-                f1, f2, f3 = st.columns(3)
-                dimensions = f1.multiselect(
-                    "Dimension", sorted(frame["dimension"].unique()), default=list(sorted(frame["dimension"].unique())))
-                directions = f2.multiselect(
-                    "Direction", sorted(frame["direction"].unique()), default=list(sorted(frame["direction"].unique())))
-                audiences = f3.multiselect(
-                    "Visibility", ["customer-visible", "internal-only"],
-                    default=["customer-visible", "internal-only"])
-
-                mask = frame["dimension"].isin(dimensions) & frame["direction"].isin(directions)
-                wanted = []
-                if "customer-visible" in audiences:
-                    wanted.append(True)
-                if "internal-only" in audiences:
-                    wanted.append(False)
-                mask &= frame["customer_visible"].isin(wanted)
-
-                filtered = frame[mask]
-                st.dataframe(filtered, use_container_width=True, hide_index=True)
-                st.caption(f"{len(filtered)} of {len(frame)} reason codes shown.")
-
-            render_fired_rules(internal["fired_rules"])
-
-# ---- Tab 3: real-time re-scoring -----------------------------------------
-
-with tab_events:
-    st.markdown(
-        "Push a single event and watch the re-scoring engine decide. The caller does "
-        "**not** resend the customer's profile — the engine rebuilds the input from "
-        "the last stored snapshot plus the event log, which is the whole point of "
-        "the endpoint."
-    )
-    st.caption(
-        "The customer must already have a score on record, so run the **Score a "
-        "customer** tab first. Trigger thresholds live in the policy file; the "
-        "`reason` in the response is the authoritative account of what happened."
-    )
-
-    with st.form("event_form"):
-        c1, c2, c3 = st.columns([2, 2, 2])
-        event_customer = c1.text_input("Customer ID", value=st.session_state.last_customer_id)
-        event_type = c2.selectbox(
-            "Event type", EVENT_TYPES,
-            format_func=lambda t: f"{t}  ·  usually a trigger" if t in LIKELY_TRIGGERS else t,
-        )
-        amount = c3.number_input("Amount", 0.0, 100_000_000.0, 75_000.0, step=1_000.0)
-        c1, c2, c3 = st.columns(3)
-        counterparty = c1.selectbox("Counterparty country", COUNTRIES)
-        channel = c2.selectbox("Channel", ["online", "branch", "mobile", "atm", "wire"])
-        minutes_ago = c3.slider("Occurred (minutes ago)", 0, 720, 0)
-        send_event = st.form_submit_button("Send event", type="primary")
-
-    if send_event:
-        event = {
-            "event_ts": (dt.datetime.now(dt.UTC) - dt.timedelta(minutes=minutes_ago)).isoformat(),
-            "event_type": event_type,
-            "amount": amount,
-            "counterparty_country": counterparty,
-            "channel": channel,
-        }
-        # Read the standing score first so the effect of the event can be shown
-        # as a before/after rather than a bare number with nothing to compare to.
-        before: dict[str, Any] | None = None
-        try:
-            before = api_explain(event_customer, "internal")
-        except ApiError:
-            before = None
-
-        try:
-            with st.spinner("Sending…"):
-                outcome = api_event(event_customer, event)
-        except ApiError as exc:
-            st.error(str(exc))
-        else:
-            st.divider()
-            reason = outcome["reason"]
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Outcome", reason)
-            c2.metric("Re-scored", "yes" if outcome["rescored"] else "no")
-            c3.metric("Band changed", "yes" if outcome["band_changed"] else "no")
-            c4.metric("Notified", "yes" if outcome["notified"] else "no")
-            st.caption(REASON_HELP.get(reason, ""))
-
-            if outcome["rescored"] and outcome.get("result"):
-                result = outcome["result"]
-                st.divider()
-                st.markdown(f"##### New score after `{outcome['triggered_by']}`")
-
-                if before is not None:
-                    d1, d2, d3 = st.columns(3)
-                    delta = result["risk_score"] - before["risk_score"]
-                    d1.metric("Score before", f"{before['risk_score']:.1f}")
-                    d2.metric("Score after", f"{result['risk_score']:.1f}", delta=f"{delta:+.1f}")
-                    d3.markdown(
-                        f"<div style='color:{INK_MUTED};font-size:0.8rem;margin-bottom:6px;'>Band</div>"
-                        + band_chip(before["risk_band"]) + " → " + band_chip(result["risk_band"]),
-                        unsafe_allow_html=True,
-                    )
-
-                    before_codes = {f["code"] for f in before["top_factors"]}
-                    after_codes = {f["code"] for f in result["top_factors"]}
-                    dropped_text = {c for c in before_codes - after_codes if c.startswith("TX")}
-                    if dropped_text:
-                        st.warning(
-                            "**The narrative-derived factor(s) "
-                            + ", ".join(f"`{c}`" for c in sorted(dropped_text))
-                            + " are absent from this re-score.** An event re-score rebuilds "
-                            "the input from the customer's stored snapshot plus the event log, "
-                            "and narrative notes are not part of that snapshot — so text signal "
-                            "present in the original `/score` call does not carry over. Note the "
-                            "response is *not* marked `degraded`: no narratives were supplied to "
-                            "this call, and by design that counts as a normal request rather than "
-                            "a failed extraction. Worth knowing before reading the delta above as "
-                            "a real change in the customer's risk."
-                        )
-
-                render_result_header(result)
-                st.markdown("##### Why — top factors (internal view)")
-                render_factor_block(
-                    result["top_factors"],
-                    "No factor cleared the policy's minimum contribution threshold.",
-                )
-                render_fired_rules(result["fired_rules"])
-            elif reason == "not_yet_scored":
-                st.info(
-                    "The event was stored. Score this customer once on the **Score a "
-                    "customer** tab, then send the event again."
-                )
-            else:
-                st.info("The event was stored, but no new score was computed — see the reason above.")
+if st.session_state.nav == "customer360":
+    page_customer360()
+elif st.session_state.nav == "simulator":
+    page_simulator()
+else:
+    page_queue()

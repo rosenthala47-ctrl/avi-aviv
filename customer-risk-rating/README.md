@@ -480,21 +480,36 @@ positives, a group is excluded from the comparison entirely, on both sides.
 ## The web UI
 
 `app.py` is a Streamlit front end over the same public endpoints an integrator
-would call. It is a **client only** — no model, no policy, no copy of the
-reason-code vocabulary lives in it, so a number on screen can only be wrong if
-the API is wrong. Three tabs:
+would call, shaped as an operations console (Unit21/Feedzai-style) rather than
+a single calculator. It is a **client only** — no model, no policy, no copy of
+the reason-code vocabulary lives in it, so a number on screen can only be
+wrong if the API is wrong. Three pages:
 
-- **Score a customer** — form inputs for ~40 of the ~65 fields, three realistic
-  starting profiles, and a control to send chosen fields as *unknown*. That
-  control exists to make the missing-data contract visible: an omitted field
-  reaches the model as a genuine NaN plus a missing-indicator, never a
-  fabricated zero.
-- **Explanation & reason codes** — the stored explanation read back from the
-  API, with the internal reviewer's view beside the customer-facing one and an
-  explicit list of what was withheld and why. Filterable by dimension,
-  direction and visibility.
-- **Real-time re-scoring** — push one event, see whether the policy triggered,
-  debounced or ignored it, and what the score did.
+- **Risk Operations Queue** — every customer scored this session, highest
+  risk first, with KPI tiles (total scored, high-risk pending review, SLA
+  breaches, escalated to AML), and search/filter by band, status, segment,
+  occupation or country. Selecting a row loads that customer's full,
+  already-scored profile straight into Customer 360 — no form to fill in.
+  New customers are onboarded from one of three realistic starting profiles
+  in one click, not a wall of sliders.
+- **Customer 360 & Decision Center** — profile, composite score, band badge
+  and degradation status; a chronological timeline merging score events,
+  pushed transactions and case decisions; an explainability panel with the
+  internal reviewer's view beside the customer-facing one and an explicit
+  list of what was withheld and why (filterable by dimension, direction and
+  visibility); and a case-decision panel (Approve / Escalate to AML /
+  Request KYC / Block), gated on a mandatory review note. Case status, SLA
+  and notes are this session's workflow state only — the API has no
+  case-management endpoints, so nothing here is written to a database; a
+  refresh starts a fresh queue.
+- **Event Simulator & Sandbox** — push one event against any queued customer
+  and see whether the policy triggered, debounced or ignored it and what the
+  score did; or, in a second tab, score a fully custom payload through the
+  original ~40-field manual form (three starting profiles, a control to send
+  chosen fields as *unknown* — that exists to make the missing-data contract
+  visible: an omitted field reaches the model as a genuine NaN plus a
+  missing-indicator, never a fabricated zero) for testing rules and the API
+  directly, with an option to add the result to the queue.
 
 The SHAP chart is a diverging bar of summed log-odds contributions: red raises
 risk, blue lowers it, zero is a real midpoint. That colour pair is validated
