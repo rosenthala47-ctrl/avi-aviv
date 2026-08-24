@@ -525,10 +525,19 @@ build generates a seeded 50,000-customer dataset and trains both targets
 lands 7 of 10 calibration bins within 2 SE against a bar of 8 and
 `train_baseline.py` exits non-zero; at 50,000 both models clear all four phase-2
 criteria with 9/10. The build deliberately keeps `set -e`, so a model that
-misses its own exit criteria fails the build rather than shipping miscalibrated.
-The Dockerfile's default (`CRR_BOOTSTRAP_ROWS`) is currently set lower, for
-low-memory free tiers — see the ARG's comment in the Dockerfile for the
-current value and the calibration trade-off it implies.
+misses its own exit criteria fails the build rather than shipping miscalibrated
+— for a production-sized build. That guarantee cannot be met on a 512MB free
+tier at all: peak RSS during training was measured directly (see the Dockerfile's
+`CRR_BOOTSTRAP_ROWS` comment for the numbers), and no row count both fits 512MB
+and reaches 8/10 calibration bins for `financial_crime_12m` — 15k and 20k give
+the identical 7/10, and the jump to 9/10 needs memory only the 50k/1GB+ path
+has. So on the free-tier path only, the Dockerfile passes
+`train_baseline.py --allow-degraded-build`, which turns that specific,
+already-measured shortfall into a loud logged warning and a `degraded_build:
+true` / `exit_criteria` record in `metadata.json` instead of a failed build —
+never a silent one. A production-sized build (`CRR_BOOTSTRAP_ROWS=50000`, the
+starter-plan default) does not pass that flag, so a real regression there still
+fails the build exactly as before.
 
 | Platform | How |
 |---|---|

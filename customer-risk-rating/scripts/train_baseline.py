@@ -156,6 +156,16 @@ def main(argv: list[str] | None = None) -> int:
                         help="reference: deterministic, no network, the honest floor (default). "
                              "anthropic: the real extractor, needs ANTHROPIC_API_KEY.")
     parser.add_argument("--no-save", action="store_true")
+    parser.add_argument(
+        "--allow-degraded-build", action="store_true",
+        help="do not exit non-zero when phase 2 exit criteria are missed (a crash still exits "
+             "non-zero). For low-memory build environments — e.g. a free-tier PaaS container — "
+             "where the dataset is capped below what financial_crime_12m's ~1.5%% prevalence "
+             "needs for reliable calibration (see the Dockerfile's CRR_BOOTSTRAP_ROWS comment). "
+             "The failure is never hidden: it is still printed and saved into metadata.json's "
+             "'exit_criteria' and 'degraded_build' fields, so a degraded artifact is always "
+             "labelled as such, never silently indistinguishable from one that earned its bar.",
+    )
     args = parser.parse_args(argv)
 
     out_dir = args.out or (REPO_ROOT / "models" / args.target)
@@ -284,10 +294,30 @@ def main(argv: list[str] | None = None) -> int:
          metrics["test"]["calibration_bins_within_2se"] >= 8),
         (f"discrimination: test AUC {metrics['test']['auc']:.4f} >= 0.70", metrics["test"]["auc"] >= 0.70),
     ]
+    all_ok = all(ok for _, ok in checks)
     print("PHASE 2 EXIT CRITERIA")
     for label, ok in checks:
         print(f"  [{'PASS' if ok else 'FAIL'}] {label}")
     print("=" * 78)
+
+    # Recorded regardless of --allow-degraded-build, so metadata.json is always
+    # honest about whether this artifact earned its own bar — see that flag's
+    # help text for why a build might continue past a failure anyway.
+    artifact.metadata["exit_criteria_met"] = all_ok
+    artifact.metadata["exit_criteria"] = [{"check": label, "passed": ok} for label, ok in checks]
+    if not all_ok:
+        artifact.metadata["degraded_build"] = args.allow_degraded_build
+        if args.allow_degraded_build:
+            print("!" * 78)
+            print("DEGRADED BUILD: the criteria above failed, but --allow-degraded-build was")
+            print("passed, so this is not fatal. This model does NOT meet phase 2's bar and")
+            print("must not be treated as production-quality — see metadata.json's")
+            print("'exit_criteria' for exactly what failed.")
+            print("!" * 78)
+        else:
+            print("Exit criteria not met. Pass --allow-degraded-build to save this artefact")
+            print("anyway for a low-resource/demo build (see the Dockerfile's ARG comment).")
+        print()
 
     if not args.no_save:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -295,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
         artifact.save(out_dir)
         print(f"\nartefacts written to {out_dir}")
 
-    return 0 if all(ok for _, ok in checks) else 1
+    return 0 if (all_ok or args.allow_degraded_build) else 1
 
 
 if __name__ == "__main__":

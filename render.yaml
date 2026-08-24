@@ -17,15 +17,20 @@
 # delete the service and recreate it via New → Blueprint instead.
 #
 # Plan selection:
-#   - starter (recommended): 1 GB RAM, fits the full 50k-row model training
-#   - free (512 MB RAM): Only works if Dockerfile uses CRR_BOOTSTRAP_ROWS=20000
-#     (a smaller dataset with higher calibration risk; see Dockerfile comments)
+#   - starter (recommended): 1 GB RAM, fits the full 50k-row model training,
+#     and financial_crime_12m actually clears its calibration bar (9/10 bins)
+#   - free (512 MB RAM): the Dockerfile's default CRR_BOOTSTRAP_ROWS=15000 fits
+#     this tier's memory (measured peak ~396 MB, see Dockerfile comments) but
+#     financial_crime_12m cannot clear its calibration bar at any row count
+#     that also fits 512 MB — train_baseline.py's --allow-degraded-build makes
+#     that an explicit, logged trade-off instead of a failed build. Fine for a
+#     demo; not a substitute for the starter plan's model quality.
 #   - higher tiers: No memory constraints; fastest builds
 services:
   - type: web
     name: customer-risk-rating
     runtime: docker
-    plan: starter          # use `free` only after verifying 20k-row training succeeds
+    plan: starter          # switch to `free` only if the 512MB trade-off above is acceptable
     rootDir: customer-risk-rating   # everything below (Dockerfile, dockerContext) is relative to this
     dockerfilePath: ./Dockerfile
     dockerContext: .
