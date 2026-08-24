@@ -1,9 +1,20 @@
 # Render blueprint — https://render.com/docs/blueprint-spec
 #
-# One-click: push this repo, then on Render choose New → Blueprint and point it
-# at the repo. Render reads this file, builds the Dockerfile (which generates
-# the dataset and trains both models during the build) and serves the Streamlit
-# UI on the port it injects as $PORT. No dashboard configuration needed.
+# This file MUST live at the repository root: Render's Blueprint sync (New →
+# Blueprint) only scans the repo root for render.yaml, never subdirectories.
+# The actual service — Dockerfile, pyproject.toml, app.py — lives in
+# customer-risk-rating/, which is why rootDir below points there.
+#
+# One-click: push this repo, then on Render choose New → Blueprint and point
+# it at the repo. Render reads this file, builds the Dockerfile (which
+# generates the dataset and trains both models during the build) and serves
+# the Streamlit UI on the port it injects as $PORT. No dashboard
+# configuration needed.
+#
+# If you already created the service manually (not via Blueprint), this file
+# will not retroactively apply — go to the service's Settings in the Render
+# dashboard and set Root Directory to `customer-risk-rating` by hand, or
+# delete the service and recreate it via New → Blueprint instead.
 #
 # Plan selection:
 #   - starter (recommended): 1 GB RAM, fits the full 50k-row model training
@@ -15,9 +26,9 @@ services:
     name: customer-risk-rating
     runtime: docker
     plan: starter          # use `free` only after verifying 20k-row training succeeds
+    rootDir: customer-risk-rating   # everything below (Dockerfile, dockerContext) is relative to this
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    rootDir: customer-risk-rating   # where the Dockerfile and pyproject.toml live
     healthCheckPath: /_stcore/health   # Streamlit's own readiness endpoint
     autoDeploy: true
     envVars:

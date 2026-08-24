@@ -115,11 +115,16 @@ is what caught it.
 
 ## Layout
 
+Note: this project lives in a subdirectory of its git repo (alongside an
+unrelated site at the repo root). `render.yaml` therefore lives at the
+**repository root**, not here — Render's Blueprint sync only scans the repo
+root — with `rootDir: customer-risk-rating` pointing back into this folder.
+Everything else below is local to `customer-risk-rating/`.
+
 ```
 customer-risk-rating/
 ├── app.py                       Streamlit front end — a pure HTTP client of the API
 ├── Dockerfile                   API + UI in one image; trains the models at build time
-├── render.yaml                  Render blueprint (1-click deploy)
 ├── railway.json                 Railway config (1-click deploy)
 ├── requirements.txt             flat deps for platforms that do not read pyproject
 ├── config/
@@ -521,12 +526,15 @@ lands 7 of 10 calibration bins within 2 SE against a bar of 8 and
 `train_baseline.py` exits non-zero; at 50,000 both models clear all four phase-2
 criteria with 9/10. The build deliberately keeps `set -e`, so a model that
 misses its own exit criteria fails the build rather than shipping miscalibrated.
+The Dockerfile's default (`CRR_BOOTSTRAP_ROWS`) is currently set lower, for
+low-memory free tiers — see the ARG's comment in the Dockerfile for the
+current value and the calibration trade-off it implies.
 
 | Platform | How |
 |---|---|
-| Render | New → Blueprint on this repo; `render.yaml` is read automatically |
-| Railway | New → Deploy from repo; `railway.json` selects the Dockerfile |
-| Any Docker host | `docker build -t crr . && docker run -p 8501:8501 crr` |
+| Render | New → Blueprint on the repo root (not this subfolder) — `render.yaml` lives there and sets `rootDir: customer-risk-rating`. If you already created the service by hand instead, set **Root Directory** to `customer-risk-rating` in its dashboard Settings, since a manually-created service never reads `render.yaml`. |
+| Railway | New → Deploy from repo, then set **Root Directory** to `customer-risk-rating` in the service's Settings so it finds `railway.json` and the Dockerfile |
+| Any Docker host | `cd customer-risk-rating && docker build -t crr . && docker run -p 8501:8501 crr` |
 
 `CRR_ANTHROPIC_API_KEY` is optional everywhere. Unset — the default — means the
 deterministic reference extractor: no network calls, no cost, and narrative
