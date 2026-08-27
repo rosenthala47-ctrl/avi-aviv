@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "148";
+  const APP_VERSION = "149";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1547,7 +1547,7 @@
     // בורר שירות
     const svcCards = services.map((s) => `
       <button class="svc-card ${view.selService === s.id ? "selected" : ""}" data-svc="${s.id}">
-        <div class="svc-ico">${esc(s.icon || "✂️")}</div>
+        <div class="svc-ico">${esc(s.icon != null ? s.icon : "✂️")}</div>
         <div class="svc-body">
           <div class="svc-name">${esc(s.name)}</div>
           <div class="svc-sub">${u.fmtDuration(s.durationMin)}</div>
@@ -2818,7 +2818,7 @@
     const items = st.services.map((s) => `
       <div class="card">
         <div class="service-item">
-          <div class="svc-ico" style="width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:var(--surface-3);font-size:20px">${esc(s.icon || "✂️")}</div>
+          <div class="svc-ico" style="width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:var(--surface-3);font-size:20px">${esc(s.icon != null ? s.icon : "✂️")}</div>
           <div class="si-main">
             <div class="si-name">${esc(s.name)}</div>
             <div class="si-meta"><span class="chip-price">${u.fmtPrice(s.price)}</span><span class="pill">⏱ ${u.fmtDuration(s.durationMin)}</span></div>
@@ -2830,7 +2830,7 @@
       return `
         <div class="section-title">✂️ השירותים שאתה מציע</div>
         ${st.services.length ? `<div class="card set-list">${st.services.map((s) => setRow({
-          nav: `data-act="edit-svc" data-id="${s.id}"`, ico: esc(s.icon || "✂️"), color: "#0ea5e9",
+          nav: `data-act="edit-svc" data-id="${s.id}"`, ico: esc(s.icon != null ? s.icon : "✂️"), color: "#0ea5e9",
           label: s.name, sub: u.fmtDuration(s.durationMin), val: u.fmtPrice(s.price),
         })).join("")}</div>` : emptyState("✂️", "אין שירותים", "הוסיפו את השירות הראשון")}
         <div style="height:14px"></div>
@@ -2923,33 +2923,41 @@
 
   function svcModal(existing) {
     const s = existing || { name: "", price: "", durationMin: 30, icon: "✂️" };
-    const icons = ["✂️", "🧔", "💈", "🪒", "👦", "💇‍♂️", "💇‍♀️", "✨"];
+    // v = הערך שנשמר, g = מה שמוצג בכפתור. "ללא" שומר מחרוזת ריקה (בלי אייקון).
+    const iconOpts = [
+      { v: "", g: "ללא", txt: true },
+      { v: "✂️", g: "✂️" }, { v: "🧔", g: "🧔" }, { v: "💈", g: "💈" }, { v: "🪒", g: "🪒" },
+      { v: "👦", g: "👦" }, { v: "💇‍♂️", g: "💇‍♂️" }, { v: "💇‍♀️", g: "💇‍♀️" }, { v: "✨", g: "✨" },
+      { v: "🎨", g: "🎨" }, { v: "💨", g: "💨" }, { v: "🔥", g: "🔥" }, { v: "💆‍♀️", g: "💆‍♀️" },
+      { v: "💅", g: "💅" }, { v: "🌀", g: "🌀" },
+    ];
+    const icBtnStyle = (txt, sel) => `width:46px;font-size:${txt ? "12px" : "20px"};${sel ? "border-color:var(--sky);box-shadow:0 0 0 2px var(--sky-glow)" : ""}`;
     openModal(`
       <div class="m-title">${existing ? "עריכת שירות" : "שירות חדש"}</div>
       <div class="m-sub">הפרטים יופיעו אצל הלקוחות</div>
       <div class="field"><label>סוג התספורת / השירות</label>
-        <input class="input" id="sv-name" placeholder="לדוגמה: תספורת גבר" value="${esc(s.name)}"></div>
+        <input class="input" id="sv-name" placeholder="לדוגמה: תספורת גבר, צביעת שיער, פן" value="${esc(s.name)}"></div>
       <div class="field-row">
         <div class="field"><label>מחיר (₪)</label>
           <input class="input" id="sv-price" type="number" inputmode="numeric" min="0" placeholder="60" value="${esc(s.price)}"></div>
         <div class="field"><label>משך (דקות)</label>
           <input class="input" id="sv-dur" type="number" inputmode="numeric" min="5" step="5" placeholder="30" value="${esc(s.durationMin)}"></div>
       </div>
-      <div class="field"><label>אייקון</label>
+      <div class="field"><label>אייקון <span class="opt">(לא חובה)</span></label>
         <div style="display:flex;gap:8px;flex-wrap:wrap" id="sv-icons">
-          ${icons.map((ic) => `<button class="btn btn-sm" data-ic="${ic}" style="width:46px;font-size:20px;${ic === s.icon ? "border-color:var(--sky);box-shadow:0 0 0 2px var(--sky-glow)" : ""}">${ic}</button>`).join("")}
+          ${iconOpts.map((o) => `<button class="btn btn-sm" data-ic="${o.v}" style="${icBtnStyle(o.txt, o.v === (s.icon || ""))}">${o.g}</button>`).join("")}
         </div>
       </div>
       <button class="btn btn-primary" data-act="save-svc" data-id="${existing ? existing.id : ""}">שמירה</button>
       ${existing ? `<button class="btn btn-danger" data-act="del-svc" data-id="${existing.id}" style="margin-top:8px">מחיקת שירות</button>` : `<button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>`}
     `);
     // בחירת אייקון
-    let chosen = s.icon;
+    let chosen = s.icon || "";
     $("#sv-icons").addEventListener("click", (e) => {
       const b = e.target.closest("[data-ic]"); if (!b) return;
       chosen = b.dataset.ic;
-      [...$("#sv-icons").children].forEach((c) => (c.style.cssText = "width:46px;font-size:20px;"));
-      b.style.cssText = "width:46px;font-size:20px;border-color:var(--sky);box-shadow:0 0 0 2px var(--sky-glow)";
+      [...$("#sv-icons").children].forEach((c) => (c.style.cssText = icBtnStyle(c.dataset.ic === "", false)));
+      b.style.cssText = icBtnStyle(b.dataset.ic === "", true);
     });
     $("#modal").__icon = () => chosen;
   }
@@ -4648,7 +4656,6 @@
   const WIZ_SOURCES = [
     { id: "friend", label: "שמעתי מחבר" },
     { id: "social", label: "ראיתי אתכם ברשתות החברתיות", sub: "אינסטגרם, פייסבוק או טיקטוק" },
-    { id: "store", label: "ראיתי אתכם בחנות האפליקציות", sub: "App Store, Google Play" },
     { id: "google", label: "חיפוש בגוגל" },
     { id: "other", label: "אחר" },
   ];
@@ -5938,7 +5945,7 @@
     const name = $("#sv-name").value.trim();
     const price = Number($("#sv-price").value);
     const durationMin = Number($("#sv-dur").value);
-    const icon = $("#modal").__icon ? $("#modal").__icon() : "✂️";
+    const icon = ($("#modal").__icon && $("#modal").__icon()) || "";   // "" = ללא אייקון
     if (!name) { toast("נא להזין שם שירות", "", "✋"); return; }
     if (!(price >= 0) || !(durationMin >= 5)) { toast("בדקו מחיר ומשך", "", "✋"); return; }
     await Store.upsertService({ id: id || undefined, name, price, durationMin, icon });
