@@ -261,6 +261,7 @@ I18N: dict[str, dict[str, str]] = {
         "sidebar.nav_queue": "📋 Risk Operations Queue",
         "sidebar.nav_customer360": "🔎 Customer 360 & Decision Center",
         "sidebar.nav_simulator": "🧪 Event Simulator & Sandbox",
+        "sidebar.nav_rulebuilder": "⚙️ Rule Builder & Policy Engine",
         "sidebar.footer": "Scores, explanations and re-scoring all come from the live FastAPI service over "
                           "its public endpoints — no model or policy logic is duplicated here. Case status, "
                           "SLA and review notes are this session's workflow state only: nothing here is "
@@ -365,6 +366,7 @@ I18N: dict[str, dict[str, str]] = {
         "col.customer_id": "Customer ID",
         "col.band": "Band",
         "col.score": "Score",
+        "col.custom_rules": "Custom rules",
         "col.segment": "Segment",
         "col.country": "Country",
         "col.credit_risk": "Credit risk",
@@ -543,6 +545,68 @@ I18N: dict[str, dict[str, str]] = {
                                  "decisions are preserved.",
         "sim.add_to_queue": "➕ Add this result to the Operations Queue",
         "sim.added_to_queue": "{id} added to the queue.",
+
+        "rulebuilder.title": "Rule Builder & Dynamic Policy Engine",
+        "rulebuilder.caption": "Add custom risk rules without touching code, built entirely from dropdowns. "
+                               "Like the rest of the Operations Queue, this is session-local workflow state "
+                               "layered on top of the API's own score — it is applied live to every customer "
+                               "already in the queue, not just new ones, and can only ADD to a customer's "
+                               "risk reading, never soften it. The model's own score is always shown "
+                               "alongside the adjustment, never overwritten by it.",
+        "rulebuilder.active_rules_header": "Active rules ({n})",
+        "rulebuilder.no_rules": "No custom rules yet. Build one below — it applies live to every customer "
+                                "already in the queue, not just new ones.",
+        "rulebuilder.enabled_label": "Enabled",
+        "rulebuilder.delete_rule": "🗑️ Delete",
+        "rulebuilder.rule_deleted": "Deleted rule: {name}.",
+        "rulebuilder.matches_count": "Matches {n} of {total} customers in the queue right now",
+        "rulebuilder.new_rule_header": "➕ New rule",
+        "rulebuilder.name_label": "Rule name",
+        "rulebuilder.name_placeholder": "e.g. Private banking + Cyprus exposure",
+        "rulebuilder.conditions_label": "When…",
+        "rulebuilder.condition_field": "Field",
+        "rulebuilder.condition_operator": "Operator",
+        "rulebuilder.condition_value": "Value",
+        "rulebuilder.remove_condition": "Remove this condition",
+        "rulebuilder.add_condition": "+ Add condition",
+        "rulebuilder.no_conditions_yet": "Add at least one condition below.",
+        "rulebuilder.combine_label": "Combine conditions with",
+        "rulebuilder.combine_and": "AND — all conditions must match",
+        "rulebuilder.combine_or": "OR — any condition matches",
+        "rulebuilder.action_label": "Then…",
+        "rulebuilder.action_type_label": "Action",
+        "rulebuilder.action_add_points": "➕ Add risk score points",
+        "rulebuilder.action_force_band": "⬆️ Force minimum band",
+        "rulebuilder.points_label": "Points to add",
+        "rulebuilder.points_help": "Added to the customer's composite risk score (capped at 100). Only "
+                                   "non-negative values are offered — a custom rule can raise risk, never "
+                                   "lower it.",
+        "rulebuilder.band_label": "Minimum band",
+        "rulebuilder.band_help": "Acts as a floor: if the customer's own reading already implies a more "
+                                 "severe band, that more severe band wins. This rule can only raise the "
+                                 "band, never lower it.",
+        "rulebuilder.action_summary_points": "+{points:.0f} pts",
+        "rulebuilder.action_summary_band": "Force ≥ {band}",
+        "rulebuilder.preview_label": "This rule would currently match {n} of {total} customers in the queue.",
+        "rulebuilder.add_rule_button": "Add rule",
+        "rulebuilder.rule_added": "Rule added: {name}.",
+        "rulebuilder.safety_note": "By design, a custom rule can only add points or raise a customer's "
+                                   "floor band — never lower either. This mirrors the same raise-only "
+                                   "guarantee enforced by the underlying policy engine (src/crr/rules).",
+        "rulebuilder.field_risk_band": "Model risk band (current)",
+        "rulebuilder.field_risk_score": "Composite risk score (current)",
+        "rulebuilder.op_eq": "is equal to",
+        "rulebuilder.op_neq": "is not equal to",
+        "rulebuilder.op_gt": "is greater than",
+        "rulebuilder.op_gte": "is at least",
+        "rulebuilder.op_lt": "is less than",
+        "rulebuilder.op_lte": "is at most",
+        "rulebuilder.op_in": "is one of",
+        "rulebuilder.c360_header": "Custom rule overlay",
+        "rulebuilder.c360_none": "No custom rule fired for this customer — the score and band above are "
+                                 "the API's own, unadjusted.",
+        "rulebuilder.c360_summary": "{n} custom rule(s) fired → +{points:.0f} pts · effective score "
+                                    "{score:.1f} · effective band {band}.",
     },
     "he": {
         "sidebar.title": "דירוג סיכון לקוחות",
@@ -558,6 +622,7 @@ I18N: dict[str, dict[str, str]] = {
         "sidebar.nav_queue": "📋 תור פעולות סיכון",
         "sidebar.nav_customer360": "🔎 תמונת לקוח 360 ומרכז החלטות",
         "sidebar.nav_simulator": "🧪 סימולטור אירועים וארגז חול",
+        "sidebar.nav_rulebuilder": "⚙️ בונה כללים ומנוע מדיניות",
         "sidebar.footer": "כל הציונים, ההסברים והניקוד מחדש מגיעים משירות ה-FastAPI החי דרך נקודות "
                           "הקצה הציבוריות שלו — אין כאן שכפול של לוגיקת מודל או מדיניות. סטטוס התיק, "
                           "ה-SLA והערות הסקירה הם מצב עבודה של הסשן הנוכחי בלבד: דבר מכאן אינו נכתב "
@@ -660,6 +725,7 @@ I18N: dict[str, dict[str, str]] = {
         "col.customer_id": "מזהה לקוח",
         "col.band": "רמה",
         "col.score": "ציון",
+        "col.custom_rules": "כללים מותאמים",
         "col.segment": "מגזר",
         "col.country": "מדינה",
         "col.credit_risk": "סיכון אשראי",
@@ -829,6 +895,65 @@ I18N: dict[str, dict[str, str]] = {
                                  "בתוצאת ארגז החול הזו. סטטוס התיק וההחלטות הקודמות שלו נשמרים.",
         "sim.add_to_queue": "➕ הוסף תוצאה זו לתור הפעולות",
         "sim.added_to_queue": "{id} נוסף לתור.",
+
+        "rulebuilder.title": "בונה כללים ומנוע מדיניות דינמי",
+        "rulebuilder.caption": "הוסיפו כללי סיכון מותאמים אישית בלי לגעת בקוד — בנויים כולם מתפריטים "
+                               "נפתחים. כמו שאר תור הפעולות, זהו מצב עבודה מקומי לסשן זה, הנשכב מעל הציון "
+                               "של ה-API עצמו — הוא מופעל באופן חי על כל לקוח שכבר נמצא בתור, לא רק על "
+                               "חדשים, ויכול רק להוסיף לקריאת הסיכון של לקוח, לעולם לא לרכך אותה. הציון "
+                               "המקורי של המודל תמיד מוצג לצד ההתאמה, ולעולם אינו נדרס על ידה.",
+        "rulebuilder.active_rules_header": "כללים פעילים ({n})",
+        "rulebuilder.no_rules": "עדיין אין כללים מותאמים. בנו אחד למטה — הוא יופעל באופן חי על כל לקוח "
+                                "שכבר נמצא בתור, לא רק על חדשים.",
+        "rulebuilder.enabled_label": "פעיל",
+        "rulebuilder.delete_rule": "🗑️ מחק",
+        "rulebuilder.rule_deleted": "הכלל נמחק: {name}.",
+        "rulebuilder.matches_count": "תואם כרגע {n} מתוך {total} לקוחות בתור",
+        "rulebuilder.new_rule_header": "➕ כלל חדש",
+        "rulebuilder.name_label": "שם הכלל",
+        "rulebuilder.name_placeholder": "לדוגמה: בנקאות פרטית + חשיפה לקפריסין",
+        "rulebuilder.conditions_label": "כאשר…",
+        "rulebuilder.condition_field": "שדה",
+        "rulebuilder.condition_operator": "אופרטור",
+        "rulebuilder.condition_value": "ערך",
+        "rulebuilder.remove_condition": "הסר תנאי זה",
+        "rulebuilder.add_condition": "+ הוסף תנאי",
+        "rulebuilder.no_conditions_yet": "הוסיפו לפחות תנאי אחד למטה.",
+        "rulebuilder.combine_label": "שילוב התנאים באמצעות",
+        "rulebuilder.combine_and": "AND — כל התנאים חייבים להתקיים",
+        "rulebuilder.combine_or": "OR — מספיק שתנאי אחד יתקיים",
+        "rulebuilder.action_label": "אז…",
+        "rulebuilder.action_type_label": "פעולה",
+        "rulebuilder.action_add_points": "➕ הוסף נקודות לציון הסיכון",
+        "rulebuilder.action_force_band": "⬆️ קבע רמה מינימלית",
+        "rulebuilder.points_label": "נקודות להוספה",
+        "rulebuilder.points_help": "מתווסף לציון הסיכון המצרפי של הלקוח (מוגבל ל-100). מוצעים כאן רק ערכים "
+                                   "לא-שליליים — כלל מותאם יכול להעלות סיכון, לעולם לא להוריד אותו.",
+        "rulebuilder.band_label": "רמה מינימלית",
+        "rulebuilder.band_help": "פועל כרצפה: אם הקריאה של הלקוח עצמה כבר מרמזת על רמה חמורה יותר, הרמה "
+                                 "החמורה יותר גוברת. כלל זה יכול רק להעלות את הרמה, לעולם לא להוריד אותה.",
+        "rulebuilder.action_summary_points": "+{points:.0f} נק'",
+        "rulebuilder.action_summary_band": "קבע ≥ {band}",
+        "rulebuilder.preview_label": "כלל זה יתאים כרגע ל-{n} מתוך {total} לקוחות בתור.",
+        "rulebuilder.add_rule_button": "הוסף כלל",
+        "rulebuilder.rule_added": "הכלל נוסף: {name}.",
+        "rulebuilder.safety_note": "מבחינה עיצובית, כלל מותאם יכול רק להוסיף נקודות או להעלות את רמת "
+                                   "הרצפה של לקוח — לעולם לא להוריד אף אחת מהן. זה משקף את אותה ערבות "
+                                   "העלאה-בלבד שנאכפת על ידי מנוע המדיניות הבסיסי (src/crr/rules).",
+        "rulebuilder.field_risk_band": "רמת סיכון המודל (נוכחית)",
+        "rulebuilder.field_risk_score": "ציון סיכון מצרפי (נוכחי)",
+        "rulebuilder.op_eq": "שווה ל-",
+        "rulebuilder.op_neq": "שונה מ-",
+        "rulebuilder.op_gt": "גדול מ-",
+        "rulebuilder.op_gte": "גדול או שווה ל-",
+        "rulebuilder.op_lt": "קטן מ-",
+        "rulebuilder.op_lte": "קטן או שווה ל-",
+        "rulebuilder.op_in": "הוא אחד מ-",
+        "rulebuilder.c360_header": "שכבת כללים מותאמים",
+        "rulebuilder.c360_none": "לא הופעל אף כלל מותאם עבור לקוח זה — הציון והרמה למעלה הם אלה של ה-API "
+                                 "עצמו, ללא התאמה.",
+        "rulebuilder.c360_summary": "{n} כלל/ים מותאמים הופעלו → +{points:.0f} נק' · ציון אפקטיבי "
+                                    "{score:.1f} · רמה אפקטיבית {band}.",
     },
 }
 
@@ -940,6 +1065,101 @@ def vocab_label(category: str, value: str) -> str:
     if st.session_state.get("language", "he") == "he":
         return VOCAB.get(category, {}).get(value, _humanize(value))
     return _humanize(value)
+
+
+# --------------------------------------------------------------------------
+# Rule Builder — field taxonomy. A curated subset of CustomerPayload
+# (crr.api.schemas) plus the two live scoring fields, picked to match the
+# categories config/risk_policy.yaml's own example rules draw from rather
+# than exposing all ~65 payload fields. Each entry is
+# (payload/result key, field.* or rulebuilder.field_* i18n key, kind); kind
+# drives both the operator set offered and which value widget is shown —
+# there is no free-text expression box anywhere in the builder, so nothing
+# a risk manager enters here is ever eval()'d.
+# --------------------------------------------------------------------------
+RULE_FIELDS: list[tuple[str, str, str]] = [
+    ("segment", "field.segment", "categorical"),
+    ("country_of_residence", "field.country", "categorical"),
+    ("occupation", "field.occupation", "categorical"),
+    ("employment_status", "field.employment", "categorical"),
+    ("residency_status", "field.residency", "categorical"),
+    ("source_of_funds_declared", "field.source_of_funds", "categorical"),
+    ("age", "field.age", "numeric"),
+    ("account_age_months", "field.account_age_months", "numeric"),
+    ("num_products_held", "field.products_held", "numeric"),
+    ("declared_annual_income", "field.declared_income", "numeric"),
+    ("credit_utilization_ratio", "field.credit_utilization", "numeric"),
+    ("dti_ratio", "field.dti", "numeric"),
+    ("bureau_score", "field.bureau_score", "numeric"),
+    ("max_days_past_due_24m", "field.max_days_past_due", "numeric"),
+    ("kyc_refresh_overdue_days", "field.kyc_refresh_overdue", "numeric"),
+    ("cash_intensity_ratio", "field.cash_intensity", "numeric"),
+    ("cross_border_txn_ratio", "field.cross_border", "numeric"),
+    ("structuring_score", "field.structuring_score", "numeric"),
+    ("crypto_exposure_ratio_90d", "field.crypto_exposure", "numeric"),
+    ("adverse_media_hits_12m", "field.adverse_media", "numeric"),
+    ("sanctions_screen_hits", "field.sanctions_hits", "numeric"),
+    ("offshore_entity_links", "field.offshore_links", "numeric"),
+    ("pep_flag", "field.pep", "flag"),
+    ("high_risk_jurisdiction_exposure", "field.high_risk_jurisdiction", "flag"),
+    ("medium_risk_jurisdiction_exposure", "field.medium_risk_jurisdiction", "flag"),
+    ("source_of_funds_verified", "field.source_verified", "flag"),
+    ("prior_default_flag", "field.prior_default", "flag"),
+    ("sar_filed_prior", "field.prior_sar", "flag"),
+    ("edd_required", "field.edd_required", "flag"),
+    ("risk_band", "rulebuilder.field_risk_band", "band"),
+    ("risk_score", "rulebuilder.field_risk_score", "numeric"),
+]
+_RULE_FIELD_KIND: dict[str, str] = {key: kind for key, _, kind in RULE_FIELDS}
+_RULE_FIELD_I18N: dict[str, str] = {key: label_key for key, label_key, _ in RULE_FIELDS}
+# Only categorical fields with a hand-written VOCAB table need one here;
+# country_of_residence and risk_score/risk_band are handled separately below.
+_RULE_FIELD_VOCAB: dict[str, str] = {
+    "segment": "segment", "occupation": "occupation", "employment_status": "employment_status",
+    "residency_status": "residency_status", "source_of_funds_declared": "source_of_funds",
+}
+_RULE_FIELD_OPTIONS: dict[str, tuple] = {
+    "segment": SEGMENTS, "country_of_residence": COUNTRIES, "occupation": OCCUPATIONS,
+    "employment_status": EMPLOYMENT_STATUSES, "residency_status": RESIDENCY_STATUSES,
+    "source_of_funds_declared": SOURCE_OF_FUNDS,
+}
+_RULE_OPERATORS: dict[str, tuple[str, ...]] = {
+    "categorical": ("==", "!=", "in"),
+    "band": ("==", "!=", "in"),
+    "flag": ("==", "!="),
+    "numeric": (">", ">=", "<", "<=", "==", "!="),
+}
+_OP_LABEL_KEY: dict[str, str] = {
+    "==": "rulebuilder.op_eq", "!=": "rulebuilder.op_neq", ">": "rulebuilder.op_gt",
+    ">=": "rulebuilder.op_gte", "<": "rulebuilder.op_lt", "<=": "rulebuilder.op_lte", "in": "rulebuilder.op_in",
+}
+_RULE_NUMERIC_STEP: dict[str, float] = {
+    "declared_annual_income": 1000.0, "credit_utilization_ratio": 0.01, "dti_ratio": 0.01,
+    "cash_intensity_ratio": 0.01, "cross_border_txn_ratio": 0.01, "structuring_score": 0.01,
+    "crypto_exposure_ratio_90d": 0.01,
+}
+
+
+def _rule_field_options(field_key: str) -> list | None:
+    kind = _RULE_FIELD_KIND[field_key]
+    if kind == "band":
+        return list(BAND_ORDER)
+    if kind == "flag":
+        return [0, 1]
+    options = _RULE_FIELD_OPTIONS.get(field_key)
+    return list(options) if options else None
+
+
+def _rule_value_format(field_key: str):
+    kind = _RULE_FIELD_KIND[field_key]
+    if kind == "band":
+        return band_label
+    if kind == "flag":
+        return yes_no_label
+    vocab_cat = _RULE_FIELD_VOCAB.get(field_key)
+    if vocab_cat:
+        return lambda v: vocab_label(vocab_cat, v)
+    return str
 
 
 # --------------------------------------------------------------------------
@@ -1450,11 +1670,17 @@ def record_event(customer_id: str, event: dict[str, Any], outcome: dict[str, Any
         entry["result"] = outcome["result"]
 
 
-def compute_kpis(queue: dict[str, dict[str, Any]]) -> dict[str, int]:
+def compute_kpis(queue: dict[str, dict[str, Any]], rules: list[dict[str, Any]] = ()) -> dict[str, int]:
+    """``rules`` defaults to empty so this is a strict no-op — identical
+    output to before the Rule Builder existed — for any caller that doesn't
+    pass one. When rules ARE passed, the high-risk and SLA counts are read
+    off the live custom-rule-adjusted band (apply_custom_rules below), not
+    the API's own band: a rule that escalates a customer is meant to show up
+    here immediately, the same way a real trigger would."""
     now = dt.datetime.now(dt.UTC)
     high_risk_pending = sla_breaches = escalated = 0
     for entry in queue.values():
-        band = entry["result"]["risk_band"]
+        band = apply_custom_rules(entry, rules)["band"]
         status = entry["status"]
         if status == "pending_review" and band in ("High", "Extreme"):
             high_risk_pending += 1
@@ -1470,7 +1696,16 @@ def compute_kpis(queue: dict[str, dict[str, Any]]) -> dict[str, int]:
 
 def queue_dataframe(
     queue: dict[str, dict[str, Any]], search: str, bands: list[str], statuses: list[str],
+    rules: list[dict[str, Any]] = (),
 ) -> pd.DataFrame:
+    """Filters (band/status/search) still read the API's own unadjusted band —
+    what the customer's model reading actually is — but the queue is SORTED
+    by the live custom-rule-adjusted band/score (a rule that escalates a
+    customer should visibly move them up the triage order), and a new
+    "Custom rules" column surfaces the audit-trail badge described in the
+    module docstring: which rule(s) fired and where they pushed this
+    customer, without ever touching the original ``col.band``/``col.score``
+    values next to it."""
     now = dt.datetime.now(dt.UTC)
     rows = []
     for entry in queue.values():
@@ -1487,13 +1722,15 @@ def queue_dataframe(
         ]).lower()
         if search and search.lower() not in haystack:
             continue
+        overlay = apply_custom_rules(entry, rules)
         scored_at = _parse_dt(result["scored_at"])
-        due = scored_at + dt.timedelta(hours=SLA_HOURS.get(band, 72))
+        due = scored_at + dt.timedelta(hours=SLA_HOURS.get(overlay["band"], 72))
         breached = status == "pending_review" and now > due
         rows.append({
             t("col.customer_id"): entry["customer_id"],
             t("col.band"): f"{BAND_DOT.get(band, '⚪')} {band_label(band)}",
             t("col.score"): round(result["risk_score"], 1),
+            t("col.custom_rules"): rule_badge_text(overlay),
             t("col.segment"): vocab_label("segment", entry["profile"]["segment"])
                               if entry["profile"].get("segment") else "—",
             t("col.country"): entry["profile"].get("country_of_residence", "—"),
@@ -1502,13 +1739,192 @@ def queue_dataframe(
             t("col.status"): status_label(status),
             t("col.sla"): t("col.breached") if breached else due.strftime("%Y-%m-%d %H:%M UTC"),
             t("col.scored"): scored_at.strftime("%Y-%m-%d %H:%M UTC"),
-            "_band_rank": BAND_RANK.get(band, 9),
+            "_band_rank": BAND_RANK.get(overlay["band"], 9),
+            "_effective_score": overlay["score"],
             "_customer_id": entry["customer_id"],
         })
     frame = pd.DataFrame(rows)
     if frame.empty:
         return frame
-    return frame.sort_values(["_band_rank", t("col.score")], ascending=[True, False], ignore_index=True)
+    return frame.sort_values(["_band_rank", "_effective_score"], ascending=[True, False], ignore_index=True)
+
+
+# --------------------------------------------------------------------------
+# Rule Builder engine — the Visual Rule Builder & Dynamic Policy Engine's
+# evaluation core. Session-local, same workflow-layer convention as the
+# Operations Queue above (see module docstring): st.session_state.custom_rules
+# is a list of rule dicts built entirely by the UI in page_rulebuilder()
+# below, never by parsing user-typed text, so nothing in this module ever
+# calls eval() on anything a risk manager enters. Every rule is evaluated
+# fresh on every rerun against the field values already sitting in
+# entry["profile"]/entry["result"] — never against another rule's output —
+# so an overlay is always a pure function of (current rule set, ORIGINAL API
+# result). It is computed here and only here; nothing below ever assigns
+# into entry["result"].
+#
+# The one property this section exists to guarantee, mirroring
+# src/crr/rules/engine.py's own structurally-enforced contract: a custom
+# rule can only ADD points or RAISE the effective band floor. There is no
+# "subtract points" action and no "lower band" verb anywhere in the schema
+# below — the UI simply never offers one — so this tool cannot be used to
+# quietly soften a model's read on a customer.
+# --------------------------------------------------------------------------
+
+
+def _resolve_field_value(field_key: str, profile: dict[str, Any], result: dict[str, Any]) -> Any:
+    if field_key == "risk_score":
+        return result.get("risk_score")
+    if field_key == "risk_band":
+        return result.get("risk_band")
+    return profile.get(field_key)
+
+
+def _condition_matches(cond: dict[str, Any], profile: dict[str, Any], result: dict[str, Any]) -> bool:
+    """The only place a stored condition is interpreted. ``cond["value"]``
+    was produced by a selectbox/multiselect/number_input when the rule was
+    built, never by parsing free text, so there is no expression grammar to
+    defend here. A missing field value evaluates to False for every
+    operator — mirroring how src/crr/rules/expressions.py treats a missing
+    comparison operand — rather than raising, so one incomplete profile can
+    never crash the whole queue's evaluation."""
+    actual = _resolve_field_value(cond["field"], profile, result)
+    if actual is None:
+        return False
+    op, target = cond["operator"], cond["value"]
+    try:
+        if op == "==":
+            return actual == target
+        if op == "!=":
+            return actual != target
+        if op == "in":
+            return actual in target
+        if op == ">":
+            return float(actual) > float(target)
+        if op == ">=":
+            return float(actual) >= float(target)
+        if op == "<":
+            return float(actual) < float(target)
+        if op == "<=":
+            return float(actual) <= float(target)
+    except (TypeError, ValueError):
+        return False
+    return False
+
+
+def _rule_matches(rule: dict[str, Any], profile: dict[str, Any], result: dict[str, Any]) -> bool:
+    conditions = rule.get("conditions") or []
+    if not conditions:
+        return False
+    outcomes = [_condition_matches(c, profile, result) for c in conditions]
+    return all(outcomes) if rule.get("combine", "AND") == "AND" else any(outcomes)
+
+
+def _band_for_score(score: float) -> str:
+    """Same BAND_CUTOFFS scale score_position_strip already draws — used
+    ONLY inside this raise-only overlay, never to second-guess the API's own
+    authoritative band (see BAND_CUTOFFS's own docstring above)."""
+    for band in BAND_ORDER:
+        if score <= BAND_CUTOFFS[band]:
+            return band
+    return "Extreme"
+
+
+def _max_band(a: str, b: str) -> str:
+    """Higher-severity of the two bands — the same raise-only combinator
+    src/crr/rules/engine.py's own ``_max_band`` implements, reproduced here
+    because this module borrows nothing from the API's process."""
+    return a if BAND_RANK.get(a, 9) <= BAND_RANK.get(b, 9) else b
+
+
+def apply_custom_rules(entry: dict[str, Any], rules: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compute the live custom-rule overlay for one queue entry from the
+    CURRENT rule set. Raise-only by construction: ``points_added`` sums only
+    non-negative numbers (the builder never lets an "add points" rule take a
+    negative value), and ``band`` is the max-severity of the model's own
+    band, every fired rule's floor, and the band the points-adjusted score
+    would occupy — so the result can only ever be a MORE severe read than
+    the API returned, never softer. Disabled rules are skipped. Never
+    mutates ``entry``."""
+    result = entry["result"]
+    profile = entry["profile"]
+    base_score = float(result["risk_score"])
+    base_band = result["risk_band"]
+    points_added = 0.0
+    band_floor = base_band
+    fired: list[dict[str, Any]] = []
+    for rule in rules:
+        if not rule.get("enabled", True):
+            continue
+        if _rule_matches(rule, profile, result):
+            fired.append(rule)
+            if rule["action_type"] == "add_points":
+                points_added += max(0.0, float(rule.get("action_points") or 0.0))
+            else:
+                band_floor = _max_band(band_floor, rule.get("action_band", base_band))
+    effective_score = min(100.0, base_score + points_added)
+    effective_band = _max_band(band_floor, _band_for_score(effective_score))
+    return {
+        "score": effective_score, "band": effective_band,
+        "base_score": base_score, "base_band": base_band,
+        "points_added": points_added, "fired_rules": fired,
+        "adjusted": bool(fired),
+    }
+
+
+def rule_badge_text(overlay: dict[str, Any]) -> str:
+    """The Operations Queue table's compact audit-trail badge — full detail
+    (rule names, conditions, actions) lives in Customer 360's overlay
+    section (render_rule_overlay), reached by opening that customer."""
+    if not overlay["adjusted"]:
+        return "—"
+    dot = BAND_DOT.get(overlay["band"], "⚪")
+    return f'🏷️ {len(overlay["fired_rules"])} · {dot} {band_label(overlay["band"])}'
+
+
+def rule_conditions_text(rule: dict[str, Any]) -> str:
+    combine_key = f"rulebuilder.combine_{rule.get('combine', 'AND').lower()}"
+    joiner = f" {t(combine_key).split(' — ')[0]} "  # "AND"/"OR" without the trailing explainer
+    parts = []
+    for cond in rule.get("conditions", []):
+        field_key = cond["field"]
+        label = t(_RULE_FIELD_I18N[field_key])
+        op_label = t(_OP_LABEL_KEY[cond["operator"]])
+        fmt = _rule_value_format(field_key)
+        value = cond["value"]
+        value_text = ", ".join(fmt(v) for v in value) if isinstance(value, list) else fmt(value)
+        parts.append(f"{label} {op_label} {value_text}")
+    return joiner.join(parts)
+
+
+def rule_action_text(rule: dict[str, Any]) -> str:
+    if rule["action_type"] == "add_points":
+        return t("rulebuilder.action_summary_points", points=rule["action_points"])
+    return t("rulebuilder.action_summary_band", band=band_label(rule["action_band"]))
+
+
+def render_rule_overlay(entry: dict[str, Any], rules: list[dict[str, Any]]) -> None:
+    """Customer 360's audit trail for the Rule Builder: exactly which custom
+    rule(s) fired for THIS customer and what each one did, computed live —
+    not read back from anywhere, since nothing here is ever persisted.
+    Deliberately not appended to entry["timeline"]: the timeline is a record
+    of things that actually happened (a score, a pushed event, a recorded
+    decision), and this overlay is a live present-tense reading that can
+    change the moment a rule is toggled or edited, which would make a
+    timeline entry for it retroactively inaccurate."""
+    overlay = apply_custom_rules(entry, rules)
+    if not overlay["adjusted"]:
+        st.caption(t("rulebuilder.c360_none"))
+        return
+    st.warning(t("rulebuilder.c360_summary", n=len(overlay["fired_rules"]), points=overlay["points_added"],
+                  score=overlay["score"], band=band_label(overlay["band"])))
+    for rule in overlay["fired_rules"]:
+        st.markdown(
+            f'<div style="padding:6px 0;border-bottom:1px solid {HAIRLINE};">'
+            f'<span style="font-weight:600;font-family:{FONT_STACK};">🏷️ {html.escape(rule["name"])}</span><br>'
+            f'<span style="color:{INK_SECONDARY};font-size:0.85rem;font-family:{FONT_STACK};">'
+            f'{rule_conditions_text(rule)} → {rule_action_text(rule)}</span></div>',
+            unsafe_allow_html=True,
+        )
 
 
 # --------------------------------------------------------------------------
@@ -1532,7 +1948,7 @@ def page_queue() -> None:
                 st.error(t("queue.load_fail", detail=errors[0] if errors else ""))
         return
 
-    kpis = compute_kpis(st.session_state.queue)
+    kpis = compute_kpis(st.session_state.queue, st.session_state.custom_rules)
     k1, k2, k3, k4 = st.columns(4)
     k1.metric(t("queue.kpi_total"), kpis["total"])
     k2.metric(t("queue.kpi_high_risk"), kpis["high_risk_pending"])
@@ -1555,12 +1971,12 @@ def page_queue() -> None:
             seed_queue()
         st.rerun()
 
-    frame = queue_dataframe(st.session_state.queue, search, bands, statuses)
+    frame = queue_dataframe(st.session_state.queue, search, bands, statuses, st.session_state.custom_rules)
     if frame.empty:
         st.caption(t("queue.no_match"))
     else:
-        display_cols = [t(k) for k in ("col.customer_id", "col.band", "col.score", "col.segment",
-                                        "col.country", "col.credit_risk", "col.crime_risk", "col.status",
+        display_cols = [t(k) for k in ("col.customer_id", "col.band", "col.score", "col.custom_rules",
+                                        "col.segment", "col.country", "col.credit_risk", "col.crime_risk", "col.status",
                                         "col.sla", "col.scored")]
         event = st.dataframe(
             frame[display_cols], use_container_width=True, hide_index=True,
@@ -1742,6 +2158,9 @@ def page_customer360() -> None:
     st.divider()
 
     render_result_header(entry["result"])
+
+    st.markdown(f"##### {t('rulebuilder.c360_header')}")
+    render_rule_overlay(entry, st.session_state.custom_rules)
 
     st.divider()
     left, right = st.columns([3, 2], gap="large")
@@ -2084,6 +2503,173 @@ def page_simulator() -> None:
                 st.rerun()
 
 
+def render_rule_condition_row(row_id: int) -> dict[str, Any] | str | None:
+    """One condition row's widgets. Returns the condition dict once every
+    widget in the row has a value, the sentinel "remove" if its ✕ was just
+    clicked, or None while incomplete (e.g. an "is one of" multiselect with
+    nothing picked yet — the row is simply not counted as a condition until
+    it does). Every widget key folds in the row id plus the field/operator
+    currently selected (the same trick the onboarding preset selectbox above
+    uses to avoid a stale label after a language switch), so switching this
+    row from a numeric field to a categorical one can never hand a
+    number_input's leftover float to a selectbox expecting a string."""
+    field_keys = [key for key, _, _ in RULE_FIELDS]
+    c1, c2, c3, c4 = st.columns([2.3, 1.6, 2.3, 0.5])
+    field_key = c1.selectbox(
+        t("rulebuilder.condition_field"), field_keys, format_func=lambda k: t(_RULE_FIELD_I18N[k]),
+        key=f"rb_field_{row_id}",
+    )
+    operators = _RULE_OPERATORS[_RULE_FIELD_KIND[field_key]]
+    operator = c2.selectbox(
+        t("rulebuilder.condition_operator"), operators, format_func=lambda op: t(_OP_LABEL_KEY[op]),
+        key=f"rb_op_{row_id}_{field_key}",
+    )
+    options = _rule_field_options(field_key)
+    fmt = _rule_value_format(field_key)
+    value: Any
+    if options is not None and operator == "in":
+        value = c3.multiselect(t("rulebuilder.condition_value"), options, format_func=fmt,
+                                key=f"rb_val_{row_id}_{field_key}_{operator}") or None
+    elif options is not None:
+        value = c3.selectbox(t("rulebuilder.condition_value"), options, format_func=fmt,
+                              key=f"rb_val_{row_id}_{field_key}_{operator}")
+    else:
+        value = c3.number_input(t("rulebuilder.condition_value"), value=0.0,
+                                 step=_RULE_NUMERIC_STEP.get(field_key, 1.0),
+                                 key=f"rb_val_{row_id}_{field_key}_{operator}")
+    if c4.button("✕", key=f"rb_remove_{row_id}", help=t("rulebuilder.remove_condition")):
+        return "remove"
+    if value is None:
+        return None
+    return {"field": field_key, "operator": operator, "value": value}
+
+
+def page_rulebuilder() -> None:
+    st.title(t("rulebuilder.title"))
+    st.caption(t("rulebuilder.caption"))
+    show_flash("rulebuilder")
+
+    st.session_state.setdefault("custom_rules", [])
+    st.session_state.setdefault("rule_id_counter", 0)
+    st.session_state.setdefault("rb_draft_rows", [0])
+    st.session_state.setdefault("rb_next_row_id", 1)
+    st.session_state.setdefault("rb_form_gen", 0)
+    rules = st.session_state.custom_rules
+    queue = st.session_state.queue
+
+    st.markdown(f"#### {t('rulebuilder.active_rules_header', n=len(rules))}")
+    if not rules:
+        st.info(t("rulebuilder.no_rules"))
+    else:
+        for rule in rules:
+            match_count = sum(
+                1 for entry in queue.values() if _rule_matches(rule, entry["profile"], entry["result"])
+            )
+            with st.container(border=True):
+                top_l, top_c, top_r = st.columns([4, 1.2, 1])
+                top_l.markdown(f"**{html.escape(rule['name'])}**")
+                new_enabled = top_c.checkbox(t("rulebuilder.enabled_label"), value=rule["enabled"],
+                                              key=f"rb_enabled_{rule['id']}")
+                if new_enabled != rule["enabled"]:
+                    rule["enabled"] = new_enabled
+                    st.rerun()
+                if top_r.button(t("rulebuilder.delete_rule"), key=f"rb_delete_{rule['id']}",
+                                 use_container_width=True):
+                    st.session_state.custom_rules = [r for r in rules if r["id"] != rule["id"]]
+                    flash_success("rulebuilder", t("rulebuilder.rule_deleted", name=rule["name"]))
+                    st.rerun()
+                st.caption(f"{rule_conditions_text(rule)}  →  {rule_action_text(rule)}")
+                st.caption(t("rulebuilder.matches_count", n=match_count, total=len(queue)))
+
+    st.divider()
+    # key= makes this a real stateful widget: expanded= only seeds the
+    # initial (pre-interaction) state, and the user's own toggle then wins
+    # on every later rerun. Without a key, expanded=not rules is
+    # re-evaluated fresh on every rerun and — since it stays False for the
+    # whole rest of the session once a first rule exists — would snap the
+    # section shut again the instant any widget inside it is touched
+    # (observed directly while building a second rule).
+    with st.expander(t("rulebuilder.new_rule_header"), expanded=not rules, key="rb_expander"):
+        st.markdown(f"**{t('rulebuilder.conditions_label')}**")
+        rows_to_remove = []
+        draft_conditions = []
+        for row_id in st.session_state.rb_draft_rows:
+            outcome = render_rule_condition_row(row_id)
+            if outcome == "remove":
+                rows_to_remove.append(row_id)
+            elif outcome is not None:
+                draft_conditions.append(outcome)
+        if rows_to_remove:
+            st.session_state.rb_draft_rows = [r for r in st.session_state.rb_draft_rows if r not in rows_to_remove]
+            st.rerun()
+        if st.button(t("rulebuilder.add_condition"), key="rb_add_condition"):
+            st.session_state.rb_draft_rows.append(st.session_state.rb_next_row_id)
+            st.session_state.rb_next_row_id += 1
+            st.rerun()
+        if not st.session_state.rb_draft_rows:
+            st.caption(t("rulebuilder.no_conditions_yet"))
+
+        combine = "AND"
+        if len(st.session_state.rb_draft_rows) > 1:
+            combine = st.radio(t("rulebuilder.combine_label"), ["AND", "OR"], horizontal=True,
+                                format_func=lambda m: t(f"rulebuilder.combine_{m.lower()}"), key="rb_combine")
+
+        st.markdown(f"**{t('rulebuilder.action_label')}**")
+        action_type = st.radio(t("rulebuilder.action_type_label"), ["add_points", "force_band"],
+                                format_func=lambda a: t(f"rulebuilder.action_{a}"), horizontal=True,
+                                key="rb_action_type")
+        if action_type == "add_points":
+            action_points: float | None = st.slider(t("rulebuilder.points_label"), 0, 50, 15, step=1,
+                                                      help=t("rulebuilder.points_help"), key="rb_action_points")
+            action_band = None
+        else:
+            action_band = st.selectbox(t("rulebuilder.band_label"), BAND_ORDER, index=BAND_ORDER.index("High"),
+                                        format_func=band_label, help=t("rulebuilder.band_help"),
+                                        key="rb_action_band")
+            action_points = None
+        st.caption(t("rulebuilder.safety_note"))
+
+        if draft_conditions:
+            preview_matches = sum(
+                1 for entry in queue.values()
+                if _rule_matches({"conditions": draft_conditions, "combine": combine, "enabled": True},
+                                  entry["profile"], entry["result"])
+            )
+            st.caption(t("rulebuilder.preview_label", n=preview_matches, total=len(queue)))
+
+        # Keyed on rb_form_gen rather than a bare "rb_name": deleting a
+        # widget's session_state entry is the documented way to reset it,
+        # but this text_input's underlying component does not pick that
+        # deletion up until the WIDGET ITSELF gets a new key (observed
+        # directly — a bare pop("rb_name") left the previous rule's name
+        # showing after submit). Bumping the generation counter below forces
+        # a genuinely fresh widget instance, the same trick already used for
+        # condition rows (row_id) and the language-suffixed preset pickers.
+        rule_name = st.text_input(t("rulebuilder.name_label"), placeholder=t("rulebuilder.name_placeholder"),
+                                   key=f"rb_name_{st.session_state.rb_form_gen}")
+        can_submit = bool(rule_name.strip()) and bool(draft_conditions)
+        if st.button(t("rulebuilder.add_rule_button"), type="primary", disabled=not can_submit, key="rb_submit"):
+            st.session_state.rule_id_counter += 1
+            new_rule = {
+                "id": f"CR-{st.session_state.rule_id_counter:03d}",
+                "name": rule_name.strip(),
+                "enabled": True,
+                "combine": combine,
+                "conditions": draft_conditions,
+                "action_type": action_type,
+                "action_points": float(action_points) if action_points is not None else None,
+                "action_band": action_band,
+                "created_at": dt.datetime.now(dt.UTC),
+                "created_by": st.session_state.get("reviewer_name", "Risk Analyst"),
+            }
+            st.session_state.custom_rules.append(new_rule)
+            st.session_state.rb_draft_rows = [st.session_state.rb_next_row_id]
+            st.session_state.rb_next_row_id += 1
+            st.session_state.rb_form_gen += 1
+            flash_success("rulebuilder", t("rulebuilder.rule_added", name=new_rule["name"]))
+            st.rerun()
+
+
 # --------------------------------------------------------------------------
 # App shell
 # --------------------------------------------------------------------------
@@ -2158,6 +2744,7 @@ st.session_state.setdefault("book_load_attempted", False)
 st.session_state.setdefault("book_seed", 42)
 st.session_state.setdefault("reviewer_name", "Risk Analyst")
 st.session_state.setdefault("language", "he")
+st.session_state.setdefault("custom_rules", [])
 
 with st.sidebar:
     st.selectbox(
@@ -2186,6 +2773,7 @@ with st.sidebar:
         ("queue", "sidebar.nav_queue"),
         ("customer360", "sidebar.nav_customer360"),
         ("simulator", "sidebar.nav_simulator"),
+        ("rulebuilder", "sidebar.nav_rulebuilder"),
     ):
         disabled = key == "customer360" and not st.session_state.get("selected_customer")
         if st.button(t(label_key), key=f"nav_{key}", use_container_width=True,
@@ -2253,5 +2841,7 @@ if st.session_state.nav == "customer360":
     page_customer360()
 elif st.session_state.nav == "simulator":
     page_simulator()
+elif st.session_state.nav == "rulebuilder":
+    page_rulebuilder()
 else:
     page_queue()
