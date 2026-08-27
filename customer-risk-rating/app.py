@@ -103,6 +103,41 @@ STATUS_COLOUR = {
 # prioritise review capacity — a workflow convention, not a compliance policy.
 SLA_HOURS = {"Extreme": 4, "High": 24, "Medium": 72, "Low": 168}
 
+# --------------------------------------------------------------------------
+# RBAC — role-based access control. Like case status/SLA above, there is no
+# API endpoint or real auth behind this: the sidebar role switcher is a
+# session-local role-PLAY, the same honesty already applied to the reviewer
+# name field ("attributed... no login"). What it gates is real, though —
+# every decide_case/manage_rules call site below actually checks
+# has_permission() before acting, not just before showing a button.
+#
+# A simple two-gate hierarchy, ranked so each role can do everything the
+# one below it can plus its own extra capability: Junior Analyst can view
+# every page, add a note and request KYC; Risk Manager additionally
+# decides cases (approve/escalate/block); Compliance Officer / Admin
+# additionally manages the Rule Builder's rules. Nothing needs a third
+# capability bucket because nothing in the brief sits between "anyone
+# logged in" and those two gated actions.
+# --------------------------------------------------------------------------
+ROLE_KEYS = ("junior_analyst", "risk_manager", "compliance_admin")
+ROLE_RANK = {"junior_analyst": 0, "risk_manager": 1, "compliance_admin": 2}
+_CAPABILITY_MIN_ROLE = {"decide_case": "risk_manager", "manage_rules": "compliance_admin"}
+
+
+def has_permission(capability: str) -> bool:
+    role = st.session_state.get("user_role", "junior_analyst")
+    min_role = _CAPABILITY_MIN_ROLE.get(capability)
+    return min_role is None or ROLE_RANK.get(role, 0) >= ROLE_RANK[min_role]
+
+
+def role_label(role: str) -> str:
+    return t(f"role.{role}")
+
+
+# Shared between the sidebar's language selectbox and audit-log entries so a
+# "language switched" row reads "עברית → English" rather than "he → en".
+LANGUAGE_LABEL = {"he": "עברית", "en": "English"}
+
 EVENT_TYPES = (
     "missed_payment", "overdraft_breach", "chargeback", "cash_deposit",
     "wire_transfer_out", "crypto_transfer", "card_purchase", "atm_withdrawal",
@@ -262,6 +297,13 @@ I18N: dict[str, dict[str, str]] = {
         "sidebar.nav_customer360": "🔎 Customer 360 & Decision Center",
         "sidebar.nav_simulator": "🧪 Event Simulator & Sandbox",
         "sidebar.nav_rulebuilder": "⚙️ Rule Builder & Policy Engine",
+        "sidebar.nav_auditlog": "🛡️ Audit Log",
+        "sidebar.role_label": "Role",
+        "sidebar.role_help": "Controls which actions you can take below — a session-local role-play, the "
+                             "same honesty as the reviewer name above: no real authentication behind it.",
+        "role.junior_analyst": "Junior Analyst",
+        "role.risk_manager": "Risk Manager",
+        "role.compliance_admin": "Compliance Officer / Admin",
         "sidebar.footer": "Scores, explanations and re-scoring all come from the live FastAPI service over "
                           "its public endpoints — no model or policy logic is duplicated here. Case status, "
                           "SLA and review notes are this session's workflow state only: nothing here is "
@@ -332,6 +374,7 @@ I18N: dict[str, dict[str, str]] = {
         "timeline.event_rescored": "re-scored",
         "timeline.event_band_changed": "  ·  <b>band changed</b>",
         "timeline.decision": "<b>{label}</b> by {actor} — &ldquo;{note}&rdquo;",
+        "timeline.note": "<b>Note</b> by {actor} — &ldquo;{note}&rdquo;",
 
         "queue.title": "Risk Operations Queue",
         "queue.caption": "Every customer scored in this session, highest risk first. Score, band and "
@@ -392,8 +435,14 @@ I18N: dict[str, dict[str, str]] = {
         "action.escalate": "🚨 Escalate to AML",
         "action.kyc": "📋 Request KYC Verification",
         "action.block": "⛔ Block Account",
-        "action.note_required": "A review note is required before recording this decision.",
+        "action.add_note": "🗒️ Add Note",
+        "action.note_required": "A review note is required before this can be recorded.",
         "action.recorded": "Recorded: {label}.",
+        "action.note_added": "Note added to the timeline.",
+        "permission.decide_case_denied": "Your role ({role}) can view this case but not decide it — Risk "
+                                         "Manager or Compliance Officer / Admin is required.",
+        "permission.manage_rules_denied": "Your role ({role}) can view rules but not create, edit or delete "
+                                          "them — Compliance Officer / Admin is required.",
 
         "explain.caption": "The stored explanation for this customer's most recent score — read back from "
                            "the API rather than recomputed, so this is provably the same event as the "
@@ -561,6 +610,9 @@ I18N: dict[str, dict[str, str]] = {
         "rulebuilder.rule_deleted": "Deleted rule: {name}.",
         "rulebuilder.matches_count": "Matches {n} of {total} customers in the queue right now",
         "rulebuilder.new_rule_header": "➕ New rule",
+        "rulebuilder.admin_only_notice": "Only Compliance Officer / Admin can create, edit or delete custom "
+                                         "rules. You can still see every active rule above and how many "
+                                         "customers it currently matches.",
         "rulebuilder.name_label": "Rule name",
         "rulebuilder.name_placeholder": "e.g. Private banking + Cyprus exposure",
         "rulebuilder.conditions_label": "When…",
@@ -607,6 +659,42 @@ I18N: dict[str, dict[str, str]] = {
                                  "the API's own, unadjusted.",
         "rulebuilder.c360_summary": "{n} custom rule(s) fired → +{points:.0f} pts · effective score "
                                     "{score:.1f} · effective band {band}.",
+
+        "auditlog.title": "Audit Log",
+        "auditlog.caption": "Every recorded action this session — case decisions, notes, rule changes, and "
+                            "language/role switches — with who did it, their role at the time, and when. "
+                            "Append-only: nothing on this page can be edited or removed once written, the "
+                            "same one-way guarantee a real compliance audit trail enforces server-side.",
+        "auditlog.kpi_total": "Total events",
+        "auditlog.kpi_decisions": "Case decisions",
+        "auditlog.kpi_rule_changes": "Rule changes",
+        "auditlog.empty": "No actions recorded yet this session.",
+        "auditlog.search_label": "Search — actor or customer ID",
+        "auditlog.action_filter_label": "Action type",
+        "auditlog.role_filter_label": "Role",
+        "auditlog.no_match": "No log entries match these filters.",
+        "auditlog.shown_caption": "{shown} of {total} events shown.",
+        "auditlog.col_timestamp": "Timestamp",
+        "auditlog.col_actor": "Actor",
+        "auditlog.col_role": "Role",
+        "auditlog.col_action": "Action",
+        "auditlog.col_customer": "Customer ID",
+        "auditlog.col_details": "Details",
+        "auditlog.action_case_decision": "Case decision",
+        "auditlog.action_note_added": "Note added",
+        "auditlog.action_rule_created": "Rule created",
+        "auditlog.action_rule_deleted": "Rule deleted",
+        "auditlog.action_rule_toggled": "Rule enabled/disabled",
+        "auditlog.action_language_switched": "Language switched",
+        "auditlog.action_role_switched": "Role switched",
+        "auditlog.detail_decision": "{label} — “{note}”",
+        "auditlog.detail_note": "“{note}”",
+        "auditlog.detail_rule_created": "{name}: {conditions} → {action}",
+        "auditlog.detail_rule_deleted": "{name}",
+        "auditlog.detail_rule_toggled_on": "{name} → enabled",
+        "auditlog.detail_rule_toggled_off": "{name} → disabled",
+        "auditlog.detail_language": "{previous} → {current}",
+        "auditlog.detail_role": "{previous} → {current}",
     },
     "he": {
         "sidebar.title": "דירוג סיכון לקוחות",
@@ -623,6 +711,13 @@ I18N: dict[str, dict[str, str]] = {
         "sidebar.nav_customer360": "🔎 תמונת לקוח 360 ומרכז החלטות",
         "sidebar.nav_simulator": "🧪 סימולטור אירועים וארגז חול",
         "sidebar.nav_rulebuilder": "⚙️ בונה כללים ומנוע מדיניות",
+        "sidebar.nav_auditlog": "🛡️ יומן ביקורת",
+        "sidebar.role_label": "תפקיד",
+        "sidebar.role_help": "קובע אילו פעולות תוכל/י לבצע למטה — משחק תפקידים מקומי לסשן זה, באותה "
+                             "כנות כמו שם הבודק למעלה: אין מאחוריו אימות אמיתי.",
+        "role.junior_analyst": "אנליסט/ית זוטר/ה",
+        "role.risk_manager": "מנהל/ת סיכונים",
+        "role.compliance_admin": "קצין/ת ציות / מנהל/ת מערכת",
         "sidebar.footer": "כל הציונים, ההסברים והניקוד מחדש מגיעים משירות ה-FastAPI החי דרך נקודות "
                           "הקצה הציבוריות שלו — אין כאן שכפול של לוגיקת מודל או מדיניות. סטטוס התיק, "
                           "ה-SLA והערות הסקירה הם מצב עבודה של הסשן הנוכחי בלבד: דבר מכאן אינו נכתב "
@@ -693,6 +788,7 @@ I18N: dict[str, dict[str, str]] = {
         "timeline.event_rescored": "נוקד מחדש",
         "timeline.event_band_changed": "  ·  <b>הרמה השתנתה</b>",
         "timeline.decision": "<b>{label}</b> על ידי {actor} — &ldquo;{note}&rdquo;",
+        "timeline.note": "<b>הערה</b> מאת {actor} — &ldquo;{note}&rdquo;",
 
         "queue.title": "תור פעולות סיכון",
         "queue.caption": "כל לקוח שנוקד בסשן זה, מהסיכון הגבוה ביותר תחילה. הציון, הרמה והגורמים מגיעים "
@@ -751,8 +847,14 @@ I18N: dict[str, dict[str, str]] = {
         "action.escalate": "🚨 הסלם להלבנת הון",
         "action.kyc": "📋 בקש אימות KYC",
         "action.block": "⛔ חסום חשבון",
-        "action.note_required": "נדרשת הערת סקירה לפני רישום החלטה זו.",
+        "action.add_note": "🗒️ הוסף הערה",
+        "action.note_required": "נדרשת הערת סקירה לפני שניתן לרשום זאת.",
         "action.recorded": "נרשם: {label}.",
+        "action.note_added": "ההערה נוספה לציר הזמן.",
+        "permission.decide_case_denied": "התפקיד שלך ({role}) יכול לצפות בתיק זה אך לא להחליט לגביו — "
+                                         "נדרש/ת מנהל/ת סיכונים או קצין/ת ציות / מנהל/ת מערכת.",
+        "permission.manage_rules_denied": "התפקיד שלך ({role}) יכול לצפות בכללים אך לא ליצור, לערוך או "
+                                          "למחוק אותם — נדרש/ת קצין/ת ציות / מנהל/ת מערכת.",
 
         "explain.caption": "ההסבר השמור לציון האחרון של לקוח זה — נקרא בחזרה מה-API ולא חושב מחדש, כך "
                            "שזהו באופן מוכח אותו אירוע כמו הציון למעלה.",
@@ -910,6 +1012,9 @@ I18N: dict[str, dict[str, str]] = {
         "rulebuilder.rule_deleted": "הכלל נמחק: {name}.",
         "rulebuilder.matches_count": "תואם כרגע {n} מתוך {total} לקוחות בתור",
         "rulebuilder.new_rule_header": "➕ כלל חדש",
+        "rulebuilder.admin_only_notice": "רק קצין/ת ציות / מנהל/ת מערכת יכול/ה ליצור, לערוך או למחוק "
+                                         "כללים מותאמים. עדיין ניתן לראות למעלה כל כלל פעיל וכמה לקוחות "
+                                         "הוא תואם כרגע.",
         "rulebuilder.name_label": "שם הכלל",
         "rulebuilder.name_placeholder": "לדוגמה: בנקאות פרטית + חשיפה לקפריסין",
         "rulebuilder.conditions_label": "כאשר…",
@@ -954,6 +1059,42 @@ I18N: dict[str, dict[str, str]] = {
                                  "עצמו, ללא התאמה.",
         "rulebuilder.c360_summary": "{n} כלל/ים מותאמים הופעלו → +{points:.0f} נק' · ציון אפקטיבי "
                                     "{score:.1f} · רמה אפקטיבית {band}.",
+
+        "auditlog.title": "יומן ביקורת",
+        "auditlog.caption": "כל פעולה שנרשמה בסשן זה — החלטות תיק, הערות, שינויי כללים ומעברי שפה/תפקיד — "
+                            "עם מי ביצע אותה, התפקיד שלו/ה באותו רגע, ומתי. הוספה בלבד: דבר בעמוד הזה אינו "
+                            "ניתן לעריכה או למחיקה לאחר שנכתב, אותה ערבות חד-כיוונית שמסלול ביקורת ציות "
+                            "אמיתי אוכף בצד השרת.",
+        "auditlog.kpi_total": "סה״כ אירועים",
+        "auditlog.kpi_decisions": "החלטות תיק",
+        "auditlog.kpi_rule_changes": "שינויי כללים",
+        "auditlog.empty": "עדיין לא נרשמה אף פעולה בסשן זה.",
+        "auditlog.search_label": "חיפוש — מבצע/ת או מזהה לקוח",
+        "auditlog.action_filter_label": "סוג פעולה",
+        "auditlog.role_filter_label": "תפקיד",
+        "auditlog.no_match": "אין רשומות יומן התואמות למסננים אלה.",
+        "auditlog.shown_caption": "{shown} מתוך {total} אירועים מוצגים.",
+        "auditlog.col_timestamp": "חותמת זמן",
+        "auditlog.col_actor": "מבצע/ת",
+        "auditlog.col_role": "תפקיד",
+        "auditlog.col_action": "פעולה",
+        "auditlog.col_customer": "מזהה לקוח",
+        "auditlog.col_details": "פרטים",
+        "auditlog.action_case_decision": "החלטת תיק",
+        "auditlog.action_note_added": "הערה נוספה",
+        "auditlog.action_rule_created": "כלל נוצר",
+        "auditlog.action_rule_deleted": "כלל נמחק",
+        "auditlog.action_rule_toggled": "כלל הופעל/כובה",
+        "auditlog.action_language_switched": "שפה הוחלפה",
+        "auditlog.action_role_switched": "תפקיד הוחלף",
+        "auditlog.detail_decision": "{label} — “{note}”",
+        "auditlog.detail_note": "“{note}”",
+        "auditlog.detail_rule_created": "{name}: {conditions} → {action}",
+        "auditlog.detail_rule_deleted": "{name}",
+        "auditlog.detail_rule_toggled_on": "{name} → הופעל",
+        "auditlog.detail_rule_toggled_off": "{name} → כובה",
+        "auditlog.detail_language": "{previous} → {current}",
+        "auditlog.detail_role": "{previous} → {current}",
     },
 }
 
@@ -1560,11 +1701,11 @@ _DECISION_ICON = {"approved": "✅", "escalated_aml": "🚨", "kyc_requested": "
 
 
 def render_timeline(entries: list[dict[str, Any]]) -> None:
-    """Newest first. Combines score events, pushed transactions/AML events and
-    case decisions into one chronological feed — the note text is the one
-    piece of this that is operator-typed free text, so it is HTML-escaped
-    before going into an ``unsafe_allow_html`` block; everything else here is
-    an enum-like value this module controls."""
+    """Newest first. Combines score events, pushed transactions/AML events,
+    case decisions and standalone notes into one chronological feed — the
+    note/actor text is the one piece of this that is operator-typed free
+    text, so it is HTML-escaped before going into an ``unsafe_allow_html``
+    block; everything else here is an enum-like value this module controls."""
     if not entries:
         st.caption(t("timeline.empty"))
         return
@@ -1581,6 +1722,9 @@ def render_timeline(entries: list[dict[str, Any]]) -> None:
             icon = "🔔"
             text = t("timeline.event", event_type=vocab_label("event_type", item["event_type"]),
                       amount=f"{item['amount']:,.0f}", status=status_txt, change=change)
+        elif kind == "note":
+            icon = "🗒️"
+            text = t("timeline.note", actor=html.escape(item["actor"]), note=html.escape(item["note"]))
         else:
             icon = _DECISION_ICON.get(item["action"], "📌")
             text = t("timeline.decision", label=status_label(item["action"]), actor=html.escape(item["actor"]),
@@ -1928,6 +2072,52 @@ def render_rule_overlay(entry: dict[str, Any], rules: list[dict[str, Any]]) -> N
 
 
 # --------------------------------------------------------------------------
+# Audit Log — an append-only record of who did what, when. Session-local
+# like every other workflow-layer list in this file (see module docstring),
+# but immutable in the one sense that matters for a demo: no button anywhere
+# in this file removes or edits an entry once log_audit() has appended it —
+# only new entries are ever added, the same one-way guarantee a real
+# compliance audit trail enforces server-side.
+# --------------------------------------------------------------------------
+
+
+def log_audit(action: str, customer_id: str | None = None, **detail: Any) -> None:
+    st.session_state.audit_log.append({
+        "at": dt.datetime.now(dt.UTC),
+        "actor": st.session_state.get("reviewer_name", "Risk Analyst"),
+        "role": st.session_state.get("user_role", "junior_analyst"),
+        "action": action,
+        "customer_id": customer_id,
+        "detail": detail,
+    })
+
+
+def audit_action_label(action: str) -> str:
+    return t(f"auditlog.action_{action}")
+
+
+def audit_detail_text(entry: dict[str, Any]) -> str:
+    action, d = entry["action"], entry["detail"]
+    if action == "case_decision":
+        return t("auditlog.detail_decision", label=status_label(d["decision"]), note=d["note"])
+    if action == "note_added":
+        return t("auditlog.detail_note", note=d["note"])
+    if action == "rule_created":
+        return t("auditlog.detail_rule_created", name=d["name"], conditions=d["conditions"],
+                  action=d["action_summary"])
+    if action == "rule_deleted":
+        return t("auditlog.detail_rule_deleted", name=d["name"])
+    if action == "rule_toggled":
+        key = "auditlog.detail_rule_toggled_on" if d["enabled"] else "auditlog.detail_rule_toggled_off"
+        return t(key, name=d["name"])
+    if action == "language_switched":
+        return t("auditlog.detail_language", previous=d["previous"], current=d["current"])
+    if action == "role_switched":
+        return t("auditlog.detail_role", previous=d["previous"], current=d["current"])
+    return ""
+
+
+# --------------------------------------------------------------------------
 # Pages
 # --------------------------------------------------------------------------
 
@@ -2034,17 +2224,24 @@ def render_action_panel(entry: dict[str, Any]) -> None:
         st.caption(t("action.already_actioned"))
 
     cid = entry["customer_id"]
+    can_decide = has_permission("decide_case")
+    decide_help = None if can_decide else t("permission.decide_case_denied", role=role_label(
+        st.session_state.get("user_role", "junior_analyst")))
     with st.form(f"decision_form_{cid}"):
         note = st.text_area(
             t("action.note_label"), placeholder=t("action.note_placeholder"),
             height=90, key=f"decision_note_{cid}",
         )
+        note_only = st.form_submit_button(t("action.add_note"), use_container_width=True)
         b1, b2 = st.columns(2)
         b3, b4 = st.columns(2)
-        approve = b1.form_submit_button(t("action.approve"), use_container_width=True)
-        escalate = b2.form_submit_button(t("action.escalate"), use_container_width=True)
+        approve = b1.form_submit_button(t("action.approve"), use_container_width=True,
+                                         disabled=not can_decide, help=decide_help)
+        escalate = b2.form_submit_button(t("action.escalate"), use_container_width=True,
+                                          disabled=not can_decide, help=decide_help)
         kyc = b3.form_submit_button(t("action.kyc"), use_container_width=True)
-        block = b4.form_submit_button(t("action.block"), use_container_width=True)
+        block = b4.form_submit_button(t("action.block"), use_container_width=True,
+                                       disabled=not can_decide, help=decide_help)
 
     action = None
     if approve:
@@ -2056,6 +2253,13 @@ def render_action_panel(entry: dict[str, Any]) -> None:
     elif block:
         action = "blocked"
 
+    # Defence in depth: the buttons above are already disabled client-side
+    # for a role that lacks decide_case, but the handler re-checks before
+    # acting rather than trusting a disabled attribute alone.
+    if action in ("approved", "escalated_aml", "blocked") and not can_decide:
+        st.error(decide_help)
+        return
+
     if action:
         if not note.strip():
             st.error(t("action.note_required"))
@@ -2065,7 +2269,19 @@ def render_action_panel(entry: dict[str, Any]) -> None:
                 "kind": "decision", "at": dt.datetime.now(dt.UTC), "action": action,
                 "note": note.strip(), "actor": st.session_state.get("reviewer_name", "Risk Analyst"),
             })
+            log_audit("case_decision", customer_id=cid, decision=action, note=note.strip())
             flash_success(f"decision_{cid}", t("action.recorded", label=status_label(action)))
+            st.rerun()
+    elif note_only:
+        if not note.strip():
+            st.error(t("action.note_required"))
+        else:
+            entry["timeline"].append({
+                "kind": "note", "at": dt.datetime.now(dt.UTC),
+                "note": note.strip(), "actor": st.session_state.get("reviewer_name", "Risk Analyst"),
+            })
+            log_audit("note_added", customer_id=cid, note=note.strip())
+            flash_success(f"decision_{cid}", t("action.note_added"))
             st.rerun()
 
 
@@ -2556,6 +2772,9 @@ def page_rulebuilder() -> None:
     st.session_state.setdefault("rb_form_gen", 0)
     rules = st.session_state.custom_rules
     queue = st.session_state.queue
+    can_manage = has_permission("manage_rules")
+    manage_help = None if can_manage else t("permission.manage_rules_denied", role=role_label(
+        st.session_state.get("user_role", "junior_analyst")))
 
     st.markdown(f"#### {t('rulebuilder.active_rules_header', n=len(rules))}")
     if not rules:
@@ -2569,19 +2788,28 @@ def page_rulebuilder() -> None:
                 top_l, top_c, top_r = st.columns([4, 1.2, 1])
                 top_l.markdown(f"**{html.escape(rule['name'])}**")
                 new_enabled = top_c.checkbox(t("rulebuilder.enabled_label"), value=rule["enabled"],
-                                              key=f"rb_enabled_{rule['id']}")
-                if new_enabled != rule["enabled"]:
+                                              key=f"rb_enabled_{rule['id']}", disabled=not can_manage,
+                                              help=manage_help)
+                if new_enabled != rule["enabled"] and can_manage:
                     rule["enabled"] = new_enabled
+                    log_audit("rule_toggled", name=rule["name"], enabled=new_enabled)
                     st.rerun()
-                if top_r.button(t("rulebuilder.delete_rule"), key=f"rb_delete_{rule['id']}",
-                                 use_container_width=True):
+                delete_clicked = top_r.button(t("rulebuilder.delete_rule"), key=f"rb_delete_{rule['id']}",
+                                               use_container_width=True, disabled=not can_manage,
+                                               help=manage_help)
+                if delete_clicked and can_manage:
                     st.session_state.custom_rules = [r for r in rules if r["id"] != rule["id"]]
+                    log_audit("rule_deleted", name=rule["name"])
                     flash_success("rulebuilder", t("rulebuilder.rule_deleted", name=rule["name"]))
                     st.rerun()
                 st.caption(f"{rule_conditions_text(rule)}  →  {rule_action_text(rule)}")
                 st.caption(t("rulebuilder.matches_count", n=match_count, total=len(queue)))
 
     st.divider()
+    if not can_manage:
+        st.info(t("rulebuilder.admin_only_notice"))
+        return
+
     # key= makes this a real stateful widget: expanded= only seeds the
     # initial (pre-interaction) state, and the user's own toggle then wins
     # on every later rerun. Without a key, expanded=not rules is
@@ -2666,8 +2894,62 @@ def page_rulebuilder() -> None:
             st.session_state.rb_draft_rows = [st.session_state.rb_next_row_id]
             st.session_state.rb_next_row_id += 1
             st.session_state.rb_form_gen += 1
+            log_audit("rule_created", name=new_rule["name"], conditions=rule_conditions_text(new_rule),
+                      action_summary=rule_action_text(new_rule))
             flash_success("rulebuilder", t("rulebuilder.rule_added", name=new_rule["name"]))
             st.rerun()
+
+
+def page_auditlog() -> None:
+    st.title(t("auditlog.title"))
+    st.caption(t("auditlog.caption"))
+
+    log = st.session_state.get("audit_log", [])
+    decisions = sum(1 for e in log if e["action"] == "case_decision")
+    rule_changes = sum(1 for e in log if e["action"] in ("rule_created", "rule_deleted", "rule_toggled"))
+    k1, k2, k3 = st.columns(3)
+    k1.metric(t("auditlog.kpi_total"), len(log))
+    k2.metric(t("auditlog.kpi_decisions"), decisions)
+    k3.metric(t("auditlog.kpi_rule_changes"), rule_changes)
+
+    if not log:
+        st.info(t("auditlog.empty"))
+        return
+
+    st.divider()
+    f1, f2, f3 = st.columns([2.2, 1.4, 1.4])
+    search = f1.text_input(t("auditlog.search_label"), "")
+    action_types = sorted({e["action"] for e in log})
+    actions_filter = f2.multiselect(t("auditlog.action_filter_label"), action_types, default=action_types,
+                                     format_func=audit_action_label)
+    roles_present = sorted({e["role"] for e in log}, key=lambda r: ROLE_RANK.get(r, 9))
+    roles_filter = f3.multiselect(t("auditlog.role_filter_label"), roles_present, default=roles_present,
+                                   format_func=role_label)
+
+    rows = []
+    for entry in log:
+        if entry["action"] not in actions_filter or entry["role"] not in roles_filter:
+            continue
+        haystack = " ".join([entry["actor"], entry.get("customer_id") or ""]).lower()
+        if search and search.lower() not in haystack:
+            continue
+        rows.append({
+            t("auditlog.col_timestamp"): _parse_dt(entry["at"]).strftime("%Y-%m-%d %H:%M:%S UTC"),
+            t("auditlog.col_actor"): entry["actor"],
+            t("auditlog.col_role"): role_label(entry["role"]),
+            t("auditlog.col_action"): audit_action_label(entry["action"]),
+            t("auditlog.col_customer"): entry.get("customer_id") or "—",
+            t("auditlog.col_details"): audit_detail_text(entry),
+            "_at": entry["at"],
+        })
+    if not rows:
+        st.caption(t("auditlog.no_match"))
+        return
+
+    frame = pd.DataFrame(rows).sort_values("_at", ascending=False, ignore_index=True)
+    display_cols = [c for c in frame.columns if c != "_at"]
+    st.dataframe(frame[display_cols], use_container_width=True, hide_index=True)
+    st.caption(t("auditlog.shown_caption", shown=len(frame), total=len(log)))
 
 
 # --------------------------------------------------------------------------
@@ -2745,12 +3027,31 @@ st.session_state.setdefault("book_seed", 42)
 st.session_state.setdefault("reviewer_name", "Risk Analyst")
 st.session_state.setdefault("language", "he")
 st.session_state.setdefault("custom_rules", [])
+st.session_state.setdefault("user_role", "junior_analyst")
+st.session_state.setdefault("audit_log", [])
+# Shadow copy used only to detect a language CHANGE for audit logging.
+# Comparing against st.session_state.language directly does not work here:
+# Streamlit applies an in-flight widget interaction to its bound
+# session_state key before the script body reruns, so by the time this code
+# reads it even on the very first line, it already reflects the NEW value —
+# a same-render "previous vs current" read sees the new value on both sides
+# (observed directly: switching languages never logged an event). This
+# shadow key is written only after log_audit() below has already fired, so
+# it keeps lagging one step behind until the next real change. The role
+# switcher below needs no equivalent: it tracks its own previous value via
+# st.session_state.user_role directly, which it — not any widget — owns.
+st.session_state.setdefault("_last_seen_language", st.session_state.language)
 
 with st.sidebar:
     st.selectbox(
-        "🌐", options=["he", "en"], format_func=lambda code: {"he": "עברית", "en": "English"}[code],
+        "🌐", options=["he", "en"], format_func=lambda code: LANGUAGE_LABEL[code],
         key="language", label_visibility="collapsed",
     )
+    _language_just_changed = st.session_state.language != st.session_state._last_seen_language
+    if _language_just_changed:
+        log_audit("language_switched", previous=LANGUAGE_LABEL[st.session_state._last_seen_language],
+                  current=LANGUAGE_LABEL[st.session_state.language])
+        st.session_state._last_seen_language = st.session_state.language
     st.markdown(f"### {t('sidebar.title')}")
     st.caption(t("sidebar.subtitle"))
     st.caption(f"{t('sidebar.api_label')} `{API_URL}`")
@@ -2766,6 +3067,25 @@ with st.sidebar:
 
     st.divider()
     st.text_input(t("sidebar.reviewer_name_label"), key="reviewer_name", help=t("sidebar.reviewer_name_help"))
+    # The widget is deliberately bound to a SEPARATE key (user_role_widget)
+    # rather than key="user_role" directly. A selectbox whose format_func
+    # output changes with language (role_label depends on
+    # st.session_state.language) resets itself to the first option the
+    # instant the language switches — observed directly, a Compliance
+    # Officer / Admin got silently demoted to Junior Analyst by toggling the
+    # language selector. Re-seeding the widget's backing key from the
+    # authoritative user_role fixes that — but ONLY on the specific rerun a
+    # language switch just caused: pre-seeding on every rerun instead was
+    # tried first and made the dropdown inert, since it silently overwrote
+    # the user's own in-flight pick with the (still-stale) old role before
+    # the comparison below ever saw it.
+    if _language_just_changed:
+        st.session_state["user_role_widget"] = st.session_state.user_role
+    picked_role = st.selectbox(t("sidebar.role_label"), ROLE_KEYS, format_func=role_label,
+                                key="user_role_widget", help=t("sidebar.role_help"))
+    if picked_role != st.session_state.user_role:
+        log_audit("role_switched", previous=role_label(st.session_state.user_role), current=role_label(picked_role))
+        st.session_state.user_role = picked_role
 
     st.divider()
     st.markdown(f"##### {t('sidebar.nav_header')}")
@@ -2774,6 +3094,7 @@ with st.sidebar:
         ("customer360", "sidebar.nav_customer360"),
         ("simulator", "sidebar.nav_simulator"),
         ("rulebuilder", "sidebar.nav_rulebuilder"),
+        ("auditlog", "sidebar.nav_auditlog"),
     ):
         disabled = key == "customer360" and not st.session_state.get("selected_customer")
         if st.button(t(label_key), key=f"nav_{key}", use_container_width=True,
@@ -2843,5 +3164,7 @@ elif st.session_state.nav == "simulator":
     page_simulator()
 elif st.session_state.nav == "rulebuilder":
     page_rulebuilder()
+elif st.session_state.nav == "auditlog":
+    page_auditlog()
 else:
     page_queue()
