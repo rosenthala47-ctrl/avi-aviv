@@ -117,7 +117,7 @@ window.UG_CONFIG = {
        להחלפת הקוד: הריצו את הפקודה הבאה עם הקוד החדש והדביקו את התוצאה:
          node -e 'console.log(require("crypto").createHash("sha256").update("הקוד-שלך").digest("hex"))'
        (אפשר עדיין להשתמש ב-adminPasscode כטקסט גלוי אם רוצים — אבל hash עדיף.) */
-    adminPasscodeHash: "a433e08b383770489c508f17fefcfa26bf5195d5c59b570f32e17f5da5ac2e7c",
+    adminPasscodeHash: "d07164a628596323ebcf8796dee0e5c164620e0922b52483bc805f54416ee73c",
 
     /* חשבון הגוגל שלך — רק הוא רשאי להפעיל/לחדש מנויים. קוד-העל פותח את
        הפאנל, אבל השינוי בפועל נכתב למסד רק כשאתה מחובר עם החשבון הזה,
