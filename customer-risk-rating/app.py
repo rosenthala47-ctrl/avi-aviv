@@ -27,6 +27,7 @@ Set ``CRR_API_URL`` to point at a running API (default http://127.0.0.1:8000).
 from __future__ import annotations
 
 import datetime as dt
+import difflib
 import html
 import os
 import random
@@ -269,6 +270,127 @@ PRESET_LABEL_HE: dict[str, str] = {
     "AML concern — opaque funds, offshore links": "חשש הלבנת הון — כספים לא שקופים, קשרים אופשוריים",
 }
 
+# --------------------------------------------------------------------------
+# Watchlist & sanctions screening — reference data and identities.
+#
+# CustomerPayload (crr/api/schemas.py) has no name or date-of-birth field
+# (extra="forbid", and the model was never trained on one) — a full legal
+# name is exactly the kind of PII a real scoring API keeps out of its
+# feature set. So a customer's name/DOB here is UI-only workflow state,
+# generated alongside the demo book the same way case status is: it never
+# gets merged into what seed_queue/onboarding/the sandbox actually POST to
+# /score (see the explicit exclusion everywhere `values`/`candidate` is
+# built into a payload below), only into entry["profile"] for display and
+# for this screening module to read.
+#
+# WATCHLIST_ENTRIES is fabricated demo reference data standing in for a
+# real OFAC/EU/UN/PEP/adverse-media feed — every entry is fictional. The
+# three demo archetypes' identity pools are almost entirely clean; a
+# handful of the AML-concern archetype's variants are deliberately close
+# or exact matches (including matching aliases and dates of birth) so the
+# feature has something to show without requiring an operator to hand-type
+# a match first.
+# --------------------------------------------------------------------------
+WATCHLIST_ENTRIES: list[dict[str, Any]] = [
+    {"id": "OFAC-2201", "name": "Mikhail Aslanov", "aliases": ["Michael Aslanov"], "dob": "1975-11-02",
+     "country": "CY", "list_source": "ofac", "category": "sanctions",
+     "reason": "Specially Designated National — asset-freeze order (demo data)."},
+    {"id": "EU-3105", "name": "Khaled Marwan", "aliases": ["Khalid Marwan"], "dob": "1969-06-19",
+     "country": "AE", "list_source": "eu", "category": "sanctions",
+     "reason": "EU consolidated sanctions list — arms trafficking (demo data)."},
+    {"id": "UN-1042", "name": "Elena Petrova", "aliases": ["Yelena Petrova"], "dob": "1982-01-30",
+     "country": "RU", "list_source": "un", "category": "sanctions",
+     "reason": "UN Security Council sanctions list (demo data)."},
+    {"id": "PEP-0087", "name": "Rustam Aliyev", "aliases": [], "dob": "1958-09-12",
+     "country": "TR", "list_source": "pep", "category": "pep",
+     "reason": "Former deputy minister of finance — politically exposed person (demo data)."},
+    {"id": "PEP-0142", "name": "Fatima Al-Sayed", "aliases": [], "dob": "1971-04-05",
+     "country": "AE", "list_source": "pep", "category": "pep",
+     "reason": "Spouse of a serving head of state — politically exposed person (demo data)."},
+    {"id": "AM-0509", "name": "Dmitri Volkov", "aliases": ["Dmitry Volkov"], "dob": "1966-12-24",
+     "country": "CY", "list_source": "adverse_media", "category": "adverse_media",
+     "reason": "Named in investigative reporting on offshore shell structures (demo data)."},
+]
+
+# Six identities per archetype (matching seed_queue's default per_archetype),
+# indexed by position — deterministic, no RNG needed since none of this
+# feeds the model. (full_name, date_of_birth) tuples.
+_DEMO_IDENTITY_POOL: dict[str, list[tuple[str, str]]] = {
+    "Low risk — salaried, clean file": [
+        ("Noa Peretz", "1985-05-12"), ("Daniel Cohen", "1978-02-20"), ("Maya Ben-David", "1990-07-08"),
+        ("Yossi Mizrahi", "1982-11-15"), ("Tamar Azulay", "1988-03-30"), ("Amit Shalev", "1975-09-01"),
+    ],
+    "Credit stress — thin buffer, recent arrears": [
+        ("Eli Buskila", "1991-06-02"), ("Ronit Malka", "1987-12-11"), ("Avi Peretz", "1993-01-25"),
+        ("Shira Amar", "1980-04-17"), ("Moshe Katz", "1979-08-09"), ("Liora Dahan", "1985-10-03"),
+    ],
+    "AML concern — opaque funds, offshore links": [
+        ("Mikael Aslanov", "1975-11-02"),   # near-name + exact-DOB match -> OFAC-2201
+        ("Khalid Marwan", "1969-06-19"),    # exact match on EU-3105's alias + DOB
+        ("Rustam Aliyev", "1958-09-12"),    # exact match -> PEP-0087
+        ("Carlos Mendes", "1972-03-14"),    # clean
+        ("Anastasia Popova", "1980-07-22"),  # clean
+        ("Hassan Nasser", "1965-05-05"),    # clean
+    ],
+}
+
+WATCHLIST_MATCH_THRESHOLD = 60.0
+WATCHLIST_CATEGORIES = ("sanctions", "pep", "adverse_media")
+WATCHLIST_SOURCES = ("ofac", "eu", "un", "pep", "adverse_media")
+# Reuses the existing band palette rather than inventing new hues: a
+# watchlist hit's severity is just another "how worried should a reviewer
+# be" scale, and Extreme/High/Medium already have colours nobody has to
+# relearn.
+WATCHLIST_SEVERITY_COLOUR = {"critical": "#d03b3b", "high": "#ec835a", "medium": "#fab219"}
+
+
+def _watchlist_severity(score: float) -> str:
+    if score >= 90:
+        return "critical"
+    if score >= 75:
+        return "high"
+    return "medium"
+
+
+def _normalize_name(name: str) -> str:
+    return " ".join(name.strip().lower().split())
+
+
+def _name_similarity(a: str, b: str) -> float:
+    return difflib.SequenceMatcher(None, _normalize_name(a), _normalize_name(b)).ratio()
+
+
+def screen_customer(full_name: str | None, date_of_birth: str | None, country: str | None) -> list[dict[str, Any]]:
+    """Fuzzy-match one customer's identity against WATCHLIST_ENTRIES.
+
+    Pure string similarity (difflib's SequenceMatcher — a ratio of matching
+    character runs, the same family of algorithm as Levenshtein-based
+    fuzzy matchers) against the entry's primary name and every alias, the
+    best of which becomes the match score; a same-value date of birth or
+    country then nudges that score up rather than gating on it, since a
+    real screening hit is corroborating evidence, not a second independent
+    filter — two different people can share a country, and a transliterated
+    name alone should already be enough to surface for human review.
+    Returns every entry clearing WATCHLIST_MATCH_THRESHOLD, most severe
+    first. Recomputed fresh on every call — nothing here is cached or
+    persisted, only a disposition recorded against a hit is (see
+    entry["watchlist_dispositions"] in page_customer360).
+    """
+    if not full_name or not full_name.strip():
+        return []
+    hits = []
+    for entry in WATCHLIST_ENTRIES:
+        candidates = [entry["name"], *entry["aliases"]]
+        best = max(_name_similarity(full_name, candidate) for candidate in candidates)
+        score = best * 100
+        if date_of_birth and entry.get("dob") and date_of_birth == entry["dob"]:
+            score = min(100.0, score + 15)
+        if country and entry.get("country") and country == entry["country"]:
+            score = min(100.0, score + 5)
+        if score >= WATCHLIST_MATCH_THRESHOLD:
+            hits.append({**entry, "match_score": round(score, 1)})
+    return sorted(hits, key=lambda h: h["match_score"], reverse=True)
+
 
 # --------------------------------------------------------------------------
 # i18n — every user-facing string in this file is looked up through t() or
@@ -387,6 +509,7 @@ I18N: dict[str, dict[str, str]] = {
         "queue.kpi_high_risk": "High-risk pending review",
         "queue.kpi_sla": "SLA breaches",
         "queue.kpi_escalated": "Escalated to AML",
+        "queue.kpi_watchlist": "Watchlist pending",
         "queue.sla_caption": "SLA windows while a case sits at Pending Review (workflow convention, not "
                              "API policy): Extreme {extreme}h · High {high}h · Medium {medium}h · "
                              "Low {low}h from the scoring timestamp.",
@@ -410,6 +533,7 @@ I18N: dict[str, dict[str, str]] = {
         "col.band": "Band",
         "col.score": "Score",
         "col.custom_rules": "Custom rules",
+        "col.watchlist": "Watchlist",
         "col.segment": "Segment",
         "col.country": "Country",
         "col.credit_risk": "Credit risk",
@@ -582,6 +706,8 @@ I18N: dict[str, dict[str, str]] = {
         "field.support_call": "Support call summary",
         "field.underwriter_note": "Underwriter note",
         "field.kyc_extract": "KYC document extract",
+        "field.full_name": "Full name",
+        "field.date_of_birth": "Date of birth",
 
         "sim.unknown_label": "Send these fields as unknown (null, not zero)",
         "sim.unknown_help": "Demonstrates the missing-data contract: an omitted field reaches the model as "
@@ -589,6 +715,11 @@ I18N: dict[str, dict[str, str]] = {
         "sim.score_customer": "Score customer",
         "sim.unknown_sent": "{n} field(s) sent as unknown: {fields}",
         "sim.why_audience": "Why — top factors ({audience} view)",
+        "sim.watchlist_header": "Watchlist screening (test)",
+        "sim.watchlist_caption": "Fuzzy-matches the name and date of birth above against the demo watchlist — "
+                                 "nothing here is sent to the API or saved until this result is added to the "
+                                 "queue.",
+        "sim.watchlist_none": "No watchlist matches for this identity.",
         "sim.overwrite_warning": "`{id}` already exists in the queue — adding will overwrite its profile, "
                                  "score and timeline with this sandbox result. Its case status and prior "
                                  "decisions are preserved.",
@@ -647,6 +778,8 @@ I18N: dict[str, dict[str, str]] = {
                                    "guarantee enforced by the underlying policy engine (src/crr/rules).",
         "rulebuilder.field_risk_band": "Model risk band (current)",
         "rulebuilder.field_risk_score": "Composite risk score (current)",
+        "rulebuilder.field_watchlist_score": "Watchlist match score (current)",
+        "rulebuilder.field_watchlist_category": "Watchlist category (current)",
         "rulebuilder.op_eq": "is equal to",
         "rulebuilder.op_neq": "is not equal to",
         "rulebuilder.op_gt": "is greater than",
@@ -687,6 +820,7 @@ I18N: dict[str, dict[str, str]] = {
         "auditlog.action_rule_toggled": "Rule enabled/disabled",
         "auditlog.action_language_switched": "Language switched",
         "auditlog.action_role_switched": "Role switched",
+        "auditlog.action_watchlist_disposition": "Watchlist disposition",
         "auditlog.detail_decision": "{label} — “{note}”",
         "auditlog.detail_note": "“{note}”",
         "auditlog.detail_rule_created": "{name}: {conditions} → {action}",
@@ -695,6 +829,34 @@ I18N: dict[str, dict[str, str]] = {
         "auditlog.detail_rule_toggled_off": "{name} → disabled",
         "auditlog.detail_language": "{previous} → {current}",
         "auditlog.detail_role": "{previous} → {current}",
+        "auditlog.detail_watchlist": "{name} ({source}) → {label} — “{note}”",
+
+        "watchlist.panel_header": "Watchlist Hits",
+        "watchlist.panel_caption": "Fuzzy name/date-of-birth/country match against a demo OFAC/EU/UN/PEP/"
+                                   "adverse-media reference list — recomputed live, never cached. The API's "
+                                   "own AML signals above (PEP flag, sanctions hits, adverse media) are a "
+                                   "separate thing and are unaffected by this module.",
+        "watchlist.none": "No watchlist hits for this identity.",
+        "watchlist.note_label": "Review note (required)",
+        "watchlist.note_placeholder": "Document why this is, or isn't, a genuine match — required for the "
+                                      "audit trail.",
+        "watchlist.note_required": "A review note is required before recording this disposition.",
+        "watchlist.mark_false_positive": "✅ Mark False Positive",
+        "watchlist.mark_true_positive": "🚨 Mark True Positive",
+        "watchlist.disposition_recorded": "Disposition recorded.",
+        "watchlist.disp_false_positive": "False Positive",
+        "watchlist.disp_true_positive": "True Positive",
+        "watchlist.disposition_line": "{label} — recorded by {actor} — “{note}”",
+        "watchlist.auto_escalated_note": "Watchlist true positive — {name} ({source}): {note}",
+        "watchlist.source_ofac": "OFAC",
+        "watchlist.source_eu": "EU Sanctions",
+        "watchlist.source_un": "UN Sanctions",
+        "watchlist.source_pep": "PEP List",
+        "watchlist.source_adverse_media": "Adverse Media",
+        "watchlist.category_sanctions": "Sanctions",
+        "watchlist.category_pep": "PEP",
+        "watchlist.category_adverse_media": "Adverse Media",
+        "watchlist.category_none": "None",
     },
     "he": {
         "sidebar.title": "דירוג סיכון לקוחות",
@@ -800,6 +962,7 @@ I18N: dict[str, dict[str, str]] = {
         "queue.kpi_high_risk": "סיכון גבוה ממתין לבדיקה",
         "queue.kpi_sla": "חריגות SLA",
         "queue.kpi_escalated": "הוסלם להלבנת הון",
+        "queue.kpi_watchlist": "רשימת מעקב ממתינה",
         "queue.sla_caption": "חלונות SLA בזמן שתיק נמצא בסטטוס ממתין לבדיקה (מוסכמת עבודה, לא מדיניות "
                              "API): קיצוני {extreme} שעות · גבוה {high} שעות · בינוני {medium} שעות · "
                              "נמוך {low} שעות ממועד הניקוד.",
@@ -822,6 +985,7 @@ I18N: dict[str, dict[str, str]] = {
         "col.band": "רמה",
         "col.score": "ציון",
         "col.custom_rules": "כללים מותאמים",
+        "col.watchlist": "רשימת מעקב",
         "col.segment": "מגזר",
         "col.country": "מדינה",
         "col.credit_risk": "סיכון אשראי",
@@ -986,6 +1150,8 @@ I18N: dict[str, dict[str, str]] = {
         "field.support_call": "סיכום שיחת תמיכה",
         "field.underwriter_note": "הערת חתם",
         "field.kyc_extract": "תמצית מסמך KYC",
+        "field.full_name": "שם מלא",
+        "field.date_of_birth": "תאריך לידה",
 
         "sim.unknown_label": "שלח שדות אלו כלא ידועים (ריק, לא אפס)",
         "sim.unknown_help": "מדגים את חוזה הנתונים החסרים: שדה שהושמט מגיע למודל כ-NaN בתוספת מחוון "
@@ -993,6 +1159,10 @@ I18N: dict[str, dict[str, str]] = {
         "sim.score_customer": "נקד לקוח",
         "sim.unknown_sent": "{n} שדה/שדות נשלחו כלא ידועים: {fields}",
         "sim.why_audience": "מדוע — גורמים מובילים (תצוגת {audience})",
+        "sim.watchlist_header": "סינון רשימת מעקב (בדיקה)",
+        "sim.watchlist_caption": "מבצע התאמה מטושטשת של השם ותאריך הלידה שלמעלה מול רשימת המעקב לדוגמה — "
+                                 "שום דבר כאן לא נשלח ל-API או נשמר עד שהתוצאה הזו תתווסף לתור.",
+        "sim.watchlist_none": "אין התאמות ברשימת המעקב לזהות זו.",
         "sim.overwrite_warning": "`{id}` כבר קיים בתור — ההוספה תחליף את הפרופיל, הציון וציר הזמן שלו "
                                  "בתוצאת ארגז החול הזו. סטטוס התיק וההחלטות הקודמות שלו נשמרים.",
         "sim.add_to_queue": "➕ הוסף תוצאה זו לתור הפעולות",
@@ -1047,6 +1217,8 @@ I18N: dict[str, dict[str, str]] = {
                                    "העלאה-בלבד שנאכפת על ידי מנוע המדיניות הבסיסי (src/crr/rules).",
         "rulebuilder.field_risk_band": "רמת סיכון המודל (נוכחית)",
         "rulebuilder.field_risk_score": "ציון סיכון מצרפי (נוכחי)",
+        "rulebuilder.field_watchlist_score": "ציון התאמה לרשימת מעקב (נוכחי)",
+        "rulebuilder.field_watchlist_category": "קטגוריית רשימת מעקב (נוכחית)",
         "rulebuilder.op_eq": "שווה ל-",
         "rulebuilder.op_neq": "שונה מ-",
         "rulebuilder.op_gt": "גדול מ-",
@@ -1087,6 +1259,7 @@ I18N: dict[str, dict[str, str]] = {
         "auditlog.action_rule_toggled": "כלל הופעל/כובה",
         "auditlog.action_language_switched": "שפה הוחלפה",
         "auditlog.action_role_switched": "תפקיד הוחלף",
+        "auditlog.action_watchlist_disposition": "החלטת רשימת מעקב",
         "auditlog.detail_decision": "{label} — “{note}”",
         "auditlog.detail_note": "“{note}”",
         "auditlog.detail_rule_created": "{name}: {conditions} → {action}",
@@ -1095,6 +1268,33 @@ I18N: dict[str, dict[str, str]] = {
         "auditlog.detail_rule_toggled_off": "{name} → כובה",
         "auditlog.detail_language": "{previous} → {current}",
         "auditlog.detail_role": "{previous} → {current}",
+        "auditlog.detail_watchlist": "{name} ({source}) → {label} — “{note}”",
+
+        "watchlist.panel_header": "פגיעות רשימת מעקב",
+        "watchlist.panel_caption": "התאמה מטושטשת של שם/תאריך לידה/מדינה מול רשימת ייחוס לדוגמה של "
+                                   "OFAC/EU/UN/PEP/תקשורת שלילית — מחושבת מחדש בכל פעם, לעולם לא נשמרת "
+                                   "במטמון. האותות למניעת הלבנת הון של ה-API עצמו למעלה (דגל PEP, פגיעות "
+                                   "סנקציות, תקשורת שלילית) הם דבר נפרד ואינם מושפעים ממודול זה.",
+        "watchlist.none": "אין פגיעות ברשימת המעקב לזהות זו.",
+        "watchlist.note_label": "הערת סקירה (חובה)",
+        "watchlist.note_placeholder": "תעד/י מדוע זו התאמה אמיתית או לא — נדרש למסלול הביקורת.",
+        "watchlist.note_required": "נדרשת הערת סקירה לפני רישום החלטה זו.",
+        "watchlist.mark_false_positive": "✅ סמן כחיובי שגוי",
+        "watchlist.mark_true_positive": "🚨 סמן כחיובי אמיתי",
+        "watchlist.disposition_recorded": "ההחלטה נרשמה.",
+        "watchlist.disp_false_positive": "חיובי שגוי",
+        "watchlist.disp_true_positive": "חיובי אמיתי",
+        "watchlist.disposition_line": "{label} — נרשם על ידי {actor} — “{note}”",
+        "watchlist.auto_escalated_note": "חיובי אמיתי ברשימת מעקב — {name} ({source}): {note}",
+        "watchlist.source_ofac": "OFAC",
+        "watchlist.source_eu": "סנקציות האיחוד האירופי",
+        "watchlist.source_un": "סנקציות האו״ם",
+        "watchlist.source_pep": "רשימת PEP",
+        "watchlist.source_adverse_media": "תקשורת שלילית",
+        "watchlist.category_sanctions": "סנקציות",
+        "watchlist.category_pep": "PEP",
+        "watchlist.category_adverse_media": "תקשורת שלילית",
+        "watchlist.category_none": "ללא",
     },
 }
 
@@ -1250,6 +1450,8 @@ RULE_FIELDS: list[tuple[str, str, str]] = [
     ("edd_required", "field.edd_required", "flag"),
     ("risk_band", "rulebuilder.field_risk_band", "band"),
     ("risk_score", "rulebuilder.field_risk_score", "numeric"),
+    ("watchlist_match_score", "rulebuilder.field_watchlist_score", "numeric"),
+    ("watchlist_category", "rulebuilder.field_watchlist_category", "watchlist_category"),
 ]
 _RULE_FIELD_KIND: dict[str, str] = {key: kind for key, _, kind in RULE_FIELDS}
 _RULE_FIELD_I18N: dict[str, str] = {key: label_key for key, label_key, _ in RULE_FIELDS}
@@ -1267,6 +1469,7 @@ _RULE_FIELD_OPTIONS: dict[str, tuple] = {
 _RULE_OPERATORS: dict[str, tuple[str, ...]] = {
     "categorical": ("==", "!=", "in"),
     "band": ("==", "!=", "in"),
+    "watchlist_category": ("==", "!=", "in"),
     "flag": ("==", "!="),
     "numeric": (">", ">=", "<", "<=", "==", "!="),
 }
@@ -1285,16 +1488,24 @@ def _rule_field_options(field_key: str) -> list | None:
     kind = _RULE_FIELD_KIND[field_key]
     if kind == "band":
         return list(BAND_ORDER)
+    if kind == "watchlist_category":
+        return ["none", *WATCHLIST_CATEGORIES]
     if kind == "flag":
         return [0, 1]
     options = _RULE_FIELD_OPTIONS.get(field_key)
     return list(options) if options else None
 
 
+def _watchlist_category_option_label(category: str) -> str:
+    return t("watchlist.category_none") if category == "none" else watchlist_category_label(category)
+
+
 def _rule_value_format(field_key: str):
     kind = _RULE_FIELD_KIND[field_key]
     if kind == "band":
         return band_label
+    if kind == "watchlist_category":
+        return _watchlist_category_option_label
     if kind == "flag":
         return yes_no_label
     vocab_cat = _RULE_FIELD_VOCAB.get(field_key)
@@ -1374,16 +1585,26 @@ def make_variant(archetype: str, rng: random.Random) -> dict[str, Any]:
 
 def generate_book(seed: int, per_archetype: int = 6) -> list[dict[str, Any]]:
     """A deterministic (given ``seed``) list of synthetic candidate customers,
-    ``per_archetype`` variants of each of the three profiles above."""
+    ``per_archetype`` variants of each of the three profiles above.
+
+    Each candidate also carries an ``identity`` (full name, date of birth)
+    from _DEMO_IDENTITY_POOL, cycled by position rather than drawn from
+    ``rng`` — it never reaches the model, only entry["profile"] for the
+    watchlist screener, so it does not need to consume the same
+    deterministic random stream the scored fields do.
+    """
     rng = random.Random(seed)
     book = []
     counter = 1
     for archetype in PRESETS:
-        for _ in range(per_archetype):
+        identities = _DEMO_IDENTITY_POOL[archetype]
+        for i in range(per_archetype):
+            full_name, date_of_birth = identities[i % len(identities)]
             book.append({
                 "customer_id": f"CUS-{100000 + counter}",
                 "archetype": archetype,
                 "values": make_variant(archetype, rng),
+                "identity": {"full_name": full_name, "date_of_birth": date_of_birth},
                 "narratives": PRESETS[archetype]["_narratives"],
             })
             counter += 1
@@ -1636,6 +1857,65 @@ def render_fired_rules(rules: list[dict[str, Any]]) -> None:
     )
 
 
+def watchlist_source_label(source: str) -> str:
+    return t(f"watchlist.source_{source}")
+
+
+def watchlist_category_label(category: str) -> str:
+    return t(f"watchlist.category_{category}")
+
+
+def watchlist_hit_chip(hit: dict[str, Any]) -> str:
+    colour = WATCHLIST_SEVERITY_COLOUR[_watchlist_severity(hit["match_score"])]
+    return (
+        f'<span style="display:inline-block;padding:2px 10px;border-radius:999px;'
+        f'background:{colour};color:#fff;font-weight:600;font-size:0.85rem;'
+        f'font-family:{FONT_STACK};">{hit["match_score"]:.0f}%</span>'
+    )
+
+
+def render_watchlist_preview(hits: list[dict[str, Any]]) -> None:
+    """Read-only preview for the sandbox tab: nothing has been added to the
+    queue yet at this point, so there is no entry to record a disposition
+    against — see render_watchlist_panel (Customer 360) for the full
+    investigate/dispose workflow. hit["name"]/["reason"] come from
+    WATCHLIST_ENTRIES, a fixed constant this module controls, not from
+    anything an operator typed, so unlike a disposition note they need no
+    HTML-escaping here."""
+    if not hits:
+        st.caption(t("sim.watchlist_none"))
+        return
+    for hit in hits:
+        st.markdown(
+            f'<div style="padding:6px 0;border-bottom:1px solid {HAIRLINE};">'
+            f'<span style="font-weight:600;font-family:{FONT_STACK};">{hit["name"]}</span> '
+            f'{watchlist_hit_chip(hit)} '
+            f'<span style="color:{INK_SECONDARY};font-size:0.85rem;">'
+            f'{watchlist_source_label(hit["list_source"])} · {watchlist_category_label(hit["category"])}</span><br>'
+            f'<span style="color:{INK_MUTED};font-size:0.85rem;">{hit["reason"]}</span></div>',
+            unsafe_allow_html=True,
+        )
+
+
+def watchlist_badge_text(entry: dict[str, Any]) -> str:
+    """The Operations Queue table's compact watchlist indicator — full
+    detail (match %, source, category, disposition) lives in Customer 360's
+    panel, reached by opening that customer. Mirrors rule_badge_text's
+    shape: a dash when clean, otherwise a count plus the most severe
+    unresolved hit's score — resolved (disposed) hits do not count toward
+    it, since they no longer need a reviewer's attention."""
+    profile = entry["profile"]
+    hits = screen_customer(profile.get("full_name"), profile.get("date_of_birth"),
+                            profile.get("country_of_residence"))
+    if not hits:
+        return "—"
+    dispositions = entry.get("watchlist_dispositions", {})
+    unresolved = [h for h in hits if h["id"] not in dispositions]
+    if not unresolved:
+        return f"✅ {len(hits)}"
+    return f"⚠️ {len(unresolved)} · {unresolved[0]['match_score']:.0f}%"
+
+
 def render_result_header(result: dict[str, Any]) -> None:
     score = result["risk_score"]
     left, right = st.columns([2, 3], gap="large")
@@ -1677,6 +1957,8 @@ def render_profile_summary(entry: dict[str, Any]) -> None:
     p = entry["profile"]
     dash = "—"
     st.markdown(
+        f"**{t('field.full_name')}** {html.escape(p['full_name']) if p.get('full_name') else dash}"
+        f"&nbsp;&nbsp;·&nbsp;&nbsp;"
         f"**{t('profile.segment')}** {vocab_label('segment', p['segment']) if p.get('segment') else dash}"
         f"&nbsp;&nbsp;·&nbsp;&nbsp;"
         f"**{t('profile.occupation')}** "
@@ -1771,6 +2053,7 @@ def add_to_queue(
         "result": result,
         "status": existing["status"] if existing else "pending_review",
         "timeline": timeline,
+        "watchlist_dispositions": existing["watchlist_dispositions"] if existing else {},
     }
 
 
@@ -1795,7 +2078,10 @@ def seed_queue(per_archetype: int = 6) -> tuple[int, list[str]]:
         except ApiError as exc:
             errors.append(f"{candidate['customer_id']}: {exc}")
             continue
-        add_to_queue(candidate["customer_id"], candidate["values"], candidate["narratives"], result,
+        # identity (name/DOB) merged into the stored profile here, never into
+        # the payload above — see the Watchlist screening section's docstring.
+        profile = {**candidate["values"], **candidate["identity"]}
+        add_to_queue(candidate["customer_id"], profile, candidate["narratives"], result,
                      archetype=candidate["archetype"])
         succeeded += 1
     return succeeded, errors
@@ -1822,7 +2108,7 @@ def compute_kpis(queue: dict[str, dict[str, Any]], rules: list[dict[str, Any]] =
     the API's own band: a rule that escalates a customer is meant to show up
     here immediately, the same way a real trigger would."""
     now = dt.datetime.now(dt.UTC)
-    high_risk_pending = sla_breaches = escalated = 0
+    high_risk_pending = sla_breaches = escalated = watchlist_pending = 0
     for entry in queue.values():
         band = apply_custom_rules(entry, rules)["band"]
         status = entry["status"]
@@ -1834,8 +2120,14 @@ def compute_kpis(queue: dict[str, dict[str, Any]], rules: list[dict[str, Any]] =
                 sla_breaches += 1
         if status == "escalated_aml":
             escalated += 1
+        profile = entry["profile"]
+        hits = screen_customer(profile.get("full_name"), profile.get("date_of_birth"),
+                                profile.get("country_of_residence"))
+        dispositions = entry.get("watchlist_dispositions", {})
+        if any(h["id"] not in dispositions for h in hits):
+            watchlist_pending += 1
     return {"total": len(queue), "high_risk_pending": high_risk_pending,
-            "sla_breaches": sla_breaches, "escalated": escalated}
+            "sla_breaches": sla_breaches, "escalated": escalated, "watchlist_pending": watchlist_pending}
 
 
 def queue_dataframe(
@@ -1875,6 +2167,7 @@ def queue_dataframe(
             t("col.band"): f"{BAND_DOT.get(band, '⚪')} {band_label(band)}",
             t("col.score"): round(result["risk_score"], 1),
             t("col.custom_rules"): rule_badge_text(overlay),
+            t("col.watchlist"): watchlist_badge_text(entry),
             t("col.segment"): vocab_label("segment", entry["profile"]["segment"])
                               if entry["profile"].get("segment") else "—",
             t("col.country"): entry["profile"].get("country_of_residence", "—"),
@@ -1920,6 +2213,12 @@ def _resolve_field_value(field_key: str, profile: dict[str, Any], result: dict[s
         return result.get("risk_score")
     if field_key == "risk_band":
         return result.get("risk_band")
+    if field_key in ("watchlist_match_score", "watchlist_category"):
+        hits = screen_customer(profile.get("full_name"), profile.get("date_of_birth"),
+                                profile.get("country_of_residence"))
+        if field_key == "watchlist_match_score":
+            return hits[0]["match_score"] if hits else 0.0
+        return hits[0]["category"] if hits else "none"
     return profile.get(field_key)
 
 
@@ -2114,7 +2413,103 @@ def audit_detail_text(entry: dict[str, Any]) -> str:
         return t("auditlog.detail_language", previous=d["previous"], current=d["current"])
     if action == "role_switched":
         return t("auditlog.detail_role", previous=d["previous"], current=d["current"])
+    if action == "watchlist_disposition":
+        label = t(f"watchlist.disp_{d['disposition']}")
+        return t("auditlog.detail_watchlist", name=d["hit_name"], source=watchlist_source_label(d["list_source"]),
+                  label=label, note=d["note"])
     return ""
+
+
+# --------------------------------------------------------------------------
+# Watchlist & sanctions screening — Customer 360 workflow. screen_customer()
+# itself (the fuzzy-match engine) and WATCHLIST_ENTRIES/identity pools live
+# with the other constants near the top of this file; this section is the
+# investigate/dispose UI built on top of it. A disposition, once recorded,
+# is never edited or removed from entry["watchlist_dispositions"] — the
+# same append-only discipline as the audit log above, and for the same
+# reason: it is a compliance decision, not draft state.
+# --------------------------------------------------------------------------
+
+
+def render_watchlist_panel(entry: dict[str, Any]) -> None:
+    cid = entry["customer_id"]
+    show_flash(f"watchlist_{cid}")
+    profile = entry["profile"]
+    hits = screen_customer(profile.get("full_name"), profile.get("date_of_birth"),
+                            profile.get("country_of_residence"))
+    if not hits:
+        st.caption(t("watchlist.none"))
+        return
+
+    dispositions = entry.setdefault("watchlist_dispositions", {})
+    can_decide = has_permission("decide_case")
+    decide_help = None if can_decide else t("permission.decide_case_denied", role=role_label(
+        st.session_state.get("user_role", "junior_analyst")))
+
+    for hit in hits:
+        disposition = dispositions.get(hit["id"])
+        with st.container(border=True):
+            st.markdown(
+                f'<div><span style="font-weight:600;font-family:{FONT_STACK};">{hit["name"]}</span>&nbsp;&nbsp;'
+                f'{watchlist_hit_chip(hit)}&nbsp;&nbsp;'
+                f'<span style="color:{INK_SECONDARY};font-size:0.85rem;">'
+                f'{watchlist_source_label(hit["list_source"])} · {watchlist_category_label(hit["category"])}'
+                f'</span></div>',
+                unsafe_allow_html=True,
+            )
+            st.caption(hit["reason"])
+
+            if disposition is not None:
+                icon = "✅" if disposition["disposition"] == "false_positive" else "🚨"
+                label = t(f"watchlist.disp_{disposition['disposition']}")
+                st.markdown(
+                    f'<div><span style="font-family:{FONT_STACK};font-size:0.9rem;">{icon} '
+                    + t("watchlist.disposition_line", label=label, actor=html.escape(disposition["actor"]),
+                        note=html.escape(disposition["note"]))
+                    + "</span></div>",
+                    unsafe_allow_html=True,
+                )
+                continue
+
+            with st.form(f"watchlist_disp_{cid}_{hit['id']}"):
+                note = st.text_area(t("watchlist.note_label"), placeholder=t("watchlist.note_placeholder"),
+                                     height=70, key=f"watchlist_note_{cid}_{hit['id']}")
+                b1, b2 = st.columns(2)
+                false_positive = b1.form_submit_button(t("watchlist.mark_false_positive"),
+                                                         use_container_width=True, disabled=not can_decide,
+                                                         help=decide_help)
+                true_positive = b2.form_submit_button(t("watchlist.mark_true_positive"),
+                                                        use_container_width=True, disabled=not can_decide,
+                                                        help=decide_help)
+
+            new_disposition = "false_positive" if false_positive else "true_positive" if true_positive else None
+            if new_disposition is None:
+                continue
+            if not can_decide:
+                st.error(decide_help)
+                continue
+            if not note.strip():
+                st.error(t("watchlist.note_required"))
+                continue
+
+            actor = st.session_state.get("reviewer_name", "Risk Analyst")
+            dispositions[hit["id"]] = {
+                "disposition": new_disposition, "note": note.strip(), "actor": actor,
+                "role": st.session_state.get("user_role", "junior_analyst"), "at": dt.datetime.now(dt.UTC),
+            }
+            log_audit("watchlist_disposition", customer_id=cid, hit_id=hit["id"], hit_name=hit["name"],
+                      list_source=hit["list_source"], disposition=new_disposition, note=note.strip())
+            if new_disposition == "true_positive":
+                entry["status"] = "escalated_aml"
+                escalation_note = t("watchlist.auto_escalated_note", name=hit["name"],
+                                     source=watchlist_source_label(hit["list_source"]), note=note.strip())
+                entry["timeline"].append({
+                    "kind": "decision", "at": dt.datetime.now(dt.UTC), "action": "escalated_aml",
+                    "note": escalation_note, "actor": actor,
+                })
+                log_audit("case_decision", customer_id=cid, decision="escalated_aml", note=escalation_note)
+            flash_success(f"watchlist_{cid}", t("watchlist.disposition_recorded"))
+            st.rerun()
 
 
 # --------------------------------------------------------------------------
@@ -2139,11 +2534,12 @@ def page_queue() -> None:
         return
 
     kpis = compute_kpis(st.session_state.queue, st.session_state.custom_rules)
-    k1, k2, k3, k4 = st.columns(4)
+    k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric(t("queue.kpi_total"), kpis["total"])
     k2.metric(t("queue.kpi_high_risk"), kpis["high_risk_pending"])
     k3.metric(t("queue.kpi_sla"), kpis["sla_breaches"])
     k4.metric(t("queue.kpi_escalated"), kpis["escalated"])
+    k5.metric(t("queue.kpi_watchlist"), kpis["watchlist_pending"])
     st.caption(t("queue.sla_caption", extreme=SLA_HOURS["Extreme"], high=SLA_HOURS["High"],
                   medium=SLA_HOURS["Medium"], low=SLA_HOURS["Low"]))
 
@@ -2166,8 +2562,8 @@ def page_queue() -> None:
         st.caption(t("queue.no_match"))
     else:
         display_cols = [t(k) for k in ("col.customer_id", "col.band", "col.score", "col.custom_rules",
-                                        "col.segment", "col.country", "col.credit_risk", "col.crime_risk", "col.status",
-                                        "col.sla", "col.scored")]
+                                        "col.watchlist", "col.segment", "col.country", "col.credit_risk",
+                                        "col.crime_risk", "col.status", "col.sla", "col.scored")]
         event = st.dataframe(
             frame[display_cols], use_container_width=True, hide_index=True,
             on_select="rerun", selection_mode="single-row",
@@ -2210,7 +2606,9 @@ def page_queue() -> None:
             except ApiError as exc:
                 st.error(str(exc))
             else:
-                add_to_queue(onboard_id, values, base["_narratives"], result, archetype=onboard_preset)
+                full_name, date_of_birth = _DEMO_IDENTITY_POOL[onboard_preset][0]
+                profile = {**values, "full_name": full_name, "date_of_birth": date_of_birth}
+                add_to_queue(onboard_id, profile, base["_narratives"], result, archetype=onboard_preset)
                 st.session_state.selected_customer = onboard_id
                 flash_success("queue", t("queue.onboard_success", id=onboard_id, band=band_label(result["risk_band"])))
                 st.rerun()
@@ -2377,6 +2775,10 @@ def page_customer360() -> None:
 
     st.markdown(f"##### {t('rulebuilder.c360_header')}")
     render_rule_overlay(entry, st.session_state.custom_rules)
+
+    st.markdown(f"##### {t('watchlist.panel_header')}")
+    st.caption(t("watchlist.panel_caption"))
+    render_watchlist_panel(entry)
 
     st.divider()
     left, right = st.columns([3, 2], gap="large")
@@ -2558,6 +2960,18 @@ def page_simulator() -> None:
                 values["country_of_residence"] = c4.selectbox(
                     t("field.country"), COUNTRIES, index=COUNTRIES.index(preset["country_of_residence"]))
                 values["num_products_held"] = st.slider(t("field.products_held"), 0, 15, preset["num_products_held"])
+                # full_name/date_of_birth are deliberately kept OUT of `values`
+                # (the dict build_customer_payload below turns into the /score
+                # request body) — CustomerPayload has no such field and
+                # extra="forbid" would 422 on it. They exist only to drive the
+                # watchlist screening preview after scoring, same as every
+                # other identity field in this file (see Watchlist section).
+                default_name, default_dob = _DEMO_IDENTITY_POOL[preset_name][0]
+                c1, c2 = st.columns(2)
+                sandbox_full_name = c1.text_input(t("field.full_name"), value=default_name)
+                sandbox_dob = c2.date_input(t("field.date_of_birth"),
+                                             value=dt.date.fromisoformat(default_dob),
+                                             min_value=dt.date(1900, 1, 1), max_value=dt.date.today())
 
             with st.expander(t("sim.expander_income"), expanded=True):
                 c1, c2, c3, c4 = st.columns(4)
@@ -2693,8 +3107,9 @@ def page_simulator() -> None:
                 st.error(str(exc))
             else:
                 st.session_state.selected_customer = customer_id
+                identity = {"full_name": sandbox_full_name.strip(), "date_of_birth": sandbox_dob.isoformat()}
                 st.session_state.sandbox_last_result = {
-                    "customer_id": customer_id, "profile": customer_payload,
+                    "customer_id": customer_id, "profile": customer_payload, "identity": identity,
                     "narratives": narratives, "result": result, "preset": preset_name,
                 }
                 st.divider()
@@ -2705,6 +3120,12 @@ def page_simulator() -> None:
                 st.markdown(f"##### {t('sim.why_audience', audience=vocab_label('audience', audience))}")
                 render_factor_block(result["top_factors"], t("sim.no_factor"))
                 render_fired_rules(result["fired_rules"])
+                st.divider()
+                st.markdown(f"##### {t('sim.watchlist_header')}")
+                st.caption(t("sim.watchlist_caption"))
+                hits = screen_customer(identity["full_name"], identity["date_of_birth"],
+                                        customer_payload.get("country_of_residence"))
+                render_watchlist_preview(hits)
 
         last = st.session_state.get("sandbox_last_result")
         if last:
@@ -2712,8 +3133,8 @@ def page_simulator() -> None:
             if last["customer_id"] in st.session_state.queue:
                 st.warning(t("sim.overwrite_warning", id=last["customer_id"]))
             if st.button(t("sim.add_to_queue"), key="sandbox_add_to_queue"):
-                add_to_queue(last["customer_id"], last["profile"], last["narratives"], last["result"],
-                             archetype=f"sandbox ({last['preset']})")
+                add_to_queue(last["customer_id"], {**last["profile"], **last["identity"]}, last["narratives"],
+                             last["result"], archetype=f"sandbox ({last['preset']})")
                 st.session_state.sandbox_last_result = None
                 flash_success("sandbox", t("sim.added_to_queue", id=last["customer_id"]))
                 st.rerun()
