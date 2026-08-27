@@ -264,6 +264,13 @@
 }
 .cover-preview.has-img { color: transparent; }
 .cover-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* חיתוך תמונה (לוגו/קאבר) לפני שמירה */
+.crop-frame {
+  position: relative; width: 100%; aspect-ratio: var(--ar, 1); overflow: hidden;
+  border-radius: 14px; background: var(--surface-2); touch-action: none; cursor: grab;
+}
+.crop-frame:active { cursor: grabbing; }
+.crop-frame img { position: absolute; top: 0; left: 0; max-width: none; max-height: none; user-select: none; -webkit-user-drag: none; pointer-events: none; }
 /* שעות פעילות */
 .hours-card { padding: 4px 16px; }
 .hours-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }

@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "147";
+  const APP_VERSION = "148";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -2254,30 +2254,137 @@
     });
   }
 
+  /* ---------- חיתוך תמונה לפני שמירה (לוגו/קאבר) ----------
+     מודאל עם גרירה (עכבר/מגע) וזום (סליידר/צביטה), חיתוך ליחס קבוע ואז דחיסה —
+     בלי ספריות חיצוניות, רק Canvas ואירועי מצביע רגילים. */
+  function touchDist(t) { const dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY; return Math.hypot(dx, dy); }
+  function openCropper(file, opts) {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onerror = () => { URL.revokeObjectURL(url); toast("לא הצלחנו לטעון את התמונה", "", "⚠️"); };
+    img.onload = () => {
+      const ratio = opts.ratio || 1;
+      openModal(`
+        <div class="m-title">✂️ ${esc(opts.title || "חיתוך תמונה")}</div>
+        <div class="m-sub">גררו כדי למקם, והחליקו כדי להתקרב</div>
+        <div class="crop-frame" id="crop-frame" style="--ar:${ratio}"><img id="crop-img" src="${url}" alt="" draggable="false"></div>
+        <input type="range" id="crop-zoom" min="0" max="100" value="0" style="width:100%;margin-top:16px">
+        <div class="btn-row" style="margin-top:14px">
+          <button class="btn btn-primary" data-act2="crop-confirm">שמירה</button>
+          <button class="btn btn-ghost" data-act2="crop-cancel">ביטול</button>
+        </div>
+      `);
+      const frame = $("#crop-frame"), imgEl = $("#crop-img"), zoomEl = $("#crop-zoom");
+      const iw = img.naturalWidth, ih = img.naturalHeight;
+      const rect = frame.getBoundingClientRect();
+      const frameW = rect.width, frameH = rect.height;
+      const baseScale = Math.max(frameW / iw, frameH / ih);
+      const maxZoom = 3;
+      let zoom = 1, tx = (frameW - iw * baseScale) / 2, ty = (frameH - ih * baseScale) / 2;
+      const apply = () => {
+        const scale = baseScale * zoom;
+        const sw = iw * scale, sh = ih * scale;
+        tx = Math.min(0, Math.max(frameW - sw, tx));
+        ty = Math.min(0, Math.max(frameH - sh, ty));
+        imgEl.style.width = sw + "px"; imgEl.style.height = sh + "px";
+        imgEl.style.transform = `translate(${tx}px, ${ty}px)`;
+      };
+      apply();
+      let dragging = false, lastX = 0, lastY = 0, pinchDist0 = 0, pinchZoom0 = 1;
+      const onDown = (e) => {
+        if (e.touches && e.touches.length === 2) { pinchDist0 = touchDist(e.touches); pinchZoom0 = zoom; return; }
+        dragging = true;
+        const p = e.touches ? e.touches[0] : e;
+        lastX = p.clientX; lastY = p.clientY;
+      };
+      const onMove = (e) => {
+        if (e.touches && e.touches.length === 2) {
+          e.preventDefault();
+          const d = touchDist(e.touches);
+          zoom = Math.min(maxZoom, Math.max(1, pinchZoom0 * (d / (pinchDist0 || d))));
+          zoomEl.value = String(Math.round((zoom - 1) / (maxZoom - 1) * 100));
+          apply(); return;
+        }
+        if (!dragging) return;
+        e.preventDefault();
+        const p = e.touches ? e.touches[0] : e;
+        tx += p.clientX - lastX; ty += p.clientY - lastY;
+        lastX = p.clientX; lastY = p.clientY;
+        apply();
+      };
+      const onUp = () => { dragging = false; };
+      frame.addEventListener("mousedown", onDown);
+      frame.addEventListener("touchstart", onDown, { passive: true });
+      document.addEventListener("mousemove", onMove);
+      frame.addEventListener("touchmove", onMove, { passive: false });
+      document.addEventListener("mouseup", onUp);
+      frame.addEventListener("touchend", onUp);
+      zoomEl.addEventListener("input", () => {
+        zoom = 1 + (Number(zoomEl.value) / 100) * (maxZoom - 1);
+        apply();
+      });
+      const cleanup = () => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        URL.revokeObjectURL(url);
+      };
+      $("[data-act2='crop-cancel']").addEventListener("click", () => { cleanup(); closeModal(); });
+      $("[data-act2='crop-confirm']").addEventListener("click", () => {
+        const scale = baseScale * zoom;
+        const sx = -tx / scale, sy = -ty / scale, sw = frameW / scale, sh = frameH / scale;
+        const outW = opts.outW || 640, outH = Math.round(outW / ratio);
+        const canvas = document.createElement("canvas");
+        canvas.width = outW; canvas.height = outH;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+        let out;
+        if (opts.transparent) {
+          out = canvas.toDataURL("image/png");
+          if (out.length > (opts.maxBytes || 200000)) {   // גדול מדי — רקע לבן + JPEG (כמו compressLogo)
+            ctx.globalCompositeOperation = "destination-over";
+            ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, outW, outH);
+            let q = 0.85; out = canvas.toDataURL("image/jpeg", q);
+            while (out.length > (opts.maxBytes || 200000) && q > 0.4) { q -= 0.1; out = canvas.toDataURL("image/jpeg", q); }
+          }
+        } else {
+          let q = opts.quality || 0.75; out = canvas.toDataURL("image/jpeg", q);
+          while (out.length > (opts.maxBytes || 900000) && q > 0.4) { q -= 0.1; out = canvas.toDataURL("image/jpeg", q); }
+        }
+        cleanup(); closeModal();
+        opts.onDone(out);
+      });
+    };
+    img.src = url;
+  }
+
   async function handleLogoUpload(file) {
     if (!file || !file.type || file.type.indexOf("image/") !== 0) { toast("נא לבחור קובץ תמונה", "", "🖼️"); return; }
-    toast("מעלה לוגו…", "sky", "⏳");
-    try {
-      const dataUrl = await compressLogo(file);
-      await Store.setShopMedia("logo", dataUrl);
-      toast("הלוגו עודכן ✓ — כך יראו אותו הלקוחות", "good", "🎨");
-      render();
-    } catch (e) {
-      toast("לא הצלחנו להעלות את הלוגו", "", "⚠️");
-    }
+    openCropper(file, {
+      ratio: 1, title: "חיתוך לוגו", outW: 480, transparent: true, maxBytes: 200000,
+      onDone: async (dataUrl) => {
+        toast("מעלה לוגו…", "sky", "⏳");
+        try {
+          await Store.setShopMedia("logo", dataUrl);
+          toast("הלוגו עודכן ✓ — כך יראו אותו הלקוחות", "good", "🎨");
+          render();
+        } catch (e) { toast("לא הצלחנו לשמור את הלוגו", "", "⚠️"); }
+      },
+    });
   }
 
   async function handleCoverUpload(file) {
     if (!file || !file.type || file.type.indexOf("image/") !== 0) { toast("נא לבחור קובץ תמונה", "", "🖼️"); return; }
-    toast("מעלה תמונת נושא…", "sky", "⏳");
-    try {
-      const dataUrl = await compressImage(file, 1200, 0.7);   // תמונה רחבה
-      await Store.setShopMedia("cover", dataUrl);
-      toast("תמונת הנושא עודכנה ✓", "good", "🌄");
-      render();
-    } catch (e) {
-      toast("לא הצלחנו להעלות את התמונה", "", "⚠️");
-    }
+    openCropper(file, {
+      ratio: 16 / 7, title: "חיתוך תמונת נושא", outW: 1280, quality: 0.75, maxBytes: 900000,
+      onDone: async (dataUrl) => {
+        toast("מעלה תמונת נושא…", "sky", "⏳");
+        try {
+          await Store.setShopMedia("cover", dataUrl);
+          toast("תמונת הנושא עודכנה ✓", "good", "🌄");
+          render();
+        } catch (e) { toast("לא הצלחנו לשמור את התמונה", "", "⚠️"); }
+      },
+    });
   }
 
   /* ---------- קוד QR לקישור הלקוחות (מקומי, ללא רשת) ---------- */
