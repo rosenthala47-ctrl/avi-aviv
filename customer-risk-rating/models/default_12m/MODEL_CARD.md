@@ -5,26 +5,26 @@ Generated from `/home/user/avi-aviv/customer-risk-rating/models/default_12m` by 
 ## Identity
 
 - Target: `default_12m`
-- Trained at: 2026-08-23T17:29:38+00:00
-- Model: LightGBM 4.7.0, platt calibration, best iteration 37
-- Feature pipeline version: 1.1.0  (contract version 1.0.0, 138 features)
+- Trained at: 2026-08-28T07:20:01+00:00
+- Model: LightGBM 4.7.0, platt calibration, best iteration 160
+- Feature pipeline version: 1.1.0  (contract version 1.0.0, 147 features)
 - Trained on: outcomes (crr.models baseline path)
 
 ## Data lineage
 
 - Dataset seed: 42
-- Dataset config hash: `2b11b097e7039d86`
+- Dataset config hash: `ddcd91d68e01d83c`
 - Dataset schema version: 1.0.0
-- Generated at: 2026-08-23T17:06:32+00:00
-- Model artefact's recorded data hash: `2b11b097e7039d86` (matches dataset)
-- Row counts: customers=60,240, narratives=60,240, events=805,185, outcomes=60,240, ground_truth=60,240
+- Generated at: 2026-08-28T07:19:06+00:00
+- Model artefact's recorded data hash: `ddcd91d68e01d83c` (matches dataset)
+- Row counts: customers=80,320, narratives=80,320, events=1,075,832, outcomes=80,320, ground_truth=80,320
 
 ## Performance (out-of-time test split)
 
-- AUC: 0.7885  (Gini 0.5771, KS 0.4457, PR-AUC 0.2707)
-- Calibration: ECE 0.0069, 9/10 bins within 2 SE
-- n = 10,265, prevalence 5.41%
-- Validation -> test AUC gap: +0.0086 (phase 2's overfit criterion; see docs/ROADMAP.md)
+- AUC: 0.8017  (Gini 0.6034, KS 0.4854, PR-AUC 0.2728)
+- Calibration: ECE 0.0067, 8/10 bins within 2 SE
+- n = 13,505, prevalence 5.69%
+- Validation -> test AUC gap: +0.0100 (phase 2's overfit criterion; see docs/ROADMAP.md)
 
 ## Fairness
 

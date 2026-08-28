@@ -583,6 +583,56 @@ def _draw_behavioural(
         _sigmoid(-3.25 + 1.35 * zk + 1.8 * cash_intensity_ratio + 0.35 * rng.standard_normal(n)), 0.0, 1.0
     ).round(4)
 
+    # --- tier-1 AML/KYC indicators (added post-launch) -----------------------
+    # Actual turnover vs. what the declared profile would predict. Centred on 1
+    # (as expected); the *spread* around 1 widens with concealment, not the mean,
+    # because a mismatch cuts both ways — understated activity hides income,
+    # overstated activity means money is moving that the declared profile does
+    # not explain. A V-shaped risk term, same idea as _credit_terms' income
+    # mismatch, is built from this at the term level, not here.
+    expected_vs_actual_turnover_ratio = np.clip(
+        1.0 + rng.normal(0.0, 0.15 + 0.55 * _sigmoid(zk), n), 0.0, 10.0
+    ).round(3)
+
+    # Hours an inflow rests before leaving again. Unlike every other field in
+    # this block, LOW is the red flag — funds passing straight through is the
+    # classic layering/mule-account pattern — so the latent pulls the median
+    # DOWN, the opposite sign from cash_intensity_ratio/structuring_score above.
+    pass_through_velocity_hours = np.clip(
+        rng.lognormal(mean=4.9 - 1.3 * _sigmoid(zk), sigma=0.65, size=n), 0.5, 2000.0
+    ).round(2)
+
+    # Recent activity volume over the trailing 6-month baseline; 1.0 = no
+    # change. Log-normal so the occasional genuine spike has a realistic tail.
+    volume_spike_ratio_6m = np.clip(
+        rng.lognormal(mean=-0.35 + 0.55 * _sigmoid(zk) + 0.15 * _sigmoid(zv), sigma=0.35, size=n), 0.05, 10.0
+    ).round(3)
+
+    # Access via VPN/Tor or a high-risk-reputation IP: sigmoid-propensity ->
+    # bernoulli draw, the same template as pep_flag/sar_filed_prior below.
+    vpn_p = np.clip(
+        _sigmoid(-2.4 + 1.1 * zk + 0.4 * np.isin(segment, ["corporate", "private_banking"])), 0.02, 0.6
+    )
+    vpn_or_high_risk_ip_flag = (rng.random(n) < vpn_p).astype(int)
+
+    # Distinct devices used in the last 30 days; a handful is routine, a churn
+    # of devices tracks the same concealment latent as everything else here.
+    device_change_frequency_30d = rng.poisson(
+        np.clip(np.exp(-0.3 + 1.8 * _sigmoid(zk)), 0, 20)
+    ).clip(0, 60)
+
+    # Share of TOTAL volume (not just activity count) settled in cash — a
+    # related but distinct measurement from cash_intensity_ratio above (a real
+    # AML program computes both and they rarely agree exactly), so it is drawn
+    # as a noisy variant rather than a duplicate of the same number.
+    cash_to_total_volume_ratio = np.clip(cash_intensity_ratio + rng.normal(0.0, 0.06, n), 0.0, 1.0).round(4)
+
+    # Counterparty is a Virtual Asset Service Provider (exchange, custodian) —
+    # a sharper, more specific signal than the general crypto volume share, so
+    # it is drawn as correlated with but not identical to crypto_exposure_ratio_90d.
+    crypto_vasp_p = np.clip(crypto_exposure_ratio_90d * 1.6 + 0.02, 0.0, 0.85)
+    crypto_vasp_exposure_flag = (rng.random(n) < crypto_vasp_p).astype(int)
+
     return {
         "txn_count_90d": txn_count_90d,
         "txn_volume_90d": txn_volume_90d,
@@ -598,6 +648,13 @@ def _draw_behavioural(
         "gambling_spend_ratio_90d": gambling_spend_ratio_90d,
         "crypto_exposure_ratio_90d": crypto_exposure_ratio_90d,
         "structuring_score": structuring_score,
+        "expected_vs_actual_turnover_ratio": expected_vs_actual_turnover_ratio,
+        "pass_through_velocity_hours": pass_through_velocity_hours,
+        "volume_spike_ratio_6m": volume_spike_ratio_6m,
+        "vpn_or_high_risk_ip_flag": vpn_or_high_risk_ip_flag,
+        "device_change_frequency_30d": device_change_frequency_30d,
+        "cash_to_total_volume_ratio": cash_to_total_volume_ratio,
+        "crypto_vasp_exposure_flag": crypto_vasp_exposure_flag,
     }
 
 
@@ -678,6 +735,21 @@ def _draw_compliance(
         )
     ).astype(int)
 
+    # Layered/opaque ownership and a recent change of the ultimate beneficial
+    # owner are both structurally not-applicable to a retail individual
+    # customer, so both are held at a deterministic 0 there rather than drawn
+    # — the same "structurally absent, not missing" discipline collateral_
+    # coverage_ratio uses for an unsecured loan. For a business entity, this
+    # reuses the offshore_entity_links > 0 boost that already tilts
+    # ownership_transparency toward "opaque" above, so the two stay coherent.
+    non_retail = np.isin(segment, ["sme", "corporate", "private_banking"])
+    ownership_complexity_p = np.clip(_sigmoid(-2.0 + 1.4 * zk + 0.9 * (offshore_entity_links > 0)), 0.03, 0.85)
+    complex_ownership_structure_flag = np.where(
+        non_retail, (rng.random(n) < ownership_complexity_p).astype(int), 0
+    )
+    ubo_change_p = np.clip(_sigmoid(-2.6 + 1.1 * zk + 0.7 * complex_ownership_structure_flag), 0.02, 0.7)
+    recent_ubo_change_flag = np.where(non_retail, (rng.random(n) < ubo_change_p).astype(int), 0)
+
     edd_required = (
         (pep_flag == 1)
         | (high_risk_jurisdiction_exposure == 1)
@@ -702,6 +774,8 @@ def _draw_compliance(
         "beneficial_ownership_transparency": ownership_transparency,
         "sar_filed_prior": sar_filed_prior,
         "edd_required": edd_required,
+        "complex_ownership_structure_flag": complex_ownership_structure_flag,
+        "recent_ubo_change_flag": recent_ubo_change_flag,
     }
 
 
@@ -820,6 +894,16 @@ BETA_CRIME: dict[str, float] = {
     "x_cash_unexpected": 0.32,
     "x_structuring_cash": 0.28,
     "x_pep_offshore": 0.26,
+    # --- tier-1 AML/KYC indicators (added post-launch) -----------------------
+    "turnover_mismatch": 0.16,
+    "fast_pass_through": 0.26,
+    "volume_spike": 0.18,
+    "vpn_or_proxy": 0.14,
+    "device_churn": 0.12,
+    "complex_ownership": 0.20,
+    "ubo_change": 0.16,
+    "cash_share": 0.10,
+    "crypto_vasp": 0.16,
     # text-only
     "text_concealment": 1.70,
 }
@@ -991,6 +1075,24 @@ def _crime_terms(
         "x_cash_unexpected": cash_unexpected,
         "x_structuring_cash": structuring * cash,
         "x_pep_offshore": pep * (offshore >= 1).astype(float),
+        # --- tier-1 AML/KYC indicators (added post-launch) -------------------
+        # V-shaped: deviation from the expected turnover in EITHER direction,
+        # same "abs() of a mismatch" shape as _credit_terms' income_inconsistency.
+        "turnover_mismatch": np.abs(np.asarray(beh["expected_vs_actual_turnover_ratio"], dtype=float) - 1.0),
+        # Sign flipped relative to the raw field on purpose: LOW hours (fast
+        # pass-through) is the risk, so this term is large when hours are low.
+        "fast_pass_through": np.clip(
+            240.0 - np.asarray(beh["pass_through_velocity_hours"], dtype=float), -240.0, 240.0
+        ),
+        # Only the spike side counts as risk — a quiet 6 months is not itself
+        # a red flag, so this is clipped at 0 rather than signed both ways.
+        "volume_spike": np.clip(np.asarray(beh["volume_spike_ratio_6m"], dtype=float) - 1.0, 0.0, None),
+        "vpn_or_proxy": np.asarray(beh["vpn_or_high_risk_ip_flag"], dtype=float),
+        "device_churn": np.minimum(np.asarray(beh["device_change_frequency_30d"], dtype=float), 10.0),
+        "complex_ownership": np.asarray(comp["complex_ownership_structure_flag"], dtype=float),
+        "ubo_change": np.asarray(comp["recent_ubo_change_flag"], dtype=float),
+        "cash_share": np.asarray(beh["cash_to_total_volume_ratio"], dtype=float),
+        "crypto_vasp": np.asarray(beh["crypto_vasp_exposure_flag"], dtype=float),
         # --- text-only ------------------------------------------------------
         "text_concealment": np.asarray(txt["concealment_level"], dtype=float),
     }

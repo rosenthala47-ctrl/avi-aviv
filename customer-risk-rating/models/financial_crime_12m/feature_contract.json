@@ -417,6 +417,69 @@
       "nullable": true
     },
     {
+      "name": "expected_vs_actual_turnover_ratio",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: expected_vs_actual_turnover_ratio.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "pass_through_velocity_hours",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: pass_through_velocity_hours.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "volume_spike_ratio_6m",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: volume_spike_ratio_6m.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "vpn_or_high_risk_ip_flag",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: vpn_or_high_risk_ip_flag.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "device_change_frequency_30d",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: device_change_frequency_30d.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "cash_to_total_volume_ratio",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: cash_to_total_volume_ratio.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "crypto_vasp_exposure_flag",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: crypto_vasp_exposure_flag.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
       "name": "pep_flag",
       "kind": "numeric",
       "block": "customer",
@@ -511,6 +574,24 @@
       "kind": "numeric",
       "block": "customer",
       "description": "Customer attribute or derived ratio: edd_required.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "complex_ownership_structure_flag",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: complex_ownership_structure_flag.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "recent_ubo_change_flag",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: recent_ubo_change_flag.",
       "minimum": null,
       "maximum": null,
       "nullable": true

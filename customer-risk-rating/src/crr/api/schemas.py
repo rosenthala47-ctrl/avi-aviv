@@ -116,6 +116,27 @@ class CustomerPayload(BaseModel):
     gambling_spend_ratio_90d: float | None = Field(default=None, ge=0, le=1)
     crypto_exposure_ratio_90d: float | None = Field(default=None, ge=0, le=1)
     structuring_score: float | None = Field(default=None, ge=0, le=1)
+    # tier-1 AML/KYC indicators (added post-launch)
+    expected_vs_actual_turnover_ratio: float | None = Field(default=None, ge=0, le=_RATIO_MAX)
+    """Actual account turnover divided by the turnover expected for this customer's
+    declared profile. Close to 1 is normal; a large deviation either way is the
+    "this doesn't match what they told us" signal a tier-1 bank monitors for."""
+    pass_through_velocity_hours: float | None = Field(default=None, ge=0, le=8760)
+    """Median hours between an inflow landing and it leaving again. LOW values are
+    the red flag here, not high ones: funds that pass straight through without
+    resting is the classic layering/mule-account pattern."""
+    volume_spike_ratio_6m: float | None = Field(default=None, ge=0, le=_RATIO_MAX)
+    """Recent activity volume divided by the trailing 6-month baseline. 1 = no
+    change; well above 1 is a sudden, unexplained jump in account activity."""
+    cash_to_total_volume_ratio: float | None = Field(default=None, ge=0, le=1)
+    crypto_vasp_exposure_flag: int | None = Field(default=None, ge=0, le=1)
+    """Counterparty is a Virtual Asset Service Provider (an exchange, custodian or
+    similar) rather than a directional crypto payment — a distinct, higher-risk
+    signal from the general ``crypto_exposure_ratio_90d`` volume share."""
+
+    # --- digital & device ---------------------------------------------------
+    vpn_or_high_risk_ip_flag: int | None = Field(default=None, ge=0, le=1)
+    device_change_frequency_30d: int | None = Field(default=None, ge=0, le=100)
 
     # --- AML / KYC --------------------------------------------------------
     pep_flag: int | None = Field(default=None, ge=0, le=1)
@@ -133,6 +154,11 @@ class CustomerPayload(BaseModel):
     beneficial_ownership_transparency: str | None = None
     sar_filed_prior: int | None = Field(default=None, ge=0, le=1)
     edd_required: int | None = Field(default=None, ge=0, le=1)
+    complex_ownership_structure_flag: int | None = Field(default=None, ge=0, le=1)
+    """Layered/opaque ownership (holding companies, nominees, multiple
+    jurisdictions) — meaningful for a business entity, structurally not
+    applicable to a retail individual customer."""
+    recent_ubo_change_flag: int | None = Field(default=None, ge=0, le=1)
 
 
 class NarrativePayload(BaseModel):

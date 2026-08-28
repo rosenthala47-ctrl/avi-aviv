@@ -4,9 +4,9 @@ Why this layer exists
 ---------------------
 A regulator, an adverse-action notice, or a customer appeal needs a *reason*, not
 a coefficient. "Your application scored high because of ``f_credit_utilization_ratio:
-+0.318``" is not an explanation anyone is allowed to send. This module maps the
-model's 134 features onto a small, fixed set of human-readable reason codes that
-the risk team owns and signs off — the same shape as the adverse-action reason
++0.318``" is not an explanation anyone is allowed to send. This module maps every
+one of the model's features onto a small, fixed set of human-readable reason codes
+that the risk team owns and signs off — the same shape as the adverse-action reason
 codes lenders already issue under ECOA/Reg B and equivalents.
 
 Design rules
@@ -112,11 +112,12 @@ REASON_CODES: tuple[ReasonCode, ...] = (
     # --- transactional behaviour -----------------------------------------
     ReasonCode(
         "BH01", "behaviour", "Unusual recent transaction velocity",
-        frozenset({"txn_velocity_change_pct", "outflow_velocity_ratio", "event_count_velocity_ratio"}),
+        frozenset({"txn_velocity_change_pct", "outflow_velocity_ratio", "event_count_velocity_ratio",
+                   "volume_spike_ratio_6m"}),
     ),
     ReasonCode(
         "BH02", "behaviour", "High cash intensity",
-        frozenset({"cash_intensity_ratio", "large_cash_deposits_90d"}),
+        frozenset({"cash_intensity_ratio", "large_cash_deposits_90d", "cash_to_total_volume_ratio"}),
         patterns=(r"cash_deposit_.*",),
     ),
     ReasonCode(
@@ -126,8 +127,12 @@ REASON_CODES: tuple[ReasonCode, ...] = (
     ),
     ReasonCode(
         "BH04", "behaviour", "Cryptocurrency exposure",
-        frozenset({"crypto_exposure_ratio_90d"}),
+        frozenset({"crypto_exposure_ratio_90d", "crypto_vasp_exposure_flag"}),
         patterns=(r"crypto_transfer_.*",),
+    ),
+    ReasonCode(
+        "BH10", "behaviour", "Account turnover inconsistent with declared profile",
+        frozenset({"expected_vs_actual_turnover_ratio"}),
     ),
     ReasonCode(
         "BH05", "behaviour", "Gambling exposure",
@@ -153,6 +158,11 @@ REASON_CODES: tuple[ReasonCode, ...] = (
         patterns=(r"event_count_\d+d", r"inflow_\d+d", r"outflow_\d+d", r"net_flow_\d+d",
                   r"max_abs_amount_\d+d", r"has_event_history"),
     ),
+    # --- digital / device ---------------------------------------------------
+    ReasonCode(
+        "DG01", "digital", "Digital access or device risk signals",
+        frozenset({"vpn_or_high_risk_ip_flag", "device_change_frequency_30d"}),
+    ),
     # --- AML / compliance (several suppressed from customer view) ---------
     ReasonCode(
         "AM01", "aml", "Politically exposed person status",
@@ -172,7 +182,8 @@ REASON_CODES: tuple[ReasonCode, ...] = (
     ReasonCode(
         "AM04", "aml", "Opaque source of funds or ownership",
         frozenset({"source_of_funds_declared", "source_of_funds_verified",
-                   "beneficial_ownership_transparency", "offshore_entity_links"}),
+                   "beneficial_ownership_transparency", "offshore_entity_links",
+                   "complex_ownership_structure_flag", "recent_ubo_change_flag"}),
     ),
     ReasonCode(
         "AM05", "aml", "Prior suspicious-activity report",
@@ -187,6 +198,11 @@ REASON_CODES: tuple[ReasonCode, ...] = (
     ReasonCode(
         "AM07", "aml", "Aggregate compliance risk indicators",
         frozenset({"aml_flag_count", "cash_and_crypto_exposure", "edd_required"}),
+        customer_visible=False,
+    ),
+    ReasonCode(
+        "AM08", "aml", "Funds pattern consistent with rapid pass-through (layering)",
+        frozenset({"pass_through_velocity_hours"}),
         customer_visible=False,
     ),
     ReasonCode(

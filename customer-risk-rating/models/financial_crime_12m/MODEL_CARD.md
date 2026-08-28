@@ -5,26 +5,26 @@ Generated from `/home/user/avi-aviv/customer-risk-rating/models/financial_crime_
 ## Identity
 
 - Target: `financial_crime_12m`
-- Trained at: 2026-08-23T17:31:28+00:00
-- Model: LightGBM 4.7.0, platt calibration, best iteration 383
-- Feature pipeline version: 1.1.0  (contract version 1.0.0, 138 features)
+- Trained at: 2026-08-28T07:20:38+00:00
+- Model: LightGBM 4.7.0, platt calibration, best iteration 99
+- Feature pipeline version: 1.1.0  (contract version 1.0.0, 147 features)
 - Trained on: outcomes (crr.models baseline path)
 
 ## Data lineage
 
 - Dataset seed: 42
-- Dataset config hash: `2b11b097e7039d86`
+- Dataset config hash: `ddcd91d68e01d83c`
 - Dataset schema version: 1.0.0
-- Generated at: 2026-08-23T17:06:32+00:00
-- Model artefact's recorded data hash: `2b11b097e7039d86` (matches dataset)
-- Row counts: customers=60,240, narratives=60,240, events=805,185, outcomes=60,240, ground_truth=60,240
+- Generated at: 2026-08-28T07:19:06+00:00
+- Model artefact's recorded data hash: `ddcd91d68e01d83c` (matches dataset)
+- Row counts: customers=80,320, narratives=80,320, events=1,075,832, outcomes=80,320, ground_truth=80,320
 
 ## Performance (out-of-time test split)
 
-- AUC: 0.8238  (Gini 0.6476, KS 0.5461, PR-AUC 0.1524)
-- Calibration: ECE 0.0024, 9/10 bins within 2 SE
-- n = 10,265, prevalence 1.42%
-- Validation -> test AUC gap: -0.0300 (phase 2's overfit criterion; see docs/ROADMAP.md)
+- AUC: 0.8069  (Gini 0.6139, KS 0.5003, PR-AUC 0.1734)
+- Calibration: ECE 0.0021, 9/10 bins within 2 SE
+- n = 13,505, prevalence 1.51%
+- Validation -> test AUC gap: -0.0167 (phase 2's overfit criterion; see docs/ROADMAP.md)
 
 ## Fairness
 

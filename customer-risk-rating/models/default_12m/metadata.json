@@ -1,13 +1,13 @@
 {
   "target": "default_12m",
-  "trained_at_utc": "2026-08-24T13:11:23+00:00",
+  "trained_at_utc": "2026-08-28T07:20:01+00:00",
   "lightgbm_version": "4.7.0",
   "pipeline_version": "1.1.0",
   "contract_version": "1.0.0",
-  "n_features": 138,
+  "n_features": 147,
   "n_categorical": 12,
   "calibration": "platt",
-  "best_iteration": 137,
+  "best_iteration": 160,
   "params": {
     "objective": "binary",
     "metric": "auc",
@@ -27,27 +27,27 @@
     "verbosity": -1
   },
   "seed": 42,
-  "n_train": 33430,
-  "n_validation": 8373,
-  "n_test": 8397,
-  "data_config_hash": "135e70978e03587e",
+  "n_train": 53361,
+  "n_validation": 13454,
+  "n_test": 13505,
+  "data_config_hash": "ddcd91d68e01d83c",
   "data_schema_version": "1.0.0",
   "exit_criteria_met": true,
   "exit_criteria": [
     {
-      "check": "no overfit: |test - validation| AUC 0.0121 <= 0.0366 (2 SE)",
+      "check": "no overfit: |test - validation| AUC 0.0100 <= 0.0280 (2 SE)",
       "passed": true
     },
     {
-      "check": "calibration: test ECE 0.0092 <= 0.02",
+      "check": "calibration: test ECE 0.0067 <= 0.02",
       "passed": true
     },
     {
-      "check": "calibration bins within 2 SE: 9/10 >= 8",
+      "check": "calibration bins within 2 SE: 8/10 >= 8",
       "passed": true
     },
     {
-      "check": "discrimination: test AUC 0.7759 >= 0.70",
+      "check": "discrimination: test AUC 0.8017 >= 0.70",
       "passed": true
     }
   ]

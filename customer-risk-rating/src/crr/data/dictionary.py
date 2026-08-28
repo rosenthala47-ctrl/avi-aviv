@@ -95,6 +95,13 @@ COLUMNS: dict[str, ColumnDoc] = {
     "gambling_spend_ratio_90d": ColumnDoc("behavioural", "Share of spend at gambling merchants."),
     "crypto_exposure_ratio_90d": ColumnDoc("behavioural", "Share of value moving to or from crypto venues."),
     "structuring_score": ColumnDoc("behavioural", "Propensity of deposits to sit just under the reporting threshold."),
+    "expected_vs_actual_turnover_ratio": ColumnDoc("behavioural", "Actual account turnover divided by the turnover expected for the declared profile."),
+    "pass_through_velocity_hours": ColumnDoc("behavioural", "Median hours an inflow rests before leaving again.", note="Low, not high, is the red flag — a layering/mule-account pattern."),
+    "volume_spike_ratio_6m": ColumnDoc("behavioural", "Recent activity volume over the trailing 6-month baseline."),
+    "cash_to_total_volume_ratio": ColumnDoc("behavioural", "Share of total transacted volume settled in cash."),
+    "crypto_vasp_exposure_flag": ColumnDoc("behavioural", "Counterparty is a Virtual Asset Service Provider (exchange, custodian) rather than a directional crypto payment."),
+    "vpn_or_high_risk_ip_flag": ColumnDoc("behavioural", "Access via VPN, Tor or an IP on a high-risk reputation list."),
+    "device_change_frequency_30d": ColumnDoc("behavioural", "Distinct devices used to access the account in the last 30 days."),
     # --- compliance -------------------------------------------------------
     "pep_flag": ColumnDoc("compliance", "Customer is politically exposed."),
     "pep_relationship": ColumnDoc("compliance", "none / self / family_member / close_associate."),
@@ -111,6 +118,8 @@ COLUMNS: dict[str, ColumnDoc] = {
     "beneficial_ownership_transparency": ColumnDoc("compliance", "clear / partial / opaque."),
     "sar_filed_prior": ColumnDoc("compliance", "A suspicious activity report was filed before the snapshot."),
     "edd_required": ColumnDoc("compliance", "Enhanced due diligence triggered by policy."),
+    "complex_ownership_structure_flag": ColumnDoc("compliance", "Layered/opaque ownership.", note="Meaningful for a business entity; structurally absent for a retail individual."),
+    "recent_ubo_change_flag": ColumnDoc("compliance", "The ultimate beneficial owner changed recently."),
     # --- narratives -------------------------------------------------------
     "language": ColumnDoc("narrative", "Language of the narrative fields: en or he."),
     "support_call_summary": ColumnDoc("narrative", "Agent's summary of a customer-service interaction."),

@@ -200,6 +200,10 @@ PRESETS: dict[str, dict[str, Any]] = {
         "txn_count_90d": 180, "cash_intensity_ratio": 0.04, "cross_border_txn_ratio": 0.02,
         "night_txn_ratio": 0.05, "structuring_score": 0.02, "crypto_exposure_ratio_90d": 0.0,
         "gambling_spend_ratio_90d": 0.0, "new_counterparty_ratio_90d": 0.10,
+        "expected_vs_actual_turnover_ratio": 1.0, "pass_through_velocity_hours": 240.0,
+        "volume_spike_ratio_6m": 1.05, "vpn_or_high_risk_ip_flag": 0, "device_change_frequency_30d": 1,
+        "complex_ownership_structure_flag": 0, "recent_ubo_change_flag": 0,
+        "cash_to_total_volume_ratio": 0.03, "crypto_vasp_exposure_flag": 0,
         "pep_flag": 0, "sanctions_screen_hits": 0, "adverse_media_hits_12m": 0,
         "high_risk_jurisdiction_exposure": 0, "medium_risk_jurisdiction_exposure": 0,
         "offshore_entity_links": 0, "source_of_funds_declared": "salary",
@@ -224,6 +228,10 @@ PRESETS: dict[str, dict[str, Any]] = {
         "txn_count_90d": 96, "cash_intensity_ratio": 0.24, "cross_border_txn_ratio": 0.01,
         "night_txn_ratio": 0.15, "structuring_score": 0.08, "crypto_exposure_ratio_90d": 0.02,
         "gambling_spend_ratio_90d": 0.04, "new_counterparty_ratio_90d": 0.28,
+        "expected_vs_actual_turnover_ratio": 0.85, "pass_through_velocity_hours": 190.0,
+        "volume_spike_ratio_6m": 1.2, "vpn_or_high_risk_ip_flag": 0, "device_change_frequency_30d": 2,
+        "complex_ownership_structure_flag": 0, "recent_ubo_change_flag": 0,
+        "cash_to_total_volume_ratio": 0.10, "crypto_vasp_exposure_flag": 0,
         "pep_flag": 0, "sanctions_screen_hits": 0, "adverse_media_hits_12m": 0,
         "high_risk_jurisdiction_exposure": 0, "medium_risk_jurisdiction_exposure": 0,
         "offshore_entity_links": 0, "source_of_funds_declared": "business_income",
@@ -249,6 +257,10 @@ PRESETS: dict[str, dict[str, Any]] = {
         "txn_count_90d": 420, "cash_intensity_ratio": 0.72, "cross_border_txn_ratio": 0.68,
         "night_txn_ratio": 0.41, "structuring_score": 0.83, "crypto_exposure_ratio_90d": 0.35,
         "gambling_spend_ratio_90d": 0.0, "new_counterparty_ratio_90d": 0.77,
+        "expected_vs_actual_turnover_ratio": 3.4, "pass_through_velocity_hours": 6.0,
+        "volume_spike_ratio_6m": 4.8, "vpn_or_high_risk_ip_flag": 1, "device_change_frequency_30d": 9,
+        "complex_ownership_structure_flag": 1, "recent_ubo_change_flag": 1,
+        "cash_to_total_volume_ratio": 0.55, "crypto_vasp_exposure_flag": 1,
         "pep_flag": 1, "sanctions_screen_hits": 0, "adverse_media_hits_12m": 3,
         "high_risk_jurisdiction_exposure": 1, "medium_risk_jurisdiction_exposure": 1,
         "offshore_entity_links": 4, "source_of_funds_declared": "undeclared",
@@ -650,6 +662,13 @@ I18N: dict[str, dict[str, str]] = {
         "sim.expander_income": "Income & credit",
         "sim.expander_txn": "Transaction behaviour",
         "sim.expander_aml": "AML / KYC",
+        "sim.expander_tier1_aml": "Advanced Risk Indicators (Tier-1 AML/KYC)",
+        "sim.tier1_aml_caption": "Behavioral, digital, corporate and cash/crypto indicators used by tier-1 "
+                                 "banks for advanced AML/KYC screening.",
+        "sim.group_behavioral": "Behavioral",
+        "sim.group_digital": "Digital & Device",
+        "sim.group_corporate": "Corporate / Legal",
+        "sim.group_cash_crypto": "Cash & Crypto",
         "sim.expander_narrative": "Narrative notes (free text)",
 
         "field.segment": "Segment",
@@ -698,6 +717,15 @@ I18N: dict[str, dict[str, str]] = {
         "field.source_verified": "Source verified",
         "field.kyc_completeness": "KYC completeness",
         "field.kyc_refresh_overdue": "KYC refresh overdue (days)",
+        "field.turnover_ratio": "Expected vs. actual turnover ratio",
+        "field.pass_through_hours": "Pass-through velocity (hours funds rest)",
+        "field.volume_spike": "6-month volume spike ratio",
+        "field.vpn_flag": "VPN / high-risk IP",
+        "field.device_changes": "Device changes (30d)",
+        "field.complex_ownership": "Complex ownership structure",
+        "field.ubo_change": "Recent UBO change",
+        "field.cash_to_volume": "Cash share of total volume",
+        "field.crypto_vasp": "Crypto VASP exposure",
 
         "sim.narrative_caption": "Treated as untrusted input. Text reaches the extractor inside a data "
                                  "envelope, and the schema it must answer through has no field that means "
@@ -1095,6 +1123,13 @@ I18N: dict[str, dict[str, str]] = {
         "sim.expander_income": "הכנסה ואשראי",
         "sim.expander_txn": "התנהגות עסקאות",
         "sim.expander_aml": "הלבנת הון / KYC",
+        "sim.expander_tier1_aml": "מדדי סיכון מתקדמים (הלבנת הון/הכרת הלקוח — בנקים מובילים)",
+        "sim.tier1_aml_caption": "מדדים התנהגותיים, דיגיטליים, תאגידיים ומזומן/קריפטו כפי שמיושמים "
+                                 "בבנקים מובילים לצורך סינון מתקדם נגד הלבנת הון והכרת הלקוח.",
+        "sim.group_behavioral": "התנהגותי",
+        "sim.group_digital": "דיגיטלי ומכשירים",
+        "sim.group_corporate": "תאגידי / משפטי",
+        "sim.group_cash_crypto": "מזומן וקריפטו",
         "sim.expander_narrative": "הערות נרטיביות (טקסט חופשי)",
 
         "field.segment": "מגזר",
@@ -1143,6 +1178,15 @@ I18N: dict[str, dict[str, str]] = {
         "field.source_verified": "מקור מאומת",
         "field.kyc_completeness": "שלמות מסמכי KYC",
         "field.kyc_refresh_overdue": "עדכון KYC באיחור (ימים)",
+        "field.turnover_ratio": "יחס מחזור צפוי מול בפועל",
+        "field.pass_through_hours": "מהירות מעבר כספים (שעות מנוחה בחשבון)",
+        "field.volume_spike": "קפיצת נפח פעילות (6 חודשים)",
+        "field.vpn_flag": "VPN / כתובת IP בסיכון גבוה",
+        "field.device_changes": "שינויי מכשיר (30 יום)",
+        "field.complex_ownership": "מבנה בעלות מורכב",
+        "field.ubo_change": "שינוי בעל שליטה מיטיב לאחרונה",
+        "field.cash_to_volume": "חלק המזומן מסך המחזור",
+        "field.crypto_vasp": "חשיפה לספק נכסים וירטואליים (VASP)",
 
         "sim.narrative_caption": "מטופל כקלט לא מהימן. הטקסט מגיע לחולץ בתוך מעטפת נתונים, והסכימה שהוא "
                                  "חייב לענות דרכה אינה כוללת שדה שמשמעותו ציון או רמה — הוראה מוסתרת "
@@ -1448,6 +1492,15 @@ RULE_FIELDS: list[tuple[str, str, str]] = [
     ("prior_default_flag", "field.prior_default", "flag"),
     ("sar_filed_prior", "field.prior_sar", "flag"),
     ("edd_required", "field.edd_required", "flag"),
+    ("expected_vs_actual_turnover_ratio", "field.turnover_ratio", "numeric"),
+    ("pass_through_velocity_hours", "field.pass_through_hours", "numeric"),
+    ("volume_spike_ratio_6m", "field.volume_spike", "numeric"),
+    ("device_change_frequency_30d", "field.device_changes", "numeric"),
+    ("cash_to_total_volume_ratio", "field.cash_to_volume", "numeric"),
+    ("vpn_or_high_risk_ip_flag", "field.vpn_flag", "flag"),
+    ("complex_ownership_structure_flag", "field.complex_ownership", "flag"),
+    ("recent_ubo_change_flag", "field.ubo_change", "flag"),
+    ("crypto_vasp_exposure_flag", "field.crypto_vasp", "flag"),
     ("risk_band", "rulebuilder.field_risk_band", "band"),
     ("risk_score", "rulebuilder.field_risk_score", "numeric"),
     ("watchlist_match_score", "rulebuilder.field_watchlist_score", "numeric"),
@@ -1481,6 +1534,8 @@ _RULE_NUMERIC_STEP: dict[str, float] = {
     "declared_annual_income": 1000.0, "credit_utilization_ratio": 0.01, "dti_ratio": 0.01,
     "cash_intensity_ratio": 0.01, "cross_border_txn_ratio": 0.01, "structuring_score": 0.01,
     "crypto_exposure_ratio_90d": 0.01,
+    "expected_vs_actual_turnover_ratio": 0.01, "volume_spike_ratio_6m": 0.01,
+    "cash_to_total_volume_ratio": 0.01, "pass_through_velocity_hours": 0.5,
 }
 
 
@@ -1556,6 +1611,11 @@ _AML_CONCERN_JITTER: dict[str, tuple[float | None, float | None, float, float | 
     "kyc_document_completeness": (0.3, None, 0.0, 1.0, False),
     "new_counterparty_ratio_90d": (0.3, None, 0.0, 1.0, False),
     "txn_count_90d": (0.3, None, 0, 2000, True),
+    "expected_vs_actual_turnover_ratio": (0.3, None, 0.0, 10.0, False),
+    "pass_through_velocity_hours": (0.4, None, 0.5, 2000.0, False),
+    "volume_spike_ratio_6m": (0.3, None, 0.0, 10.0, False),
+    "device_change_frequency_30d": (None, 3, 0, 100, True),
+    "cash_to_total_volume_ratio": (0.3, None, 0.0, 1.0, False),
 }
 _ARCHETYPE_JITTER = {
     "Low risk — salaried, clean file": _LOW_RISK_JITTER,
@@ -3062,6 +3122,40 @@ def page_simulator() -> None:
                     t("field.kyc_completeness"), 0.0, 1.0, preset["kyc_document_completeness"], 0.05)
                 values["kyc_refresh_overdue_days"] = st.slider(
                     t("field.kyc_refresh_overdue"), 0, 1000, preset["kyc_refresh_overdue_days"])
+
+            with st.expander(t("sim.expander_tier1_aml")):
+                st.caption(t("sim.tier1_aml_caption"))
+                st.markdown(f"**{t('sim.group_behavioral')}**")
+                c1, c2, c3 = st.columns(3)
+                values["expected_vs_actual_turnover_ratio"] = c1.slider(
+                    t("field.turnover_ratio"), 0.0, 10.0, preset["expected_vs_actual_turnover_ratio"], 0.05)
+                values["pass_through_velocity_hours"] = c2.slider(
+                    t("field.pass_through_hours"), 0.0, 720.0, preset["pass_through_velocity_hours"], 1.0)
+                values["volume_spike_ratio_6m"] = c3.slider(
+                    t("field.volume_spike"), 0.0, 10.0, preset["volume_spike_ratio_6m"], 0.05)
+
+                st.markdown(f"**{t('sim.group_digital')}**")
+                c1, c2 = st.columns(2)
+                values["vpn_or_high_risk_ip_flag"] = c1.selectbox(
+                    t("field.vpn_flag"), [0, 1], index=preset["vpn_or_high_risk_ip_flag"], format_func=yes_no_label)
+                values["device_change_frequency_30d"] = c2.slider(
+                    t("field.device_changes"), 0, 30, preset["device_change_frequency_30d"])
+
+                st.markdown(f"**{t('sim.group_corporate')}**")
+                c1, c2 = st.columns(2)
+                values["complex_ownership_structure_flag"] = c1.selectbox(
+                    t("field.complex_ownership"), [0, 1], index=preset["complex_ownership_structure_flag"],
+                    format_func=yes_no_label)
+                values["recent_ubo_change_flag"] = c2.selectbox(
+                    t("field.ubo_change"), [0, 1], index=preset["recent_ubo_change_flag"], format_func=yes_no_label)
+
+                st.markdown(f"**{t('sim.group_cash_crypto')}**")
+                c1, c2 = st.columns(2)
+                values["cash_to_total_volume_ratio"] = c1.slider(
+                    t("field.cash_to_volume"), 0.0, 1.0, preset["cash_to_total_volume_ratio"], 0.01)
+                values["crypto_vasp_exposure_flag"] = c2.selectbox(
+                    t("field.crypto_vasp"), [0, 1], index=preset["crypto_vasp_exposure_flag"],
+                    format_func=yes_no_label)
 
             with st.expander(t("sim.expander_narrative")):
                 st.caption(t("sim.narrative_caption"))
