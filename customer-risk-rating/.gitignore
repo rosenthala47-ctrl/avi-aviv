@@ -41,3 +41,9 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+
+# Workflow store (case management / auth / audit) — local SQLite
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm

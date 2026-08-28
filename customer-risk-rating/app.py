@@ -1,15 +1,19 @@
 """Streamlit front end for the Customer Risk Rating API — an operations console.
 
-A thin HTTP client, deliberately. Every score, band, SHAP factor and re-score
-shown here comes from the live FastAPI service over its documented endpoints —
-this module holds no model, no policy and no scoring logic that could quietly
-disagree with the API. That discipline extends to the workflow layer added in
-this file (the Operations Queue, case status, SLA clock and review notes): the
-API has no case-management endpoints, so that state is held in
-``st.session_state`` for this browser session only — it is not written to any
-database, and a page refresh or a new tab starts a fresh queue. It exists to
-demonstrate the reviewer workflow a real deployment would wire to a case
-system, not to replace one.
+A thin HTTP client to the model, deliberately. Every score, band, SHAP factor
+and re-score shown here comes from the live FastAPI service over its documented
+endpoints — this module holds no model, no policy and no scoring logic that
+could quietly disagree with the API.
+
+The reviewer workflow around those scores — user accounts and login, case
+status, review notes and timelines, the Rule Builder's dynamic rules, watchlist
+dispositions, and an immutable audit trail — is persisted to a database via the
+``crr.workflow`` package (SQLite by default, PostgreSQL via
+``CRR_WORKFLOW_DB_URL``). It survives a page refresh, a new tab and a restart;
+role is the signed-in account's, read from the database, with no session-state
+role switcher. The API still has no case-management endpoints — that layer is
+this console's own, and it now has real persistence behind it rather than
+``st.session_state`` that evaporated on refresh.
 
 Bilingual (Hebrew default, English toggle) via the ``I18N``/``VOCAB`` tables
 and the ``t()``/``vocab_label()`` lookups below — every user-facing string in
@@ -31,6 +35,8 @@ import difflib
 import html
 import os
 import random
+import sys
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -39,8 +45,49 @@ import requests
 import streamlit as st
 from streamlit.components.v1 import html as components_html
 
+# The workflow store (case management, auth, audit) is real Python that runs
+# in-process here, unlike the scoring service which stays behind the HTTP
+# boundary. Make the src/ package importable the same way the scripts do.
+_SRC = Path(__file__).resolve().parent / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
+from crr.workflow import (  # noqa: E402  (path setup must run first)
+    DEMO_USERS,
+    WorkflowStore,
+    create_session_factory,
+    resolve_database_url,
+)
+
 API_URL = os.environ.get("CRR_API_URL", "http://127.0.0.1:8000").rstrip("/")
 REQUEST_TIMEOUT = float(os.environ.get("CRR_UI_TIMEOUT", "30"))
+
+
+@st.cache_resource
+def get_store() -> WorkflowStore:
+    """Process-wide singleton: one engine + session factory, tables created and
+    demo users seeded once. ``@st.cache_resource`` keeps it alive across reruns
+    and shares it across browser sessions in the same server process."""
+    store = WorkflowStore(create_session_factory(resolve_database_url()))
+    store.seed_default_users()
+    return store
+
+
+# --- current-user helpers (the logged-in account is the source of truth for
+# role and attribution — there is no session-state role switcher any more) ---
+
+
+def current_user() -> dict[str, Any]:
+    return st.session_state.get("auth_user") or {}
+
+
+def current_role() -> str:
+    return current_user().get("role", "junior_analyst")
+
+
+def current_actor() -> str:
+    """Human-readable attribution for decisions, notes and audit rows."""
+    return current_user().get("display_name") or current_user().get("username") or "System"
 
 # --------------------------------------------------------------------------
 # Design tokens.
@@ -126,7 +173,7 @@ _CAPABILITY_MIN_ROLE = {"decide_case": "risk_manager", "manage_rules": "complian
 
 
 def has_permission(capability: str) -> bool:
-    role = st.session_state.get("user_role", "junior_analyst")
+    role = current_role()
     min_role = _CAPABILITY_MIN_ROLE.get(capability)
     return min_role is None or ROLE_RANK.get(role, 0) >= ROLE_RANK[min_role]
 
@@ -433,15 +480,34 @@ I18N: dict[str, dict[str, str]] = {
         "sidebar.nav_rulebuilder": "⚙️ Rule Builder & Policy Engine",
         "sidebar.nav_auditlog": "🛡️ Audit Log",
         "sidebar.role_label": "Role",
-        "sidebar.role_help": "Controls which actions you can take below — a session-local role-play, the "
-                             "same honesty as the reviewer name above: no real authentication behind it.",
+        "sidebar.role_help": "Your role comes from your signed-in account and controls which actions you "
+                             "can take. To change it, an administrator edits the account.",
+        "sidebar.sign_out": "Sign out",
         "role.junior_analyst": "Junior Analyst",
         "role.risk_manager": "Risk Manager",
         "role.compliance_admin": "Compliance Officer / Admin",
+        "login.title": "Sign in",
+        "login.subtitle": "Enterprise Risk & Compliance Console",
+        "login.username": "Username",
+        "login.password": "Password",
+        "login.submit": "Sign in",
+        "login.failed": "Incorrect username or password.",
+        "login.demo_header": "Demo accounts",
+        "login.demo_hint": "This is a demo. Sign in with one of the seeded accounts below; a real "
+                           "deployment disables these and provisions accounts per user.",
+        "users.header": "User management",
+        "users.new_username": "Username",
+        "users.new_display_name": "Display name",
+        "users.new_role": "Role",
+        "users.new_password": "Password",
+        "users.create": "Create user",
+        "users.created": "Created user {username}.",
+        "users.error": "Could not create user: {detail}",
+        "users.existing": "{n} accounts",
         "sidebar.footer": "Scores, explanations and re-scoring all come from the live FastAPI service over "
-                          "its public endpoints — no model or policy logic is duplicated here. Case status, "
-                          "SLA and review notes are this session's workflow state only: nothing here is "
-                          "written to a case-management database.",
+                          "its public endpoints — no model or policy logic is duplicated here. Case "
+                          "decisions, notes, rules, watchlist rulings and the audit trail are persisted to "
+                          "the workflow database and survive a refresh, a new tab and a restart.",
 
         "common.band_prefix": "band",
         "common.case_prefix": "case:",
@@ -849,6 +915,9 @@ I18N: dict[str, dict[str, str]] = {
         "auditlog.action_language_switched": "Language switched",
         "auditlog.action_role_switched": "Role switched",
         "auditlog.action_watchlist_disposition": "Watchlist disposition",
+        "auditlog.action_login": "Signed in",
+        "auditlog.action_logout": "Signed out",
+        "auditlog.action_user_created": "User created",
         "auditlog.detail_decision": "{label} — “{note}”",
         "auditlog.detail_note": "“{note}”",
         "auditlog.detail_rule_created": "{name}: {conditions} → {action}",
@@ -858,6 +927,7 @@ I18N: dict[str, dict[str, str]] = {
         "auditlog.detail_language": "{previous} → {current}",
         "auditlog.detail_role": "{previous} → {current}",
         "auditlog.detail_watchlist": "{name} ({source}) → {label} — “{note}”",
+        "auditlog.detail_user_created": "{username} ({role})",
 
         "watchlist.panel_header": "Watchlist Hits",
         "watchlist.panel_caption": "Fuzzy name/date-of-birth/country match against a demo OFAC/EU/UN/PEP/"
@@ -903,15 +973,34 @@ I18N: dict[str, dict[str, str]] = {
         "sidebar.nav_rulebuilder": "⚙️ בונה כללים ומנוע מדיניות",
         "sidebar.nav_auditlog": "🛡️ יומן ביקורת",
         "sidebar.role_label": "תפקיד",
-        "sidebar.role_help": "קובע אילו פעולות תוכל/י לבצע למטה — משחק תפקידים מקומי לסשן זה, באותה "
-                             "כנות כמו שם הבודק למעלה: אין מאחוריו אימות אמיתי.",
+        "sidebar.role_help": "התפקיד נקבע לפי החשבון שאיתו התחברת ושולט באילו פעולות תוכל/י לבצע. "
+                             "לשינוי, מנהל/ת מערכת עורך/ת את החשבון.",
+        "sidebar.sign_out": "התנתקות",
         "role.junior_analyst": "אנליסט/ית זוטר/ה",
         "role.risk_manager": "מנהל/ת סיכונים",
         "role.compliance_admin": "קצין/ת ציות / מנהל/ת מערכת",
+        "login.title": "התחברות",
+        "login.subtitle": "קונסולת ניהול סיכונים וציות ארגונית",
+        "login.username": "שם משתמש",
+        "login.password": "סיסמה",
+        "login.submit": "התחברות",
+        "login.failed": "שם משתמש או סיסמה שגויים.",
+        "login.demo_header": "חשבונות הדגמה",
+        "login.demo_hint": "זוהי הדגמה. התחבר/י עם אחד מחשבונות ההדגמה למטה; פריסה אמיתית משביתה אותם "
+                           "ומקצה חשבונות לכל משתמש.",
+        "users.header": "ניהול משתמשים",
+        "users.new_username": "שם משתמש",
+        "users.new_display_name": "שם לתצוגה",
+        "users.new_role": "תפקיד",
+        "users.new_password": "סיסמה",
+        "users.create": "צור משתמש",
+        "users.created": "המשתמש {username} נוצר.",
+        "users.error": "לא ניתן ליצור משתמש: {detail}",
+        "users.existing": "{n} חשבונות",
         "sidebar.footer": "כל הציונים, ההסברים והניקוד מחדש מגיעים משירות ה-FastAPI החי דרך נקודות "
-                          "הקצה הציבוריות שלו — אין כאן שכפול של לוגיקת מודל או מדיניות. סטטוס התיק, "
-                          "ה-SLA והערות הסקירה הם מצב עבודה של הסשן הנוכחי בלבד: דבר מכאן אינו נכתב "
-                          "למסד נתוני ניהול תיקים.",
+                          "הקצה הציבוריות שלו — אין כאן שכפול של לוגיקת מודל או מדיניות. החלטות תיק, "
+                          "הערות, כללים, החלטות רשימת מעקב ויומן הביקורת נשמרים במסד נתוני העבודה "
+                          "ושורדים רענון, טאב חדש והפעלה מחדש.",
 
         "common.band_prefix": "רמה",
         "common.case_prefix": "תיק:",
@@ -1304,6 +1393,9 @@ I18N: dict[str, dict[str, str]] = {
         "auditlog.action_language_switched": "שפה הוחלפה",
         "auditlog.action_role_switched": "תפקיד הוחלף",
         "auditlog.action_watchlist_disposition": "החלטת רשימת מעקב",
+        "auditlog.action_login": "התחברות",
+        "auditlog.action_logout": "התנתקות",
+        "auditlog.action_user_created": "משתמש נוצר",
         "auditlog.detail_decision": "{label} — “{note}”",
         "auditlog.detail_note": "“{note}”",
         "auditlog.detail_rule_created": "{name}: {conditions} → {action}",
@@ -1313,6 +1405,7 @@ I18N: dict[str, dict[str, str]] = {
         "auditlog.detail_language": "{previous} → {current}",
         "auditlog.detail_role": "{previous} → {current}",
         "auditlog.detail_watchlist": "{name} ({source}) → {label} — “{note}”",
+        "auditlog.detail_user_created": "{username} ({role})",
 
         "watchlist.panel_header": "פגיעות רשימת מעקב",
         "watchlist.panel_caption": "התאמה מטושטשת של שם/תאריך לידה/מדינה מול רשימת ייחוס לדוגמה של "
@@ -2099,22 +2192,13 @@ def add_to_queue(
     customer_id: str, profile: dict[str, Any], narratives: dict[str, Any],
     result: dict[str, Any], *, archetype: str = "custom", note: str = "Initial scoring",
 ) -> None:
-    existing = st.session_state.queue.get(customer_id)
-    timeline = existing["timeline"] if existing else []
-    timeline.append({
-        "kind": "scored", "at": dt.datetime.now(dt.UTC),
-        "risk_score": result["risk_score"], "risk_band": result["risk_band"], "note": note,
-    })
-    st.session_state.queue[customer_id] = {
-        "customer_id": customer_id,
-        "archetype": archetype,
-        "profile": profile,
-        "narratives": narratives,
-        "result": result,
-        "status": existing["status"] if existing else "pending_review",
-        "timeline": timeline,
-        "watchlist_dispositions": existing["watchlist_dispositions"] if existing else {},
-    }
+    """Persist a scored case (insert or re-score). The store preserves an
+    existing case's status and appends a 'scored' timeline row; a re-score never
+    un-decides a case (see WorkflowStore.upsert_case)."""
+    get_store().upsert_case(
+        customer_id, profile, narratives, result,
+        archetype=archetype, actor=current_actor(), note=note,
+    )
 
 
 def seed_queue(per_archetype: int = 6) -> tuple[int, list[str]]:
@@ -2148,16 +2232,16 @@ def seed_queue(per_archetype: int = 6) -> tuple[int, list[str]]:
 
 
 def record_event(customer_id: str, event: dict[str, Any], outcome: dict[str, Any]) -> None:
-    entry = st.session_state.queue.get(customer_id)
-    if entry is None:
+    store = get_store()
+    if customer_id not in st.session_state.queue:
         return
-    entry["timeline"].append({
-        "kind": "event", "at": dt.datetime.now(dt.UTC), "event_type": event["event_type"],
-        "amount": event["amount"], "reason": outcome["reason"], "rescored": outcome["rescored"],
-        "band_changed": outcome["band_changed"],
-    })
+    store.add_timeline(
+        customer_id, "event", current_actor(), event_type=event["event_type"],
+        amount=event["amount"], reason=outcome["reason"], rescored=outcome["rescored"],
+        band_changed=outcome["band_changed"],
+    )
     if outcome["rescored"] and outcome.get("result"):
-        entry["result"] = outcome["result"]
+        store.update_result(customer_id, outcome["result"])
 
 
 def compute_kpis(queue: dict[str, dict[str, Any]], rules: list[dict[str, Any]] = ()) -> dict[str, int]:
@@ -2384,6 +2468,18 @@ def rule_badge_text(overlay: dict[str, Any]) -> str:
     return f'🏷️ {len(overlay["fired_rules"])} · {dot} {band_label(overlay["band"])}'
 
 
+def _max_rule_number(rules: list[dict[str, Any]]) -> int:
+    """Highest N across the persisted rules' ``CR-NNN`` ids, so a new session
+    continues the numbering rather than restarting at 1 and colliding with an
+    existing rule's primary key."""
+    highest = 0
+    for rule in rules:
+        rid = str(rule.get("id", ""))
+        if rid.startswith("CR-") and rid[3:].isdigit():
+            highest = max(highest, int(rid[3:]))
+    return highest
+
+
 def rule_conditions_text(rule: dict[str, Any]) -> str:
     combine_key = f"rulebuilder.combine_{rule.get('combine', 'AND').lower()}"
     joiner = f" {t(combine_key).split(' — ')[0]} "  # "AND"/"OR" without the trailing explainer
@@ -2441,14 +2537,12 @@ def render_rule_overlay(entry: dict[str, Any], rules: list[dict[str, Any]]) -> N
 
 
 def log_audit(action: str, customer_id: str | None = None, **detail: Any) -> None:
-    st.session_state.audit_log.append({
-        "at": dt.datetime.now(dt.UTC),
-        "actor": st.session_state.get("reviewer_name", "Risk Analyst"),
-        "role": st.session_state.get("user_role", "junior_analyst"),
-        "action": action,
-        "customer_id": customer_id,
-        "detail": detail,
-    })
+    """Append one row to the persisted, hash-chained audit log, attributed to
+    the logged-in user. Never edits or removes a prior entry — the store
+    exposes no path to (see WorkflowStore.append_audit)."""
+    get_store().append_audit(
+        action, actor=current_actor(), role=current_role(), customer_id=customer_id, detail=detail,
+    )
 
 
 def audit_action_label(action: str) -> str:
@@ -2477,6 +2571,8 @@ def audit_detail_text(entry: dict[str, Any]) -> str:
         label = t(f"watchlist.disp_{d['disposition']}")
         return t("auditlog.detail_watchlist", name=d["hit_name"], source=watchlist_source_label(d["list_source"]),
                   label=label, note=d["note"])
+    if action == "user_created":
+        return t("auditlog.detail_user_created", username=d["username"], role=role_label(d["role"]))
     return ""
 
 
@@ -2503,8 +2599,7 @@ def render_watchlist_panel(entry: dict[str, Any]) -> None:
 
     dispositions = entry.setdefault("watchlist_dispositions", {})
     can_decide = has_permission("decide_case")
-    decide_help = None if can_decide else t("permission.decide_case_denied", role=role_label(
-        st.session_state.get("user_role", "junior_analyst")))
+    decide_help = None if can_decide else t("permission.decide_case_denied", role=role_label(current_role()))
 
     for hit in hits:
         disposition = dispositions.get(hit["id"])
@@ -2552,21 +2647,19 @@ def render_watchlist_panel(entry: dict[str, Any]) -> None:
                 st.error(t("watchlist.note_required"))
                 continue
 
-            actor = st.session_state.get("reviewer_name", "Risk Analyst")
-            dispositions[hit["id"]] = {
-                "disposition": new_disposition, "note": note.strip(), "actor": actor,
-                "role": st.session_state.get("user_role", "junior_analyst"), "at": dt.datetime.now(dt.UTC),
-            }
+            store = get_store()
+            actor = current_actor()
+            store.add_disposition(
+                cid, hit["id"], new_disposition, note.strip(), actor, current_role(),
+                hit_name=hit["name"], list_source=hit["list_source"],
+            )
             log_audit("watchlist_disposition", customer_id=cid, hit_id=hit["id"], hit_name=hit["name"],
                       list_source=hit["list_source"], disposition=new_disposition, note=note.strip())
             if new_disposition == "true_positive":
-                entry["status"] = "escalated_aml"
                 escalation_note = t("watchlist.auto_escalated_note", name=hit["name"],
                                      source=watchlist_source_label(hit["list_source"]), note=note.strip())
-                entry["timeline"].append({
-                    "kind": "decision", "at": dt.datetime.now(dt.UTC), "action": "escalated_aml",
-                    "note": escalation_note, "actor": actor,
-                })
+                store.set_status(cid, "escalated_aml")
+                store.add_timeline(cid, "decision", actor, action="escalated_aml", note=escalation_note)
                 log_audit("case_decision", customer_id=cid, decision="escalated_aml", note=escalation_note)
             flash_success(f"watchlist_{cid}", t("watchlist.disposition_recorded"))
             st.rerun()
@@ -2683,8 +2776,7 @@ def render_action_panel(entry: dict[str, Any]) -> None:
 
     cid = entry["customer_id"]
     can_decide = has_permission("decide_case")
-    decide_help = None if can_decide else t("permission.decide_case_denied", role=role_label(
-        st.session_state.get("user_role", "junior_analyst")))
+    decide_help = None if can_decide else t("permission.decide_case_denied", role=role_label(current_role()))
     with st.form(f"decision_form_{cid}"):
         note = st.text_area(
             t("action.note_label"), placeholder=t("action.note_placeholder"),
@@ -2722,11 +2814,9 @@ def render_action_panel(entry: dict[str, Any]) -> None:
         if not note.strip():
             st.error(t("action.note_required"))
         else:
-            entry["status"] = action
-            entry["timeline"].append({
-                "kind": "decision", "at": dt.datetime.now(dt.UTC), "action": action,
-                "note": note.strip(), "actor": st.session_state.get("reviewer_name", "Risk Analyst"),
-            })
+            store = get_store()
+            store.set_status(cid, action)
+            store.add_timeline(cid, "decision", current_actor(), action=action, note=note.strip())
             log_audit("case_decision", customer_id=cid, decision=action, note=note.strip())
             flash_success(f"decision_{cid}", t("action.recorded", label=status_label(action)))
             st.rerun()
@@ -2734,10 +2824,7 @@ def render_action_panel(entry: dict[str, Any]) -> None:
         if not note.strip():
             st.error(t("action.note_required"))
         else:
-            entry["timeline"].append({
-                "kind": "note", "at": dt.datetime.now(dt.UTC),
-                "note": note.strip(), "actor": st.session_state.get("reviewer_name", "Risk Analyst"),
-            })
+            get_store().add_timeline(cid, "note", current_actor(), note=note.strip())
             log_audit("note_added", customer_id=cid, note=note.strip())
             flash_success(f"decision_{cid}", t("action.note_added"))
             st.rerun()
@@ -3280,16 +3367,17 @@ def page_rulebuilder() -> None:
     st.caption(t("rulebuilder.caption"))
     show_flash("rulebuilder")
 
-    st.session_state.setdefault("custom_rules", [])
-    st.session_state.setdefault("rule_id_counter", 0)
     st.session_state.setdefault("rb_draft_rows", [0])
     st.session_state.setdefault("rb_next_row_id", 1)
     st.session_state.setdefault("rb_form_gen", 0)
+    store = get_store()
     rules = st.session_state.custom_rules
+    # Persisted rule IDs must not collide across sessions: a fresh session's
+    # counter starts from the highest existing CR-NNN, not from zero.
+    st.session_state["rule_id_counter"] = _max_rule_number(rules)
     queue = st.session_state.queue
     can_manage = has_permission("manage_rules")
-    manage_help = None if can_manage else t("permission.manage_rules_denied", role=role_label(
-        st.session_state.get("user_role", "junior_analyst")))
+    manage_help = None if can_manage else t("permission.manage_rules_denied", role=role_label(current_role()))
 
     st.markdown(f"#### {t('rulebuilder.active_rules_header', n=len(rules))}")
     if not rules:
@@ -3306,14 +3394,14 @@ def page_rulebuilder() -> None:
                                               key=f"rb_enabled_{rule['id']}", disabled=not can_manage,
                                               help=manage_help)
                 if new_enabled != rule["enabled"] and can_manage:
-                    rule["enabled"] = new_enabled
+                    store.set_rule_enabled(rule["id"], new_enabled)
                     log_audit("rule_toggled", name=rule["name"], enabled=new_enabled)
                     st.rerun()
                 delete_clicked = top_r.button(t("rulebuilder.delete_rule"), key=f"rb_delete_{rule['id']}",
                                                use_container_width=True, disabled=not can_manage,
                                                help=manage_help)
                 if delete_clicked and can_manage:
-                    st.session_state.custom_rules = [r for r in rules if r["id"] != rule["id"]]
+                    store.delete_rule(rule["id"])
                     log_audit("rule_deleted", name=rule["name"])
                     flash_success("rulebuilder", t("rulebuilder.rule_deleted", name=rule["name"]))
                     st.rerun()
@@ -3402,10 +3490,10 @@ def page_rulebuilder() -> None:
                 "action_type": action_type,
                 "action_points": float(action_points) if action_points is not None else None,
                 "action_band": action_band,
-                "created_at": dt.datetime.now(dt.UTC),
-                "created_by": st.session_state.get("reviewer_name", "Risk Analyst"),
+                "created_at": dt.datetime.now(dt.UTC).isoformat(),
+                "created_by": current_actor(),
             }
-            st.session_state.custom_rules.append(new_rule)
+            store.add_rule(new_rule, actor=current_actor())
             st.session_state.rb_draft_rows = [st.session_state.rb_next_row_id]
             st.session_state.rb_next_row_id += 1
             st.session_state.rb_form_gen += 1
@@ -3419,7 +3507,10 @@ def page_auditlog() -> None:
     st.title(t("auditlog.title"))
     st.caption(t("auditlog.caption"))
 
-    log = st.session_state.get("audit_log", [])
+    # Read fresh from the store rather than the top-of-run session cache: an
+    # audit event written earlier in this same run (e.g. a language switch)
+    # would otherwise not show until the next rerun.
+    log = get_store().list_audit()
     decisions = sum(1 for e in log if e["action"] == "case_decision")
     rule_changes = sum(1 for e in log if e["action"] in ("rule_created", "rule_deleted", "rule_toggled"))
     k1, k2, k3 = st.columns(3)
@@ -3465,6 +3556,112 @@ def page_auditlog() -> None:
     display_cols = [c for c in frame.columns if c != "_at"]
     st.dataframe(frame[display_cols], use_container_width=True, hide_index=True)
     st.caption(t("auditlog.shown_caption", shown=len(frame), total=len(log)))
+
+
+# --------------------------------------------------------------------------
+# Authentication
+#
+# Role is now the logged-in user's, read from the database — there is no
+# session-state role switcher. Login state survives a hard browser refresh via
+# a bearer token in the URL query string, validated on every run against the
+# wf_sessions table (only the token's hash is stored; see crr.workflow.auth).
+#
+# Honest limitation: a token in the URL is visible in history, logs and the
+# referrer header. This is the Streamlit-native way to survive a refresh with
+# no third-party cookie component; a production deployment would terminate auth
+# at a reverse proxy issuing httpOnly+Secure+SameSite cookies instead. The
+# token is 256-bit random, stored only as a SHA-256 hash, and expires.
+# --------------------------------------------------------------------------
+
+_AUTH_QP = "auth"
+
+
+def resolve_current_user(store: WorkflowStore) -> dict[str, Any] | None:
+    """The logged-in user for this run: the cached session value, or a token
+    from the URL validated against the store. Caches the result for the run."""
+    cached = st.session_state.get("auth_user")
+    if cached:
+        return cached
+    token = st.query_params.get(_AUTH_QP)
+    user = store.resolve_session(token) if token else None
+    if user:
+        st.session_state["auth_user"] = user
+    return user
+
+
+def render_login_page(store: WorkflowStore) -> None:
+    """The full-screen sign-in gate shown until a valid session exists."""
+    st.selectbox(
+        "🌐", options=["he", "en"], format_func=lambda code: LANGUAGE_LABEL[code],
+        key="language", label_visibility="collapsed",
+    )
+    left, mid, right = st.columns([1, 1.4, 1])
+    with mid:
+        st.markdown(f"### {t('login.title')}")
+        st.caption(t("login.subtitle"))
+        with st.form("login_form"):
+            username = st.text_input(t("login.username"), key="login_username")
+            password = st.text_input(t("login.password"), type="password", key="login_password")
+            submitted = st.form_submit_button(t("login.submit"), type="primary", use_container_width=True)
+        if submitted:
+            user = store.authenticate(username, password)
+            if user is None:
+                st.error(t("login.failed"))
+            else:
+                token = store.create_login_session(user["id"])
+                st.query_params[_AUTH_QP] = token
+                st.session_state["auth_user"] = user
+                # Land every fresh login on the queue, not wherever the previous
+                # session (possibly a different user) happened to be.
+                st.session_state.nav = "queue"
+                st.session_state.selected_customer = None
+                store.append_audit("login", actor=user["display_name"], role=user["role"],
+                                   detail={"username": user["username"]})
+                st.rerun()
+        with st.expander(t("login.demo_header")):
+            st.caption(t("login.demo_hint"))
+            for spec in DEMO_USERS:
+                st.markdown(
+                    f"- **{spec['username']}** / `{spec['password']}` — {role_label(spec['role'])}"
+                )
+
+
+def render_user_panel(store: WorkflowStore) -> None:
+    """Sidebar: who is signed in, their role, and a sign-out button. Replaces
+    the old free-text reviewer name and the role switcher. An admin also gets a
+    compact user-provisioning form."""
+    user = current_user()
+    st.markdown(f"**{html.escape(user.get('display_name', ''))}**")
+    st.caption(f"{t('sidebar.role_label')}: {role_label(user.get('role', 'junior_analyst'))}")
+    if st.button(t("sidebar.sign_out"), use_container_width=True, key="sign_out_btn"):
+        log_audit("logout")  # attributed to the current user before it is cleared
+        store.end_session(st.query_params.get(_AUTH_QP))
+        st.query_params.pop(_AUTH_QP, None)
+        st.session_state.pop("auth_user", None)
+        st.rerun()
+
+    # Provisioning real accounts is itself an admin-only action, gated by the
+    # same manage_rules capability that guards the policy surface.
+    if not has_permission("manage_rules"):
+        return
+    with st.expander(t("users.header")):
+        existing = store.list_users()
+        st.caption(t("users.existing", n=len(existing)))
+        with st.form("create_user_form"):
+            new_username = st.text_input(t("users.new_username"), key="new_user_username")
+            new_display = st.text_input(t("users.new_display_name"), key="new_user_display")
+            new_role = st.selectbox(t("users.new_role"), ROLE_KEYS, format_func=role_label, key="new_user_role")
+            new_password = st.text_input(t("users.new_password"), type="password", key="new_user_password")
+            created = st.form_submit_button(t("users.create"), use_container_width=True)
+        if created:
+            try:
+                account = store.create_user(new_username, new_display, new_role, new_password)
+            except ValueError as exc:
+                st.error(t("users.error", detail=str(exc)))
+            else:
+                log_audit("user_created", username=account["username"], role=account["role"])
+                st.success(t("users.created", username=account["username"]))
+                st.rerun()
 
 
 # --------------------------------------------------------------------------
@@ -3519,6 +3716,50 @@ def _inject_head_signals(lang: str) -> None:
     )
 
 
+def _apply_rtl_css() -> None:
+    """Right-to-left for Hebrew, applied to the app's text flow (headers,
+    captions, labels, markdown) so prose reads naturally right-to-left, but
+    deliberately NOT to canvas/grid-rendered widgets — the dataframe grid,
+    sliders, Plotly SVGs — where mirroring a risk-score slider or a chart axis
+    would confuse rather than help. Called once early (before the login gate,
+    so the login page is RTL too); a no-op in English.
+
+    [data-testid="stAppViewContainer"] — the flex row holding the sidebar and
+    the main content side by side — is deliberately kept LTR. Streamlit's
+    mobile sidebar collapse is a hardcoded translateX(-300px) on the sidebar
+    that assumes its un-transformed position is flush against the LEFT edge;
+    flipping this container to RTL relocates that to the RIGHT edge, so the
+    fixed offset no longer clears the sidebar off-screen on a narrow viewport
+    (it lands as a ~40px sliver with Hebrew wrapping one char per line, seen at
+    390px). Keeping this one container LTR keeps Streamlit's collapse math
+    correct in both languages; RTL is re-applied to the content areas inside
+    it (stMain, stSidebarContent), which have no such transform."""
+    if st.session_state.get("language") != "he":
+        return
+    st.markdown(
+        """
+        <style>
+          [data-testid="stAppViewContainer"] { direction: ltr; }
+
+          [data-testid="stMain"], [data-testid="stSidebarContent"],
+          [data-testid="stMain"] p, [data-testid="stMain"] span, [data-testid="stMain"] label,
+          [data-testid="stSidebarContent"] p, [data-testid="stSidebarContent"] span,
+          [data-testid="stSidebarContent"] label,
+          div[data-testid="stCaptionContainer"], div[data-testid="stMarkdownContainer"],
+          div[data-testid="stMetricLabel"], div[data-testid="stWidgetLabel"] {
+            direction: rtl;
+            text-align: right;
+          }
+          div[data-testid="stSlider"], div[data-testid="stDataFrame"], div[data-testid="stPlotlyChart"],
+          div[data-testid="stNumberInput"], div[data-testid="stDataFrame"] * {
+            direction: ltr;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 _inject_head_signals(st.session_state.get("language", "he"))
 
 st.markdown(
@@ -3534,15 +3775,16 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.session_state.setdefault("queue", {})
 st.session_state.setdefault("selected_customer", None)
 st.session_state.setdefault("nav", "queue")
 st.session_state.setdefault("book_load_attempted", False)
 st.session_state.setdefault("book_seed", 42)
-st.session_state.setdefault("reviewer_name", "Risk Analyst")
 st.session_state.setdefault("language", "he")
+# Workflow data (queue, rules, audit) is hydrated from the database on every
+# run — see below — not defaulted here, but the keys are seeded empty so any
+# read that happens before hydration (or on the login page) is safe.
+st.session_state.setdefault("queue", {})
 st.session_state.setdefault("custom_rules", [])
-st.session_state.setdefault("user_role", "junior_analyst")
 st.session_state.setdefault("audit_log", [])
 # Shadow copy used only to detect a language CHANGE for audit logging.
 # Comparing against st.session_state.language directly does not work here:
@@ -3552,10 +3794,23 @@ st.session_state.setdefault("audit_log", [])
 # a same-render "previous vs current" read sees the new value on both sides
 # (observed directly: switching languages never logged an event). This
 # shadow key is written only after log_audit() below has already fired, so
-# it keeps lagging one step behind until the next real change. The role
-# switcher below needs no equivalent: it tracks its own previous value via
-# st.session_state.user_role directly, which it — not any widget — owns.
+# it keeps lagging one step behind until the next real change.
 st.session_state.setdefault("_last_seen_language", st.session_state.language)
+
+store = get_store()
+_apply_rtl_css()  # defined below; applied before the login gate so login is RTL too
+
+# ---- login gate: nothing below renders until a valid session exists --------
+if resolve_current_user(store) is None:
+    render_login_page(store)
+    st.stop()
+
+# ---- hydrate persisted workflow state from the database, fresh every run ----
+# Every UI read below still uses these session keys unchanged; only the writes
+# go through the store (which reruns, re-hydrating on the next pass).
+st.session_state.queue = store.load_queue()
+st.session_state.custom_rules = store.list_rules()
+st.session_state.audit_log = store.list_audit()
 
 with st.sidebar:
     st.selectbox(
@@ -3581,26 +3836,7 @@ with st.sidebar:
         st.caption(t("sidebar.api_start_hint"))
 
     st.divider()
-    st.text_input(t("sidebar.reviewer_name_label"), key="reviewer_name", help=t("sidebar.reviewer_name_help"))
-    # The widget is deliberately bound to a SEPARATE key (user_role_widget)
-    # rather than key="user_role" directly. A selectbox whose format_func
-    # output changes with language (role_label depends on
-    # st.session_state.language) resets itself to the first option the
-    # instant the language switches — observed directly, a Compliance
-    # Officer / Admin got silently demoted to Junior Analyst by toggling the
-    # language selector. Re-seeding the widget's backing key from the
-    # authoritative user_role fixes that — but ONLY on the specific rerun a
-    # language switch just caused: pre-seeding on every rerun instead was
-    # tried first and made the dropdown inert, since it silently overwrote
-    # the user's own in-flight pick with the (still-stale) old role before
-    # the comparison below ever saw it.
-    if _language_just_changed:
-        st.session_state["user_role_widget"] = st.session_state.user_role
-    picked_role = st.selectbox(t("sidebar.role_label"), ROLE_KEYS, format_func=role_label,
-                                key="user_role_widget", help=t("sidebar.role_help"))
-    if picked_role != st.session_state.user_role:
-        log_audit("role_switched", previous=role_label(st.session_state.user_role), current=role_label(picked_role))
-        st.session_state.user_role = picked_role
+    render_user_panel(store)
 
     st.divider()
     st.markdown(f"##### {t('sidebar.nav_header')}")
@@ -3620,58 +3856,16 @@ with st.sidebar:
     st.divider()
     st.caption(t("sidebar.footer"))
 
-# RTL for Hebrew: applied to the app's text flow (headers, captions, labels,
-# markdown) so prose reads naturally right-to-left, but deliberately NOT to
-# canvas/grid-rendered widgets — the dataframe grid, sliders, Plotly SVGs —
-# where mirroring a risk-score slider or a chart axis would confuse rather
-# than help (e.g. "low" no longer on the side a reviewer expects). Numeric/
-# code inputs stay right-aligned like the rest of the form, which is the
-# normal convention for RTL sites and does not affect what gets typed or
-# sent to the API.
-#
-# [data-testid="stAppViewContainer"] — the flex row that holds the sidebar
-# and the main content side by side — is deliberately kept LTR and excluded
-# from the RTL rules below, even though it is the .stApp ancestor of
-# everything else here. Streamlit's mobile sidebar collapse is a hardcoded
-# `translateX(-300px)` on [data-testid="stSidebar"] that assumes the
-# sidebar's un-transformed position is flush against the LEFT edge (x=0).
-# Flipping this container's flex order to RTL relocates that un-transformed
-# position to the RIGHT edge instead, so the same fixed offset no longer
-# clears the sidebar off-screen on a narrow viewport — it lands as a ~40px
-# sliver still on screen, and Hebrew text wraps one character per line
-# inside it (reproduced directly at a 390px viewport width). Keeping this
-# one container LTR keeps Streamlit's own collapse math correct in both
-# languages; RTL is then re-applied to the actual content areas inside it
-# (stMain, stSidebarContent), which have no such transform and were never
-# the problem.
-if st.session_state.language == "he":
-    st.markdown(
-        """
-        <style>
-          [data-testid="stAppViewContainer"] { direction: ltr; }
-
-          [data-testid="stMain"], [data-testid="stSidebarContent"],
-          [data-testid="stMain"] p, [data-testid="stMain"] span, [data-testid="stMain"] label,
-          [data-testid="stSidebarContent"] p, [data-testid="stSidebarContent"] span,
-          [data-testid="stSidebarContent"] label,
-          div[data-testid="stCaptionContainer"], div[data-testid="stMarkdownContainer"],
-          div[data-testid="stMetricLabel"], div[data-testid="stWidgetLabel"] {
-            direction: rtl;
-            text-align: right;
-          }
-          div[data-testid="stSlider"], div[data-testid="stDataFrame"], div[data-testid="stPlotlyChart"],
-          div[data-testid="stNumberInput"], div[data-testid="stDataFrame"] * {
-            direction: ltr;
-          }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-if api_up and not st.session_state.book_load_attempted:
+# Seed the synthetic demo book once — only when the persisted case store is
+# actually empty, so a refresh or restart loads the saved cases rather than
+# re-seeding on top of them. book_load_attempted guards against re-running the
+# (possibly failing) seed every rerun within a session; the rerun re-hydrates
+# the queue so the freshly seeded cases render immediately.
+if api_up and store.case_count() == 0 and not st.session_state.book_load_attempted:
     st.session_state.book_load_attempted = True
     with st.spinner("…"):
         seed_queue()
+    st.rerun()
 
 if st.session_state.nav == "customer360":
     page_customer360()
