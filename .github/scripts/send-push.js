@@ -267,6 +267,18 @@ function apptTs(date, start) {
   const perShop = (stateVal && stateVal.shops) || {};
 
   const now = Date.now();
+  /* GitHub Actions לא תמיד מפעיל cron של "כל 5 דקות" בזמן — נצפו פערים של
+     עד כמה שעות בין הרצה להרצה (עומס בפלטפורמה). בלי תיקון, תור שחלון
+     התזכורת שלו (למשל "60 דקות לפני") נופל בדיוק בתוך פער כזה — מפספס את
+     ההתראה לצמיתות, כי בהרצה הבאה ה"לפני" כבר הפך ל"אחרי" ולא נשלח כלום.
+     הפתרון: מרחיבים את חלון התזכורת אחורה בדיוק לפי הפער מהריצה הקודמת,
+     כך שתור שהיה אמור לקבל תזכורת במהלך הפער עדיין נתפס בריצה שאחריו.
+     תקרה של 6 שעות מונעת "גל" תזכורות מאוחרות מדי אחרי השבתה ממושכת. */
+  const gapMs = Math.max(0, now - ((stateVal && stateVal.updatedAt) || now));
+  const catchupMs = Math.min(gapMs + 2 * 60000, 6 * 3600000);
+  if (!firstRun && gapMs > 15 * 60000) {
+    console.warn(`הריצה הקודמת הייתה לפני ${Math.round(gapMs / 60000)} דקות (במקום 5) — כנראה עיכוב בתזמון של GitHub Actions. משתמשים בחלון תפיסה מורחב (${Math.round(catchupMs / 60000)} דקות) כדי לא לפספס תזכורות.`);
+  }
   const shopsVal = (await db.ref("shops").once("value")).val() || {};
   const shopIds = Object.keys(shopsVal);
   // פרטי לקוח של תורים במספרות מאובטחות נשמרים בצומת פרטי (private/<id>/bk).
@@ -314,19 +326,23 @@ function apptTs(date, start) {
     const newBc = broadcasts.filter((b) => b && b.id && b.text && !doneBc.has(b.id));
     // תזכורות לפני התור — נשלחות כשנותר פחות מ-reminderMinutes עד המועד
     const reminderMin = Number((shop.shop && shop.shop.reminderMinutes) || 60);
+    // גבול תחתון מורחב אחורה לפי catchupMs — כדי לתפוס תור שחלון התזכורת שלו
+    // נפל בתוך פער בין הרצות (ראו הסבר ליד catchupMs למעלה). עדיין לא שולחים
+    // תזכורת לתור שכבר עבר מזמן ומחוץ לתקרת התפיסה.
     const dueReminders = bookings.filter((b) => {
       if (!b || !b.id || !b.userId || b.status === "cancelled" || doneRem.has(b.id)) return false;
       const lead = apptTs(b.date, b.start) - now;
-      return lead > 0 && lead <= reminderMin * 60000;
+      return lead > -catchupMs && lead <= reminderMin * 60000;
     });
     /* תזכורת "התור מחר" — נשלחת כשנותרו בין 18 ל-26 שעות עד התור.
        חלון בשעות (ולא "תאריך מחר") כדי שלא יהיה תלוי באזור הזמן של הראנר,
-       שרץ ב-UTC בעוד המספרות בישראל. ה-dedup מבטיח שליחה אחת בלבד. */
+       שרץ ב-UTC בעוד המספרות בישראל. ה-dedup מבטיח שליחה אחת בלבד. הגבול
+       התחתון (18 שעות) מורחב אחורה לפי catchupMs מאותה סיבה כמו למעלה. */
     const dayBeforeOn = (shop.shop && shop.shop.remindDayBefore) !== false;
     const dueDayReminders = dayBeforeOn ? bookings.filter((b) => {
       if (!b || !b.id || !b.userId || b.status === "cancelled" || doneDayRem.has(b.id)) return false;
       const lead = apptTs(b.date, b.start) - now;
-      return lead > 18 * 3600000 && lead <= 26 * 3600000;
+      return lead > 18 * 3600000 - catchupMs && lead <= 26 * 3600000;
     }) : [];
 
     if (!firstRun) {

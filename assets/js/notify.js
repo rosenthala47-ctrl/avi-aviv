@@ -99,7 +99,7 @@ UG.Notify = (function () {
                 show(
                   "⏰ תזכורת לתספורת",
                   `${b.serviceName} ${label} בשעה ${b.start} · ${shop.name}`,
-                  { tag: "reminder-" + b.id }
+                  { tag: "rem-" + b.id }   // תג זהה לתזכורת השרת (send-push.js) — מונע התראה כפולה כשהאפליקציה פתוחה
                 );
                 markFired(fireId);
               }, delay);
