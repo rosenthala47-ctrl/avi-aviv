@@ -290,8 +290,13 @@ function apptTs(date, start) {
     return (p && p.name) || b.userName || "לקוח";
   };
   let sent = 0, totalNewA = 0, totalNewB = 0;
+  // בדיקה ידנית על מספרה בודדת (Run workflow → shop_filter) — לא נוגעים כלל
+  // במצב/בהתראות של שאר המספרות. ריק (ברירת המחדל, וכך גם בהרצה המתוזמנת) = הכול כרגיל.
+  const shopFilter = String(process.env.SHOP_FILTER || "").trim();
+  if (shopFilter) console.log(`בדיקה ידנית — מעבד רק את המספרה "${shopFilter}", שאר המספרות לא ייגעו.`);
 
   for (const sid of shopIds) {
+    if (shopFilter && sid !== shopFilter) continue;
     const shop = shopsVal[sid] || {};
     if (shop.type === "photo") continue;   // דלג על רשומות ישנות
     const shopName = (shop.shop && shop.shop.name) || "המספרה";
@@ -468,6 +473,6 @@ function apptTs(date, start) {
   } catch (e) { console.warn("הפעלת תורים מחמירים נכשלה:", (e && e.message) || e); }
 
   if (firstRun) console.log("ריצה ראשונה — סימון מצב קיים בלבד, ללא שליחה.");
-  else console.log(`הושלם. מספרות=${shopIds.length}, alerts חדשים=${totalNewA}, bookings חדשים=${totalNewB}, פושים שנשלחו=${sent}`);
+  else console.log(`הושלם${shopFilter ? ` (סינון: ${shopFilter} בלבד)` : ""}. מספרות=${shopFilter ? 1 : shopIds.length}, alerts חדשים=${totalNewA}, bookings חדשים=${totalNewB}, פושים שנשלחו=${sent}`);
 })().catch((e) => { console.error(e); process.exitCode = 1; })
   .finally(() => admin.app().delete());   // סוגר את חיבור ה-RTDB כדי שהתהליך יסתיים

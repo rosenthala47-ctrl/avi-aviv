@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
+    inputs:
+      shop_filter:
+        description: "מזהה מספרה יחידה לבדיקה (למשל try) — ריק = כל המספרות, כרגיל"
+        required: false
+        default: ""
 
 concurrency:
   group: push-notify
@@ -31,4 +36,6 @@ jobs:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           # השעות במסד הן זמן מקומי של המספרה — הראנר חייב לרוץ באותו אזור זמן
           TZ: Asia/Jerusalem
+          # ריק בהרצה המתוזמנת הרגילה (אין inputs לאירוע schedule) — כל המספרות כרגיל
+          SHOP_FILTER: ${{ github.event.inputs.shop_filter }}
         run: node send-push.js
