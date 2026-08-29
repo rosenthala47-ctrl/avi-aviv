@@ -14,7 +14,11 @@ immutable audit trail survive a refresh, a new tab, and a restart.
 
 from __future__ import annotations
 
+from crr.workflow.auth import AUTH_HEADER_NAME, SESSION_COOKIE_NAME, extract_bearer_token
 from crr.workflow.db import create_session_factory, resolve_database_url
 from crr.workflow.store import DEMO_USERS, WorkflowStore
 
-__all__ = ["WorkflowStore", "create_session_factory", "resolve_database_url", "DEMO_USERS"]
+__all__ = [
+    "WorkflowStore", "create_session_factory", "resolve_database_url", "DEMO_USERS",
+    "extract_bearer_token", "SESSION_COOKIE_NAME", "AUTH_HEADER_NAME",
+]

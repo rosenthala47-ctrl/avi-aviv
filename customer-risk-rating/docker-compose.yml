@@ -1,0 +1,128 @@
+# Customer Risk Rating — reverse-proxied production topology.
+#
+# Caddy in front of Streamlit and the auth gateway (crr.workflow.gateway),
+# both sharing one workflow database so the httpOnly session cookie the
+# gateway issues means the same thing to both. See deploy/Caddyfile and
+# crr/workflow/gateway.py's module docstrings for why a separate small
+# gateway service exists at all: Streamlit can read a cookie but has no API
+# to set one, so something else behind the same proxy has to.
+#
+# This is an ADDITIONAL deployment path alongside the existing single-
+# container Dockerfile (`docker build . && docker run -p 8501:8501 ...`) —
+# that one stays the right call for a free-tier PaaS exposing one port (see
+# that Dockerfile's own comments), and nothing here changes it. Reach for
+# this file when you want the reverse-proxy + cookie-auth setup instead: four
+# small containers behind one public port, all built from the same image.
+#
+#   docker compose up --build
+#   open http://localhost
+#   # sign in with any of the demo accounts the login page lists
+#
+# To swap nginx in for Caddy: point `proxy.image` at `nginx:alpine`, mount
+# ./deploy/nginx.conf instead of ./deploy/Caddyfile (to /etc/nginx/nginx.conf),
+# and drop the caddy_data volume (nginx needs no local state for this config).
+#
+# To swap SQLite for PostgreSQL (recommended for a real multi-process
+# deployment — see crr/workflow/db.py's docstring): uncomment the
+# `workflow-db` service and the `CRR_WORKFLOW_DB_URL` lines on `gateway` and
+# `streamlit` below, and rebuild the image with the `db` extra installed
+# (`pip install -e ".[db]"` — see the README) so the psycopg driver is
+# present.
+
+services:
+  proxy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      # - "443:443"   # uncomment once Caddyfile's `localhost` is a real domain
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      streamlit:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api:
+    build: .
+    command: ["python", "-m", "uvicorn", "crr.api.app:create_app", "--factory",
+              "--host", "0.0.0.0", "--port", "8000"]
+    expose:
+      - "8000"
+    restart: unless-stopped
+    # Healthcheck inherited from the Dockerfile — it already checks this
+    # exact port/path (CRR_API_PORT defaults to 8000), which is this
+    # service's whole job, so no override is needed here.
+
+  gateway:
+    build: .
+    command: ["python", "-m", "uvicorn", "crr.workflow.gateway:create_app", "--factory",
+              "--host", "0.0.0.0", "--port", "8600"]
+    environment:
+      # This compose file serves plain HTTP on localhost for a runnable local
+      # demo. A `Secure` cookie is never sent back by a browser over plain
+      # HTTP, so it is disabled here — flip to "true" (the default if unset)
+      # once the proxy in front of this is real HTTPS.
+      CRR_COOKIE_SECURE: "false"
+      CRR_COOKIE_SAMESITE: "lax"
+      # CRR_WORKFLOW_DB_URL: "postgresql+psycopg://crr:crr@workflow-db:5432/crr_workflow"
+    expose:
+      - "8600"
+    volumes:
+      - workflow_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8600/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  streamlit:
+    build: .
+    command: ["python", "-m", "streamlit", "run", "app.py",
+              "--server.port", "8501", "--server.address", "0.0.0.0", "--server.headless", "true"]
+    environment:
+      CRR_API_URL: "http://api:8000"
+      # Browser-facing, same-origin path the proxy routes to `gateway` — NOT
+      # the gateway's internal compose address, which the browser can never
+      # reach directly.
+      CRR_AUTH_GATEWAY_URL: "/auth"
+      # CRR_WORKFLOW_DB_URL: "postgresql+psycopg://crr:crr@workflow-db:5432/crr_workflow"  # must match `gateway`'s
+    expose:
+      - "8501"
+    volumes:
+      - workflow_data:/app/data
+    depends_on:
+      api:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8501/_stcore/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  # workflow-db:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_USER: crr
+  #     POSTGRES_PASSWORD: crr
+  #     POSTGRES_DB: crr_workflow
+  #   volumes:
+  #     - workflow_pg_data:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+volumes:
+  caddy_data:
+  # SQLite file shared between `gateway` (which writes the session it issues
+  # a cookie for) and `streamlit` (which reads and writes everything else) —
+  # both must resolve the exact same file, hence the shared named volume
+  # rather than each container getting its own empty one.
+  workflow_data:
+  # workflow_pg_data:

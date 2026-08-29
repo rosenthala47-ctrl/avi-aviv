@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 
 from crr.workflow import WorkflowStore, create_session_factory
 from crr.workflow.auth import (
+    extract_bearer_token,
     hash_password,
     hash_token,
     needs_rehash,
@@ -81,6 +82,38 @@ def test_only_the_token_hash_is_stored(store, db_url):
         stored = s.execute(text("SELECT token_hash FROM wf_sessions")).scalar_one()
     assert stored == hash_token(token)
     assert token not in stored, "the raw bearer token must never be persisted"
+
+
+# --------------------------------------------------------------------------
+# Bearer-token extraction — header > cookie > query param, framework-agnostic
+# --------------------------------------------------------------------------
+
+
+def test_extract_prefers_header_over_cookie_and_query():
+    assert extract_bearer_token("h", "c", "q") == "h"
+
+
+def test_extract_falls_back_to_cookie_when_header_absent():
+    assert extract_bearer_token(None, "c", "q") == "c"
+
+
+def test_extract_falls_back_to_query_when_header_and_cookie_absent():
+    assert extract_bearer_token(None, None, "q") == "q"
+
+
+def test_extract_returns_none_when_all_absent():
+    assert extract_bearer_token(None, None, None) is None
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\t"])
+def test_extract_treats_blank_values_as_absent(blank):
+    assert extract_bearer_token(blank, "c", "q") == "c"
+    assert extract_bearer_token(blank, blank, "q") == "q"
+    assert extract_bearer_token(blank, blank, blank) is None
+
+
+def test_extract_strips_surrounding_whitespace():
+    assert extract_bearer_token("  h  ", None, None) == "h"
 
 
 # --------------------------------------------------------------------------

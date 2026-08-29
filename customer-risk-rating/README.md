@@ -514,10 +514,16 @@ into a `removeChild` crash. Three pages:
   internal reviewer's view beside the customer-facing one and an explicit
   list of what was withheld and why (filterable by dimension, direction and
   visibility); and a case-decision panel (Approve / Escalate to AML /
-  Request KYC / Block), gated on a mandatory review note. Case status, SLA
-  and notes are this session's workflow state only — the API has no
-  case-management endpoints, so nothing here is written to a database; a
-  refresh starts a fresh queue.
+  Request KYC / Block), gated on a mandatory review note. Case status, SLA,
+  notes, dynamic rules, watchlist rulings and a hash-chained audit trail are
+  persisted via `crr.workflow` (SQLite by default, PostgreSQL via
+  `CRR_WORKFLOW_DB_URL`) — not the scoring API, which stays a pure client of
+  this console and still has no case-management endpoints of its own — so a
+  refresh, a new tab or a restart all land back on the same queue. Access is
+  gated behind a real login; see [Reverse proxy + cookie-based
+  auth](#reverse-proxy--cookie-based-auth-production) below for running it
+  with httpOnly session cookies instead of the built-in URL-parameter
+  fallback.
 - **Event Simulator & Sandbox** — push one event against any queued customer
   and see whether the policy triggered, debounced or ignored it and what the
   score did; or, in a second tab, score a fully custom payload through the
@@ -589,6 +595,118 @@ selection note for when to move to a paid tier instead.
 `CRR_ANTHROPIC_API_KEY` is optional everywhere. Unset — the default — means the
 deterministic reference extractor: no network calls, no cost, and narrative
 text never leaves the container.
+
+### Reverse proxy + cookie-based auth (production)
+
+The single-container setup above authenticates with a bearer token in the
+URL's `?auth=` query parameter — Streamlit's own runtime can *read* a cookie
+or header on the request that opened a session, but has no API to *set* one
+(there is no `st.set_cookie`: a `Set-Cookie` can only come from a real HTTP
+response, and a Streamlit script never gets a hook into the page's initial
+one). A URL parameter is visible in browser history, server access logs and
+the `Referer` header — a known, accepted limitation of that fallback path, not
+of the login system as a whole.
+
+The fix is a small extra service, **`crr.workflow.gateway`**, that sits behind
+the same reverse proxy as Streamlit and is the one thing in this system
+allowed to issue the session as an httpOnly cookie. The flow:
+
+1. The existing in-app Streamlit login form authenticates exactly as before
+   (`WorkflowStore.authenticate` / `create_login_session`) and mints a token.
+2. If `CRR_AUTH_GATEWAY_URL` is set, instead of putting that token in the URL
+   for good, the app triggers a real top-level browser navigation to
+   `{gateway}/adopt?token=…&next=/` (a `<meta http-equiv="refresh">` tag
+   rendered via `st.markdown` — the only real page navigation a Streamlit
+   script can drive; an in-app `st.rerun()` cannot leave the page, and a
+   sandboxed `components.v1.html` iframe cannot navigate the top-level window
+   at all, which is what an earlier attempt at this used and why it silently
+   failed). The gateway checks the token is valid (the same check every
+   request already makes) and responds with
+   `Set-Cookie: crr_session=…; HttpOnly; Secure; SameSite=Lax`, then redirects
+   back to `/`. Because `<meta refresh>` is GET-only, the token is briefly
+   visible in that one redirect's URL and whatever logs it — a real, narrow
+   exposure, honestly no better than the old `?auth=` fallback for that single
+   hop, but confined to it: no other request, and no ongoing session, ever
+   carries the token in a URL again.
+3. Every request after that carries the cookie automatically. `app.py` reads
+   it via `st.context.cookies` (and, as an alternative some proxy setups
+   prefer, an `X-Auth-Token` header via `st.context.headers`) — see
+   `crr.workflow.auth.extract_bearer_token` for the exact precedence
+   (header → cookie → URL parameter, so the old fallback still works with no
+   gateway configured at all). Sign-out is the mirror image: the same
+   navigation trick against `{gateway}/logout?next=/`, which carries no token
+   at all, so it has no such exposure.
+
+Nothing about `WorkflowStore`, `resolve_session`, password hashing or the
+audit log changed for any of this — the gateway only ever cookie-izes a
+session the store already considers valid; it does not authenticate on its
+own or duplicate that logic.
+
+#### Run it with Docker Compose
+
+```bash
+docker compose up --build
+open http://localhost   # sign in with any of the demo accounts the login page lists
+```
+
+`docker-compose.yml` runs four small containers from the same image as the
+single-container Dockerfile — `proxy` (Caddy), `api` (the scoring service),
+`gateway`, and `streamlit` — with `deploy/Caddyfile` routing `/auth/*` to the
+gateway and everything else, WebSocket runtime connection included, to
+Streamlit. `gateway` and `streamlit` share one SQLite file over a named
+volume; swap in PostgreSQL by uncommenting the `workflow-db` service and the
+matching `CRR_WORKFLOW_DB_URL` lines (and rebuilding with `pip install -e
+".[db]"` for the psycopg driver) — see `crr/workflow/db.py`'s docstring. To use
+nginx instead of Caddy, point `proxy.image` at `nginx:alpine` and mount
+`./deploy/nginx.conf` in place of the Caddyfile.
+
+Before a real deployment, validate whichever config you're using —
+`caddy validate --config deploy/Caddyfile --adapter caddyfile` or
+`nginx -t -c deploy/nginx.conf` — the versions of those tools you're actually
+shipping with are the ground truth, not this file.
+
+#### Run it with local binaries (no Docker)
+
+```bash
+# 1. the scoring API
+python scripts/serve.py &
+
+# 2. the auth gateway — CRR_COOKIE_SECURE=false only because this is plain
+#    HTTP on localhost; a browser never sends a Secure cookie back over HTTP,
+#    so leaving the default (true) here would look like a silent failure
+CRR_COOKIE_SECURE=false python -m uvicorn crr.workflow.gateway:create_app \
+  --factory --host 127.0.0.1 --port 8600 &
+
+# 3. Streamlit — CRR_AUTH_GATEWAY_URL points at wherever the proxy will
+#    expose the gateway's /auth mount to the BROWSER, and must already end in
+#    "/auth" (app.py appends only "/adopt"/"/logout" to it) — a same-origin
+#    path once a proxy is in front, e.g. "/auth"; a full origin+path like
+#    below only when testing straight against the gateway with no proxy at all
+CRR_AUTH_GATEWAY_URL=http://127.0.0.1:8600/auth streamlit run app.py &
+
+# 4. the reverse proxy — pick one
+caddy run --config deploy/Caddyfile --adapter caddyfile
+# or: nginx -c "$(pwd)/deploy/nginx.conf" -p "$(pwd)"
+```
+
+Both `deploy/Caddyfile` and `deploy/nginx.conf` default to Docker Compose's
+service names (`streamlit`, `gateway`) as upstream hosts; running the binaries
+directly on one machine, replace those with `127.0.0.1`.
+
+#### Environment variables
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CRR_AUTH_GATEWAY_URL` | *(unset)* | Base URL of the auth gateway's `/auth` mount, as the **browser** reaches it — must already end in `/auth` (e.g. a same-origin path like `/auth` behind a proxy, or a full `http://host:port/auth` for local testing without one). Unset keeps every auth flow exactly as the single-container setup: a token in the URL, no cookie, no gateway process needed at all. |
+| `CRR_WORKFLOW_DB_URL` | `sqlite:///data/workflow.db` | Shared by `crr.workflow`'s Streamlit code and the gateway — both must point at the same database. |
+| `CRR_COOKIE_SECURE` | `true` | Set `false` only for plain-HTTP local testing; a `Secure` cookie is never returned by a browser without TLS. |
+| `CRR_COOKIE_SAMESITE` | `lax` | `lax`, `strict`, or `none` (the last requires `Secure`). |
+
+The demo accounts the login page lists (`analyst` / `manager` / `officer`,
+passwords printed right there) are exactly that — a demo. A real deployment
+disables `WorkflowStore.seed_default_users()` or rotates those passwords
+immediately, and provisions real accounts through the admin-only user form in
+the sidebar (or an external identity provider, if one is already in place).
 
 ## Data provenance
 

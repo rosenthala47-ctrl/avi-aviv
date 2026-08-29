@@ -36,6 +36,7 @@ import html
 import os
 import random
 import sys
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -53,14 +54,27 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from crr.workflow import (  # noqa: E402  (path setup must run first)
+    AUTH_HEADER_NAME,
     DEMO_USERS,
+    SESSION_COOKIE_NAME,
     WorkflowStore,
     create_session_factory,
+    extract_bearer_token,
     resolve_database_url,
 )
 
 API_URL = os.environ.get("CRR_API_URL", "http://127.0.0.1:8000").rstrip("/")
 REQUEST_TIMEOUT = float(os.environ.get("CRR_UI_TIMEOUT", "30"))
+# Same-origin base URL of crr.workflow.gateway's /auth mount — e.g. "/auth"
+# behind a reverse proxy that routes that path to the gateway unchanged, or a
+# full "https://host/auth" (see deploy/Caddyfile, deploy/nginx.conf; both
+# proxy /auth/* straight through with no path rewriting, so this must already
+# end in "/auth" to line up with the gateway's own routes, /auth/adopt and
+# /auth/logout — the code below appends only "/adopt"/"/logout"). Empty (the
+# default, a bare `streamlit run app.py` with no proxy in front) keeps every
+# auth flow exactly as it was: a token in the URL query string, no cookie in
+# play at all.
+AUTH_GATEWAY_URL = os.environ.get("CRR_AUTH_GATEWAY_URL", "").rstrip("/")
 
 
 @st.cache_resource
@@ -3561,16 +3575,25 @@ def page_auditlog() -> None:
 # --------------------------------------------------------------------------
 # Authentication
 #
-# Role is now the logged-in user's, read from the database — there is no
-# session-state role switcher. Login state survives a hard browser refresh via
-# a bearer token in the URL query string, validated on every run against the
-# wf_sessions table (only the token's hash is stored; see crr.workflow.auth).
+# Role is the logged-in user's, read from the database — there is no
+# session-state role switcher. The session token can reach this app three
+# ways, tried in this order (crr.workflow.auth.extract_bearer_token):
 #
-# Honest limitation: a token in the URL is visible in history, logs and the
-# referrer header. This is the Streamlit-native way to survive a refresh with
-# no third-party cookie component; a production deployment would terminate auth
-# at a reverse proxy issuing httpOnly+Secure+SameSite cookies instead. The
-# token is 256-bit random, stored only as a SHA-256 hash, and expires.
+#   1. the X-Auth-Token header — for a deployment where a proxy/gateway in
+#      front injects it directly;
+#   2. the httpOnly crr_session cookie — set by crr.workflow.gateway, never
+#      by this app (Streamlit has no API to issue a Set-Cookie; see that
+#      module's docstring for why a separate small service exists at all);
+#   3. the ``auth`` URL query parameter — the fallback for a bare
+#      ``streamlit run app.py`` with no proxy or gateway in front, and the
+#      only path that existed before AUTH_GATEWAY_URL was introduced.
+#
+# Whichever carried it, resolve_session() (crr.workflow.store) validates the
+# exact same way — a 256-bit random token, stored only as a SHA-256 hash, that
+# expires. With no gateway configured, behaviour is byte-for-byte what it was
+# before this section grew: the query parameter, visible in history/logs/the
+# referrer header, is a known, documented limitation of that fallback path —
+# not of the system as a whole once a gateway is in front of it.
 # --------------------------------------------------------------------------
 
 _AUTH_QP = "auth"
@@ -3578,15 +3601,50 @@ _AUTH_QP = "auth"
 
 def resolve_current_user(store: WorkflowStore) -> dict[str, Any] | None:
     """The logged-in user for this run: the cached session value, or a token
-    from the URL validated against the store. Caches the result for the run."""
+    from a header/cookie/query-param validated against the store. Caches the
+    result — and which token resolved it — for the run."""
     cached = st.session_state.get("auth_user")
     if cached:
         return cached
-    token = st.query_params.get(_AUTH_QP)
+    token = extract_bearer_token(
+        st.context.headers.get(AUTH_HEADER_NAME),
+        st.context.cookies.get(SESSION_COOKIE_NAME),
+        st.query_params.get(_AUTH_QP),
+    )
     user = store.resolve_session(token) if token else None
     if user:
         st.session_state["auth_user"] = user
+        st.session_state["auth_token"] = token
     return user
+
+
+def _navigate_to(url: str, **query: str) -> None:
+    """A full top-level browser navigation from inside a Streamlit script —
+    the only way anything here can hand a value to a different origin-path
+    service (crr.workflow.gateway) as a real HTTP request, and the only way a
+    response to that request can set an httpOnly cookie the browser will keep.
+
+    An earlier version of this rendered an auto-submitting <form> inside
+    components.v1.html's iframe. That iframe is sandboxed WITHOUT
+    allow-top-navigation (neither components.v1.html nor st.iframe expose a
+    way to change that), so the browser blocks the form's submit with
+    "Unsafe attempt to initiate navigation for frame ... sandboxed" — it
+    never actually navigated. A <meta http-equiv="refresh"> tag has no such
+    restriction: rendered via st.markdown(unsafe_allow_html=True) it lands in
+    the TOP-LEVEL page's own DOM (no iframe at all), and a real redirect from
+    there is exactly what a <meta refresh> is for. Confirmed with an isolated
+    Streamlit test app that this specific tag survives st.markdown's
+    CommonMark pass and triggers a genuine navigation.
+
+    The tradeoff: <meta refresh> is GET-only, so query values travel in the
+    target URL rather than a POST body. That is a real, narrow exposure for
+    the login hop specifically (the one-time bearer token appears in this
+    single redirect's URL/logs, though never again afterward — every
+    subsequent request carries only the httpOnly cookie), and is called out
+    in the README rather than glossed over. Logout has no such exposure: it
+    carries no token, only `next`."""
+    target = f"{url}?{urllib.parse.urlencode(query)}" if query else url
+    st.markdown(f'<meta http-equiv="refresh" content="0;url={html.escape(target)}">', unsafe_allow_html=True)
 
 
 def render_login_page(store: WorkflowStore) -> None:
@@ -3609,14 +3667,23 @@ def render_login_page(store: WorkflowStore) -> None:
                 st.error(t("login.failed"))
             else:
                 token = store.create_login_session(user["id"])
+                store.append_audit("login", actor=user["display_name"], role=user["role"],
+                                   detail={"username": user["username"]})
+                if AUTH_GATEWAY_URL:
+                    # A real page navigation, not st.rerun(): it is the only
+                    # way this token becomes an httpOnly cookie. The browser
+                    # lands back on "/" with the cookie already set, and that
+                    # fresh page load is what resolve_current_user() sees —
+                    # there is nothing left to render on this pass.
+                    _navigate_to(f"{AUTH_GATEWAY_URL}/adopt", token=token, next="/")
+                    st.stop()
                 st.query_params[_AUTH_QP] = token
                 st.session_state["auth_user"] = user
+                st.session_state["auth_token"] = token
                 # Land every fresh login on the queue, not wherever the previous
                 # session (possibly a different user) happened to be.
                 st.session_state.nav = "queue"
                 st.session_state.selected_customer = None
-                store.append_audit("login", actor=user["display_name"], role=user["role"],
-                                   detail={"username": user["username"]})
                 st.rerun()
         with st.expander(t("login.demo_header")):
             st.caption(t("login.demo_hint"))
@@ -3635,9 +3702,15 @@ def render_user_panel(store: WorkflowStore) -> None:
     st.caption(f"{t('sidebar.role_label')}: {role_label(user.get('role', 'junior_analyst'))}")
     if st.button(t("sidebar.sign_out"), use_container_width=True, key="sign_out_btn"):
         log_audit("logout")  # attributed to the current user before it is cleared
-        store.end_session(st.query_params.get(_AUTH_QP))
-        st.query_params.pop(_AUTH_QP, None)
+        store.end_session(st.session_state.get("auth_token"))
         st.session_state.pop("auth_user", None)
+        st.session_state.pop("auth_token", None)
+        if AUTH_GATEWAY_URL:
+            # Clears the browser's httpOnly cookie too — only a real HTTP
+            # response (the gateway's) can do that; a Streamlit rerun cannot.
+            _navigate_to(f"{AUTH_GATEWAY_URL}/logout", next="/")
+            st.stop()
+        st.query_params.pop(_AUTH_QP, None)
         st.rerun()
 
     # Provisioning real accounts is itself an admin-only action, gated by the

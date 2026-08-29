@@ -77,3 +77,50 @@ def new_session_token() -> str:
 def hash_token(token: str) -> str:
     """SHA-256 of a raw token — what actually goes in the sessions table."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+# --------------------------------------------------------------------------
+# Where the bearer token travels: a header/cookie set by a reverse proxy or
+# this app's own auth gateway (crr.workflow.gateway), or — with no proxy in
+# front at all — the URL query parameter the in-app Streamlit login sets
+# directly. All three carry the exact same opaque token; only how it reaches
+# the server differs, and resolve_session() (crr.workflow.store) does not
+# care which path it came from.
+# --------------------------------------------------------------------------
+
+#: The httpOnly cookie the auth gateway sets. Never readable from page JS by
+#: design — that is the entire point of httpOnly — so nothing in this file or
+#: app.py ever sets it directly; only crr.workflow.gateway does, via a real
+#: Set-Cookie response header.
+SESSION_COOKIE_NAME = "crr_session"
+
+#: An alternative for deployments that forward the session as a header rather
+#: than a cookie (e.g. an internal gateway/SSO layer that already terminated
+#: its own auth and re-injects this as a trusted, proxy-only header).
+AUTH_HEADER_NAME = "X-Auth-Token"
+
+
+def extract_bearer_token(
+    header_value: str | None, cookie_value: str | None, query_param_value: str | None,
+) -> str | None:
+    """Pick the session token from whichever transport actually carried it.
+
+    Deliberately framework-agnostic — it takes three already-looked-up
+    strings, not a headers/cookies/query-params object — so the exact same
+    logic runs whether the caller is Streamlit (``st.context.headers``/
+    ``st.context.cookies``/``st.query_params``, see app.py) or a Starlette
+    request in the auth gateway. That symmetry is what makes this function
+    worth having rather than duplicating the precedence rule in two places.
+
+    Precedence: header, then cookie, then the URL query parameter — the
+    header is the most deliberate signal (something upstream chose to inject
+    it), the httpOnly cookie is the normal browser-native case, and the query
+    parameter is the fallback for a bare ``streamlit run app.py`` with no
+    proxy or gateway in front at all. Blank/whitespace-only values are treated
+    as absent, matching how a proxy might forward an empty header rather than
+    omitting it.
+    """
+    for candidate in (header_value, cookie_value, query_param_value):
+        if candidate is not None and candidate.strip():
+            return candidate.strip()
+    return None
