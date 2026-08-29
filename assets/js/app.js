@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "150";
+  const APP_VERSION = "151";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -4316,6 +4316,11 @@
           ${pageRow("tools", "🛠️", "#64748b", "כלים ותחזוקה", "גיבוי, גרסה ותמיכה")}
           ${pageRow("account", "🚪", "#ef4444", "חשבון", "יציאה ומחיקת המספרה")}
         </div>
+        ${SHOP === "try" ? `
+        <div class="section-title">🛡️ לרוזנטל בלבד</div>
+        <div class="card set-list">
+          ${navRow('data-act="admin-quick-open"', "🛡️", "#0ea5e9", "ניהול מנויים — כל המספרות", "דורש קוד מנהל · משפיע על כל המספרות, לא רק try")}
+        </div>` : ""}
         ${footer}`;
     }
 
@@ -5370,6 +5375,9 @@
         // כפיית עדכון — מנקה מטמון ומרענן, למקרה שהדפדפן מחזיק גרסה ישנה
         case "force-update": forceUpdate(); break;
         case "owner-login": promptOwner(); break;   // כניסת מנהל ייעודית (במקום 3 לחיצות על הלוגו)
+        // קיצור דרך לפאנל ניהול המנויים — מוצג רק בהגדרות מספרת try. עדיין דורש
+        // את קוד המנהל הסודי (בדיוק כמו 3 לחיצות על הלוגו) — לא עוקף אבטחה.
+        case "admin-quick-open": promptOwnerCode(); break;
         case "owner-logout": confirmOwnerLogout(); break;
         case "do-owner-logout":
           try {
