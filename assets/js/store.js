@@ -561,6 +561,24 @@ UG.Store = (function () {
     return true;
   }
 
+  /* מחיקת מספרה כלשהי מהפאנל (אתה בלבד) — בלתי הפיך. פועל לפי מזהה מפורש
+     (sid), לא לפי המספרה הפעילה כרגע כמו deleteShop(). חוקי האבטחה
+     (database.rules.json) אוכפים שרק חשבון האדמין יכול למחוק מספרה שאינה
+     שלו. שאר הצמתים — מיטב המאמץ, בדיוק כמו deleteShop() הרגיל. */
+  async function adminDeleteShop(sid) {
+    await connect();
+    if (!_conn || _conn.kind !== "rtdb") return { ok: false, reason: "הפעולה זמינה רק במצב ענן" };
+    const db = _conn.db;
+    try {
+      await db.ref("shops/" + sid).remove();
+    } catch (e) {
+      return { ok: false, reason: (e && e.message) || "המחיקה נכשלה" };
+    }
+    const rest = ["shopIndex/" + sid, "subs/" + sid, "gallery/" + sid, "private/" + sid, "pushTokens/owner_" + sid];
+    await Promise.allSettled(rest.map((p) => db.ref(p).remove()));
+    return { ok: true };
+  }
+
   /* הספר חזר מעמוד התשלום — מסמנים "ממתין לאישור" בלי לגעת ב-paidUntil */
   async function markPaymentPending(planId) {
     await connect();
@@ -1315,7 +1333,7 @@ UG.Store = (function () {
     subscribeGallery, getGallery, addPhoto, removePhoto,
     subscribeMedia, getMedia, setShopMedia, getBookingPriv, getContacts, subscribeContacts,
     createShop, shopExists, peekShop, passcodeTaken, registerPasscodeIfFree, setOwnerPassHash,
-    getSub, markPaymentPending, adminListShops, adminSetPaid,
+    getSub, markPaymentPending, adminListShops, adminSetPaid, adminDeleteShop,
     exportData, importData, deleteShop, purgeClient, onWriteError,
     get mode() { return backend ? backend.mode : "local"; },
     get shopId() { return shopId; },

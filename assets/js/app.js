@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "152";
+  const APP_VERSION = "153";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1480,9 +1480,49 @@
           <button class="btn btn-sm" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="1">+ חודש</button>
           <button class="btn btn-sm" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="12">+ שנה</button>
           <button class="btn btn-sm btn-danger" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="0">איפוס</button>
+          <button class="btn btn-sm btn-danger" data-act="adm-confirm-delete" data-sid="${esc(s.id)}" data-name="${esc(s.name)}">🗑️ מחיקה</button>
         </div>
       </div>`;
     }).join("");
+  }
+
+  // אישור מחיקת מספרה מהפאנל (בלתי הפיך) — חלון נפרד עם הקלדת "מחק" לפני
+  // שהמחיקה בפועל מתבצעת, כדי למנוע מחיקת מספרה חיה בטעות בלחיצה אחת.
+  function admConfirmDelete(sid, name) {
+    openModal(`
+      <div class="m-title" style="color:var(--bad)">🗑️ מחיקת מספרה</div>
+      <div class="m-sub">${esc(name || sid)} · ${esc(sid)}</div>
+      <p style="font-size:14px;color:var(--bad);font-weight:700;margin:14px 0 0">פעולה בלתי הפיכה — כל התורים, הלקוחות וההגדרות של המספרה הזו יימחקו לצמיתות.</p>
+      <div class="field" style="margin-top:18px">
+        <label>להמשך, הקלידו <b>מחק</b> בתיבה:</label>
+        <input class="input" id="adm-del-confirm" placeholder="מחק" autocomplete="off">
+      </div>
+      <button class="btn btn-danger" data-act="adm-do-delete" data-sid="${esc(sid)}">מחיקה סופית</button>
+      <button class="btn btn-ghost" data-act="adm-cancel-delete" style="margin-top:8px">ביטול</button>
+    `);
+    setTimeout(() => { const el = $("#adm-del-confirm"); if (el) el.focus(); }, 100);
+  }
+
+  async function admDoDelete(sid) {
+    const el = $("#adm-del-confirm");
+    if (!el || el.value.trim() !== "מחק") { toast("הקלידו ״מחק״ כדי לאשר", "", "⌨️"); if (el) el.focus(); return; }
+    if (adminEmail() && authAvail && !isAdminAuthed()) {
+      toast("התחברו עם חשבון האדמין כדי למחוק", "", "🔒");
+      openAdminPanel();
+      return;
+    }
+    const btn = $("[data-act='adm-do-delete']"); if (btn) { btn.disabled = true; btn.textContent = "מוחק…"; }
+    let res;
+    try { res = await Store.adminDeleteShop(sid); }
+    catch (e) {
+      const denied = /permission[_ ]denied/i.test(String((e && (e.code || e.message)) || e));
+      toast(denied ? "אין הרשאה — התחברו עם חשבון האדמין" : "המחיקה נכשלה", "", "🔒");
+      openAdminPanel();
+      return;
+    }
+    if (!res || !res.ok) { toast((res && res.reason) || "המחיקה נכשלה", "", "⚠️"); openAdminPanel(); return; }
+    toast("המספרה נמחקה", "good", "🗑️");
+    openAdminPanel();   // רשימה מעודכנת מהשרת
   }
 
   async function admExtend(sid, months) {
@@ -5640,6 +5680,9 @@
         case "adm-extend": admExtend(t.dataset.sid, Number(t.dataset.m)); break;
         case "adm-google": adminGoogleSignIn(); break;
         case "adm-visit": openExternal(shareBase() + "#" + t.dataset.sid); break;   // כניסה למספרה (עמוד הלקוח שלה) מפאנל ניהול המנויים
+        case "adm-confirm-delete": admConfirmDelete(t.dataset.sid, t.dataset.name); break;
+        case "adm-do-delete": admDoDelete(t.dataset.sid); break;
+        case "adm-cancel-delete": openAdminPanel(); break;
         case "del-contact":
           await Store.removeContact(t.dataset.id);
           closeModal();  // הפעולה זמינה גם מתוך כרטיס הלקוח
