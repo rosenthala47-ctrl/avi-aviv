@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "151";
+  const APP_VERSION = "152";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1476,6 +1476,7 @@
         <div class="adm-meta">${s.phone ? esc(s.phone) + " · " : ""}${s.paidUntil ? "שולם עד " + esc(u.longDate(u.dateKey(new Date(s.paidUntil)))) : "טרם שולם"}</div>
         <span class="adm-badge ${st.cls}">${esc(st.label)}</span>
         <div class="adm-btns">
+          <button class="btn btn-sm" data-act="adm-visit" data-sid="${esc(s.id)}">🔗 כניסה</button>
           <button class="btn btn-sm" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="1">+ חודש</button>
           <button class="btn btn-sm" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="12">+ שנה</button>
           <button class="btn btn-sm btn-danger" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="0">איפוס</button>
@@ -5638,6 +5639,7 @@
         case "show-upgrade": handleUpgrade(); break;
         case "adm-extend": admExtend(t.dataset.sid, Number(t.dataset.m)); break;
         case "adm-google": adminGoogleSignIn(); break;
+        case "adm-visit": openExternal(shareBase() + "#" + t.dataset.sid); break;   // כניסה למספרה (עמוד הלקוח שלה) מפאנל ניהול המנויים
         case "del-contact":
           await Store.removeContact(t.dataset.id);
           closeModal();  // הפעולה זמינה גם מתוך כרטיס הלקוח
