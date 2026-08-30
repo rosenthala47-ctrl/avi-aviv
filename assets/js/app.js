@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "154";
+  const APP_VERSION = "155";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -61,6 +61,14 @@
     const cfg = ((window.UG_CONFIG && UG_CONFIG.publicBaseUrl) || "").trim().replace(/\/+$/, "");
     if (cfg) return cfg + "/";
     return location.origin + location.pathname;
+  }
+  // באנר שיווקי — "רוצים גם מערכת תורים בחינם?" מוביל לאשף פתיחת מספרה חדשה (#new)
+  function promoBanner() {
+    return `
+      <p class="hint" style="text-align:center;margin-top:22px">
+        רוצים גם אתר ומערכת לניהול תורים בחינם לגמרי?<br>
+        <a href="#new" data-act="open-signup" style="color:var(--sky);font-weight:700">לחצו כאן!</a>
+      </p>`;
   }
   function clientLink() {
     // כולל #main גם למספרה של אורי — כדי שהקישור יעבוד גם בדומיין המוצר (שם הכתובת הריקה = מסך פתיחה)
@@ -759,9 +767,7 @@
       ${cShow(st, "showShare") ? shareCard() : ""}
       ${cShow(st, "showProducts") ? homeProducts(st) : ""}
       ${cShow(st, "showReviews") ? homeReviews(st) : ""}
-      <p class="hint" style="text-align:center;margin-top:22px">
-        מנהלים מספרה? <a href="#new" data-act="open-signup" style="color:var(--sky)">פתחו מערכת תורים משלכם ›</a>
-      </p>
+      ${promoBanner()}
       <p class="hint" style="text-align:center;margin-top:8px">
         <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--muted)">מדיניות פרטיות</a>
         · <a href="terms.html" target="_blank" rel="noopener" style="color:var(--muted)">תנאי שימוש</a>
@@ -1673,9 +1679,7 @@
       ${installCard()}
       ${mapsCard(st)}
       ${cShow(st, "showShare") ? shareCard() : ""}
-      <p class="hint" style="text-align:center;margin-top:22px">
-        מנהלים מספרה? <a href="#new" data-act="open-signup" style="color:var(--sky)">פתחו מערכת תורים משלכם ›</a>
-      </p>
+      ${promoBanner()}
       <p class="hint" style="text-align:center;margin-top:8px">
         <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--muted)">מדיניות פרטיות</a>
         · <a href="terms.html" target="_blank" rel="noopener" style="color:var(--muted)">תנאי שימוש</a>
@@ -4215,7 +4219,8 @@
         <button class="btn btn-danger" data-act="delete-shop" style="margin-top:12px">🗑️ מחיקת המספרה לצמיתות</button>
       </div>`;
     const footer = `
-      <p class="hint" style="text-align:center;margin-top:20px">
+      ${promoBanner()}
+      <p class="hint" style="text-align:center;margin-top:8px">
         <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--muted)">מדיניות פרטיות</a>
         · <a href="terms.html" target="_blank" rel="noopener" style="color:var(--muted)">תנאי שימוש</a>
         · BarberTor
