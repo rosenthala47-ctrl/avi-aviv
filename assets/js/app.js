@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "155";
+  const APP_VERSION = "156";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -5684,10 +5684,11 @@
         case "show-upgrade": handleUpgrade(); break;
         case "adm-extend": admExtend(t.dataset.sid, Number(t.dataset.m)); break;
         case "adm-google": adminGoogleSignIn(); break;
-        // כניסה למספרה (עמוד הלקוח שלה) מפאנל ניהול המנויים. ניווט במקום (לא
-        // חלון/לשונית חדשה) — באפליקציה מותקנת (standalone) אין תמיכה
-        // אמינה בפתיחת לשונית נוספת, וזה הציג מסך שחור ריק.
-        case "adm-visit": location.href = shareBase() + "#" + t.dataset.sid; break;
+        // כניסה למספרה (עמוד הלקוח שלה) מפאנל ניהול המנויים. שינוי hash לבדו
+        // (בלי reload) לא עושה כלום — אין מאזין hashchange באפליקציה, אז ה-SPA
+        // ממשיך להציג את אותה מספרה שהייתה טעונה. reload מכריח אתחול מחדש עם
+        // המספרה החדשה — בדיוק כמו open-signup למעלה.
+        case "adm-visit": location.hash = t.dataset.sid; location.reload(); break;
         case "adm-confirm-delete": admConfirmDelete(t.dataset.sid, t.dataset.name); break;
         case "adm-do-delete": admDoDelete(t.dataset.sid); break;
         case "adm-cancel-delete": openAdminPanel(); break;
