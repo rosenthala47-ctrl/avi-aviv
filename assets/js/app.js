@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "156";
+  const APP_VERSION = "157";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1437,13 +1437,15 @@
     return { label: "הסתיים — ממתין לתשלום", cls: "exp" };
   }
 
-  /* סטטיסטיקה כוללת — מחושבת מהאינדקס שכבר נטען, בלי קריאות נוספות */
+  /* סטטיסטיקה כוללת — מחושבת מהאינדקס שכבר נטען, בלי קריאות נוספות.
+     "try" היא מספרת הבדיקות שלך, לא לקוח — לא נספרת בשום מדד עסקי. */
   function adminStatsHtml() {
     const cfg = UG_CONFIG.subscription || {};
     const now = Date.now();
     const trialMs = (Number(cfg.trialDays) || 30) * 86400000;
+    const realShops = adminShops.filter((s) => s.id !== "try");
     let active = 0, trial = 0, expired = 0, pending = 0, newMonth = 0, newWeek = 0, revenue = 0;
-    adminShops.forEach((s) => {
+    realShops.forEach((s) => {
       if (s.pending) pending++;
       if (s.paidUntil && s.paidUntil > now) { active++; revenue += 35; }
       else if (!s.createdAt) active++;                      // מספרה ותיקה ללא הגבלה
@@ -1452,7 +1454,7 @@
       if (s.createdAt && now - s.createdAt < 30 * 86400000) newMonth++;
       if (s.createdAt && now - s.createdAt < 7 * 86400000) newWeek++;
     });
-    const total = adminShops.length;
+    const total = realShops.length;
     const conv = (active + expired) ? Math.round(active / (active + expired) * 100) : 0;
     const cell = (num, lbl, cls) =>
       `<div class="adm-stat ${cls || ""}"><div class="as-num">${num}</div><div class="as-lbl">${lbl}</div></div>`;
@@ -1476,9 +1478,11 @@
     if (!adminShops.length) { el.innerHTML = `<p class="hint">אין עדיין מספרות</p>`; return; }
     el.innerHTML = adminStatsHtml() + adminShops.map((s) => {
       const st = admShopStatus(s);
+      const isTest = s.id === "try";
       return `
-      <div class="adm-shop${s.pending ? " pend" : ""}">
+      <div class="adm-shop${s.pending ? " pend" : ""}${isTest ? " test" : ""}">
         <div class="adm-name">${esc(s.name)} <span style="color:var(--muted);font-weight:400">· ${esc(s.id)}</span></div>
+        ${isTest ? `<span class="adm-badge test">🧪 מספרת הבדיקות שלך — לא נספרת בסטטיסטיקה</span>` : ""}
         <div class="adm-meta">${s.phone ? esc(s.phone) + " · " : ""}${s.paidUntil ? "שולם עד " + esc(u.longDate(u.dateKey(new Date(s.paidUntil)))) : "טרם שולם"}</div>
         <span class="adm-badge ${st.cls}">${esc(st.label)}</span>
         <div class="adm-btns">

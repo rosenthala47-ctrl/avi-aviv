@@ -1002,6 +1002,8 @@ select.input {
 .adm-badge.exp { color: #dc2626; background: rgba(248,113,113,.15); }
 .adm-badge.pend { color: #b45309; background: rgba(251,191,36,.2); }
 .adm-shop.pend { border-color: rgba(251,191,36,.6); box-shadow: 0 6px 16px rgba(251,191,36,.14); }
+.adm-shop.test { border: 1px dashed var(--muted); background: var(--surface-2); opacity: .9; }
+.adm-badge.test { color: var(--muted); background: var(--surface-3); display: block; width: fit-content; margin-bottom: 6px; }
 .adm-btns { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
 .adm-btns .btn { width: auto; flex: 1; min-width: 74px; }
 /* סטטיסטיקה בפאנל המנויים */
