@@ -260,6 +260,27 @@ function apptTs(date, start) {
     return res.successCount;
   }
 
+  /* הכנה ל-SMS — עד שתבחרו ותשלמו לספק SMS מורשה (בישראל שליחת SMS דורשת
+     ספק רשמי, לא API כללי), הפונקציה רק מדפיסה ללוג מה היא הייתה שולחת —
+     דמה לגמרי, לא יוצאת שום קריאת רשת ולא עולה כסף. ברגע שתגדירו secret
+     בשם SMS_API_KEY ב-GitHub (Settings → Secrets → Actions, בדיוק כמו
+     FIREBASE_SERVICE_ACCOUNT), הריצה הבאה של הקרון תזהה שיש מפתח — אבל
+     עדיין צריך למלא כאן את הבקשה בפורמט הספציפי של הספק שתבחרו (כל ספק
+     שונה: כתובת, כותרות, גוף הבקשה) לפני שזה באמת ישלח. */
+  async function sendSms(phone, message) {
+    const clean = String(phone || "").replace(/\D/g, "");
+    if (!clean) return { ok: false, reason: "no-phone" };
+    const apiKey = process.env.SMS_API_KEY;
+    if (!apiKey) {
+      console.log(`[SMS דמה — לא נשלח באמת] אל ${clean}: ${message}`);
+      return { ok: true, dryRun: true };
+    }
+    // TODO: יש מפתח מוגדר — למלא כאן את הקריאה בפועל לפי מסמכי הספק שנבחר
+    // (fetch לכתובת הספק, עם apiKey ו-SMS_SENDER מה-env, ומספר+טקסט ההודעה).
+    console.warn("SMS_API_KEY מוגדר אך שליחת SMS בפועל עוד לא מומשה — יש למלא את ה-TODO בתוך sendSms()");
+    return { ok: false, reason: "not-implemented" };
+  }
+
   // מצב "כבר טופל" לכל המספרות בצומת אחד
   const stateRef = db.ref("system/pushState");
   const stateVal = (await stateRef.once("value")).val();
@@ -289,6 +310,12 @@ function apptTs(date, start) {
     const p = privVal[sid] && privVal[sid].bk && privVal[sid].bk[b.id];
     return (p && p.name) || b.userName || "לקוח";
   };
+  const bkPhoneOf = (sid, b) => {
+    const p = privVal[sid] && privVal[sid].bk && privVal[sid].bk[b.id];
+    return (p && p.phone) || b.phone || "";
+  };
+  // SMS — כרגע רק על try (הכנה, ראו sendSms). להרחיב לשאר המספרות בהמשך.
+  const SMS_SHOPS = ["try"];
   let sent = 0, totalNewA = 0, totalNewB = 0;
   // בדיקה ידנית על מספרה בודדת (Run workflow → shop_filter) — לא נוגעים כלל
   // במצב/בהתראות של שאר המספרות. ריק (ברירת המחדל, וכך גם בהרצה המתוזמנת) = הכול כרגיל.
@@ -315,6 +342,7 @@ function apptTs(date, start) {
     const doneBc = new Set(st.bcIds || []);
     const doneRem = new Set(st.remIds || []);   // תזכורות שכבר נשלחו
     const doneDayRem = new Set(st.dayRemIds || []); // תזכורות "התור מחר" שכבר נשלחו
+    const doneSmsRem = new Set(st.smsRemIds || []); // תזכורות SMS שכבר נשלחו (דמה או אמיתי) — סט נפרד מה-push
 
     const newAlerts = alerts.filter((a) => a && a.id && !doneAlerts.has(a.id) && apptTs(a.date, a.start) > now);
     const newBookings = bookings.filter((b) =>
@@ -386,6 +414,12 @@ function apptTs(date, start) {
         sent += await sendToUid(b.userId, "⏰ תזכורת לתור",
           `${b.serviceName} · ${relDay(b.date)} בשעה ${b.start} (בעוד ${mins} דק׳)\n${shopName}`, "rem-" + b.id);
         doneRem.add(b.id);
+        // SMS מקביל לתזכורת — כרגע רק על SMS_SHOPS (try), ובדמה עד שיוגדר ספק אמיתי
+        if (SMS_SHOPS.includes(sid) && !doneSmsRem.has(b.id)) {
+          const phone = bkPhoneOf(sid, b);
+          if (phone) await sendSms(phone, `תזכורת: ${b.serviceName} ${relDay(b.date)} בשעה ${b.start} · ${shopName}`);
+          doneSmsRem.add(b.id);
+        }
       }
       // הודעה קבוצתית — נשלחת לכל הלקוחות שהזמינו דרך האפליקציה
       if (newBc.length) {
@@ -405,6 +439,7 @@ function apptTs(date, start) {
     if (firstRun) {
       dueReminders.forEach((b) => doneRem.add(b.id));
       dueDayReminders.forEach((b) => doneDayRem.add(b.id));
+      dueReminders.forEach((b) => doneSmsRem.add(b.id));
     }
     alerts.forEach((a) => a && a.id && doneAlerts.add(a.id));
     bookings.forEach((b) => b && b.id && doneBookings.add(b.id));
@@ -423,6 +458,7 @@ function apptTs(date, start) {
       bcIds: [...doneBc].slice(-200),
       remIds: [...doneRem].slice(-500),
       dayRemIds: [...doneDayRem].slice(-500),
+      smsRemIds: [...doneSmsRem].slice(-500),
     };
     totalNewA += newAlerts.length; totalNewB += newBookings.length;
   }

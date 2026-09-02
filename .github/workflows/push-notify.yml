@@ -38,4 +38,7 @@ jobs:
           TZ: Asia/Jerusalem
           # ריק בהרצה המתוזמנת הרגילה (אין inputs לאירוע schedule) — כל המספרות כרגיל
           SHOP_FILTER: ${{ github.event.inputs.shop_filter }}
+          # הכנה ל-SMS (ראו sendSms ב-send-push.js): ריק כרגע — עד שתוגדר secret
+          # בשם SMS_API_KEY (Settings → Secrets → Actions), הקוד רק מדפיס דמה
+          SMS_API_KEY: ${{ secrets.SMS_API_KEY }}
         run: node send-push.js
