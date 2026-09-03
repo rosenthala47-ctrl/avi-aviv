@@ -20,9 +20,10 @@ import hashlib
 import json
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from crr.screening.models import WatchlistRecord
 from crr.workflow import auth
 from crr.workflow.models import (
     AuditEntry,
@@ -32,6 +33,7 @@ from crr.workflow.models import (
     User,
     UserSession,
     WatchlistDisposition,
+    WatchlistEntry,
 )
 
 #: Session lifetime for a browser login token.
@@ -51,6 +53,38 @@ DEMO_USERS: tuple[dict[str, str], ...] = (
      "role": "risk_manager", "password": "manager123"},
     {"username": "officer", "display_name": "Noa (Compliance Officer)",
      "role": "compliance_admin", "password": "officer123"},
+)
+
+#: Fictional demo watchlist entries — replaces the hardcoded WATCHLIST_ENTRIES
+#: that used to live in app.py. Seeded once, only into an empty table (see
+#: seed_demo_watchlist), so the screening feature has something to show
+#: before anyone has run scripts/refresh_watchlists.py. The "ofac"/"eu"/"un"
+#: rows are placeholders: replace_watchlist_source deletes every row for a
+#: source before inserting the freshly parsed list, so the first real refresh
+#: for that source evicts its demo stand-in automatically. "pep" and
+#: "adverse_media" have no free, authoritative, machine-readable source to
+#: refresh from (a real deployment integrates a paid vendor — World-Check,
+#: Dow Jones — for those; see crr/screening/ingest.py's module docstring) and
+#: so stay demo-only indefinitely.
+_DEMO_WATCHLIST_SEED: tuple[WatchlistRecord, ...] = (
+    WatchlistRecord(source="ofac", source_id="OFAC-2201", name="Mikhail Aslanov", category="sanctions",
+                     aliases=("Michael Aslanov",), dates_of_birth=("1975-11-02",), countries=("CY",),
+                     remarks="Specially Designated National — asset-freeze order (demo data)."),
+    WatchlistRecord(source="eu", source_id="EU-3105", name="Khaled Marwan", category="sanctions",
+                     aliases=("Khalid Marwan",), dates_of_birth=("1969-06-19",), countries=("AE",),
+                     remarks="EU consolidated sanctions list — arms trafficking (demo data)."),
+    WatchlistRecord(source="un", source_id="UN-1042", name="Elena Petrova", category="sanctions",
+                     aliases=("Yelena Petrova",), dates_of_birth=("1982-01-30",), countries=("RU",),
+                     remarks="UN Security Council sanctions list (demo data)."),
+    WatchlistRecord(source="pep", source_id="PEP-0087", name="Rustam Aliyev", category="pep",
+                     dates_of_birth=("1958-09-12",), countries=("TR",),
+                     remarks="Former deputy minister of finance — politically exposed person (demo data)."),
+    WatchlistRecord(source="pep", source_id="PEP-0142", name="Fatima Al-Sayed", category="pep",
+                     dates_of_birth=("1971-04-05",), countries=("AE",),
+                     remarks="Spouse of a serving head of state — politically exposed person (demo data)."),
+    WatchlistRecord(source="adverse_media", source_id="AM-0509", name="Dmitri Volkov", category="adverse_media",
+                     aliases=("Dmitry Volkov",), dates_of_birth=("1966-12-24",), countries=("CY",),
+                     remarks="Named in investigative reporting on offshore shell structures (demo data)."),
 )
 
 
@@ -329,6 +363,63 @@ class WorkflowStore:
                 s.delete(row)
                 s.commit()
 
+    # ---- watchlist entries (sanctions/PEP/adverse-media screening data) --
+
+    def seed_demo_watchlist(self) -> None:
+        """Insert each demo entry whose SOURCE currently has zero rows — not
+        an all-or-nothing check on the whole table, so an ops team that runs
+        scripts/refresh_watchlists.py for ofac/un before anyone has ever
+        opened the app still gets pep/adverse_media's demo rows seeded (they
+        have no real source to refresh from at all, see the module-level
+        comment on _DEMO_WATCHLIST_SEED — a whole-table check would leave
+        them permanently empty in that ordering). Never re-seeds a source
+        that already has rows, real or demo, so a genuine refresh's data is
+        never overwritten by this. Idempotent; called from get_store() on
+        every process start, same as seed_default_users."""
+        with self._sf() as s:
+            existing_sources = set(s.scalars(select(WatchlistEntry.source).distinct()).all())
+            to_seed = [r for r in _DEMO_WATCHLIST_SEED if r.source not in existing_sources]
+            if not to_seed:
+                return
+            now = _utcnow()
+            for record in to_seed:
+                s.add(_entry_from_record(record, now))
+            s.commit()
+
+    def replace_watchlist_source(self, source: str, records: list[WatchlistRecord]) -> int:
+        """Atomically swap in a freshly parsed list for one source: delete
+        every existing row for it, insert the new ones, in one transaction.
+        Refreshing one source never touches another's rows, and a failure
+        partway through rolls back rather than leaving a source
+        half-updated. Returns the number of rows inserted."""
+        now = _utcnow()
+        with self._sf() as s:
+            s.execute(delete(WatchlistEntry).where(WatchlistEntry.source == source))
+            for record in records:
+                s.add(_entry_from_record(record, now))
+            s.commit()
+        return len(records)
+
+    def list_watchlist_entries(self) -> list[dict[str, Any]]:
+        with self._sf() as s:
+            rows = s.scalars(select(WatchlistEntry)).all()
+            return [_watchlist_entry_dict(r) for r in rows]
+
+    def watchlist_source_status(self) -> list[dict[str, Any]]:
+        """Per-source row count and most recent ingest timestamp — what the
+        admin-only "watchlist data sources" panel shows, so a compliance
+        officer can answer "how do we know this list is current" without
+        opening the database directly."""
+        with self._sf() as s:
+            rows = s.execute(
+                select(WatchlistEntry.source, func.count(), func.max(WatchlistEntry.ingested_at))
+                .group_by(WatchlistEntry.source)
+            ).all()
+            return [
+                {"source": source, "count": count, "last_refreshed": last}
+                for source, count, last in sorted(rows, key=lambda r: r[0])
+            ]
+
     # ---- watchlist dispositions -----------------------------------------
 
     def add_disposition(
@@ -381,6 +472,36 @@ class WorkflowStore:
                     return False, row.id
                 prev_hash = row.entry_hash
             return True, None
+
+
+def _entry_from_record(record: WatchlistRecord, at: dt.datetime) -> WatchlistEntry:
+    return WatchlistEntry(
+        source=record.source, source_id=record.source_id, name=record.name, category=record.category,
+        aliases=list(record.aliases), dates_of_birth=list(record.dates_of_birth), countries=list(record.countries),
+        program=record.program, remarks=record.remarks, ingested_at=at,
+    )
+
+
+def _watchlist_entry_dict(row: WatchlistEntry) -> dict[str, Any]:
+    """The dict shape crr.screening.matcher.screen() and the app's watchlist
+    UI expect — "dob"/"country" are the first of the (possibly multi-valued)
+    dates_of_birth/countries lists, kept for display; matching itself reads
+    the full lists so any of several real dates/countries can corroborate a
+    hit, not just the first one."""
+    dobs = row.dates_of_birth or []
+    countries = row.countries or []
+    return {
+        "id": f"{row.source}:{row.source_id}",
+        "name": row.name,
+        "aliases": row.aliases or [],
+        "dates_of_birth": dobs,
+        "countries": countries,
+        "dob": dobs[0] if dobs else None,
+        "country": countries[0] if countries else None,
+        "list_source": row.source,
+        "category": row.category,
+        "reason": row.remarks or row.program or f"Listed on the {row.source.upper()} sanctions list.",
+    }
 
 
 def _user_dict(user: User) -> dict[str, Any]:

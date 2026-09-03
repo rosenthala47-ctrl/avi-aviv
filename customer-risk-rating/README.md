@@ -718,7 +718,71 @@ described in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). With no key set
 — the default — extraction uses the local, offline `ReferenceExtractor` and
 nothing leaves the machine, same as every other phase.
 
-The jurisdiction, occupation and sanctions
-taxonomies in `src/crr/data/taxonomy.py` are illustrative structure for the
-alpha, **not** a compliance source; production must replace each with a live,
-versioned feed (FATF, OFAC/EU/UN, a licensed PEP and adverse-media vendor).
+The jurisdiction and occupation taxonomies in `src/crr/data/taxonomy.py` are
+illustrative structure for the alpha, **not** a compliance source; production
+must replace each with a live, versioned feed (FATF risk ratings and similar).
+Sanctions screening is different: see the next section — `crr.screening` and
+`scripts/refresh_watchlists.py` ingest OFAC's and the UN's real, free,
+government-published lists directly, not a placeholder.
+
+### Sanctions & PEP watchlist screening
+
+The Watchlist Hits panel (Customer 360) and the Sandbox's screening preview
+fuzzy-match a customer's name/DOB/country against whatever is currently in
+the `wf_watchlist_entries` table — see `crr.screening` for the matching and
+parsing code, and the sidebar's admin-only **Watchlist data sources** panel
+(Compliance Officer / Admin role) for what is loaded right now and how stale
+it is.
+
+**Three sources, three different levels of "real" out of the box:**
+
+| Source | Where the data comes from | Free? |
+|---|---|---|
+| OFAC (US) | `crr.screening.parsers.parse_ofac_sdn` — the real [SDN.XML](https://www.treasury.gov/ofac/downloads/sdn.xml) schema | Yes |
+| UN Security Council | `parse_un_consolidated` — the real [consolidated list](https://scsanctions.un.org/resources/xml/en/consolidated.xml) XML schema | Yes |
+| EU | `parse_eu_fsf` — the EU FSF export schema; no stable public URL (the Commission serves it through the interactive Sanctions Map UI, which mints a short-lived download token) — fetch a copy through that UI and pass it with `--file` | Yes, but manual |
+| PEP / adverse media | fictional demo entries only | No free, authoritative source exists — a real deployment integrates a paid vendor (World-Check, Dow Jones) here |
+
+Until `scripts/refresh_watchlists.py` has been run, every source shows a
+small set of fictional demo entries (clearly marked as such in the sidebar
+panel) — enough to exercise the screening/disposition workflow end to end
+without any setup. Run the script to replace a source's demo rows with the
+real thing:
+
+```bash
+# OFAC and the UN have a built-in default URL:
+python scripts/refresh_watchlists.py --source ofac
+python scripts/refresh_watchlists.py --source un
+python scripts/refresh_watchlists.py --source all   # both of the above
+
+# EU: fetch xmlFullSanctionsList through https://webgate.ec.europa.eu/fsd/fsf/public/
+# (the Sanctions Map UI) first, then:
+python scripts/refresh_watchlists.py --source eu --file /path/to/downloaded_fsf_export.xml
+
+# Any source can be loaded from a file you already have instead of fetching —
+# some regulated environments require this regardless of connectivity:
+python scripts/refresh_watchlists.py --source ofac --file /path/to/sdn.xml
+```
+
+The refresh replaces only the named source's rows (`WorkflowStore
+.replace_watchlist_source`), in one transaction, so a UN refresh never
+touches OFAC or EU data and a failed refresh can't leave a source half
+loaded. It reads/writes `CRR_WORKFLOW_DB_URL`, the same database the app
+itself uses — run it against whichever database the deployment actually
+points at, then the app picks up the new data on its next page load with no
+restart needed. Put it on a daily cron in a real deployment; these lists
+change.
+
+**Honest disclosure on the parsers**: every parser here is written against
+each publisher's real, documented XML schema and is verified against small,
+schema-accurate fixture files (`tests/fixtures/screening/`, `tests/
+test_screening_parsers.py`) — but this project was built in a sandboxed
+environment with no outbound network access to `treasury.gov`,
+`un.org` or `ec.europa.eu`, so the live fetch path (`crr.screening.ingest
+.fetch`) could not be exercised against the real, current files before
+shipping. Run `scripts/refresh_watchlists.py --source ofac` (or `un`) once
+against a real network and check the printed row count looks like the real
+list's size (tens of thousands for OFAC, low thousands for the UN) as the
+first thing to verify after wiring this in for real — a field renamed or
+restructured upstream would make the parser quietly return 0 rows rather
+than raise (see `crr/screening/parsers.py`'s module docstring).

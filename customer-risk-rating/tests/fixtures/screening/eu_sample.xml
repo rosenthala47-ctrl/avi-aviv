@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<export>
+  <sanctionEntity euReferenceNumber="EU.9001" logicalId="9001">
+    <subjectType code="P"/>
+    <regulation programme="EU-ARMS-EMBARGO"/>
+    <remark>EU consolidated sanctions list — fixture data, fictional.</remark>
+    <nameAlias wholeName="Rustam Aliyev" firstName="Rustam" lastName="Aliyev" strong="true"/>
+    <nameAlias wholeName="Rustam Aliev" firstName="Rustam" lastName="Aliev" strong="false"/>
+    <birthdate birthdate="1958-09-12"/>
+    <citizenship countryIso2Code="TR"/>
+  </sanctionEntity>
+  <sanctionEntity euReferenceNumber="EU.9002" logicalId="9002">
+    <subjectType code="E"/>
+    <regulation programme="EU-DPRK"/>
+    <remark>Fixture data, fictional shell entity.</remark>
+    <nameAlias wholeName="Silverline Holdings Ltd" strong="true"/>
+    <citizenship countryIso2Code="CY"/>
+  </sanctionEntity>
+</export>

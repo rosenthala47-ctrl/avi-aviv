@@ -160,6 +160,39 @@ class CustomRule(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
 
+class WatchlistEntry(Base):
+    """One sanctioned/PEP/adverse-media party from a screening source —
+    either a real OFAC/UN/EU sanctions record ingested by
+    ``scripts/refresh_watchlists.py`` (see :mod:`crr.screening`), or one of
+    the small set of fictional demo entries seeded on first run so the
+    screening UI has something to show before anyone has run that script.
+
+    ``source`` plus ``source_id`` is the natural key a refresh replaces on:
+    :meth:`crr.workflow.store.WorkflowStore.replace_watchlist_source` deletes
+    every row for one source and re-inserts the freshly parsed list in one
+    transaction, so re-running the ingest for OFAC never touches UN or EU
+    rows, and a mid-refresh failure cannot leave a source half-updated.
+    ``aliases``/``dates_of_birth``/``countries`` are JSON lists rather than
+    single columns because a real designation commonly carries more than one
+    of each (see crr.screening.models.WatchlistRecord's docstring)."""
+
+    __tablename__ = "wf_watchlist_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    source_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    category: Mapped[str] = mapped_column(String(32), nullable=False, default="sanctions")
+    aliases: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    dates_of_birth: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    countries: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    program: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    remarks: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    ingested_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    __table_args__ = (UniqueConstraint("source", "source_id", name="uq_wf_watchlist_source_id"),)
+
+
 class WatchlistDisposition(Base):
     """An investigator's ruling on one watchlist hit for one case. Terminal:
     one disposition per (customer, hit) — enforced by a unique constraint — and

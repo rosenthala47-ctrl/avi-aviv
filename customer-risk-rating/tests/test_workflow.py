@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+from crr.screening.models import WatchlistRecord
 from crr.workflow import WorkflowStore, create_session_factory
 from crr.workflow.auth import (
     extract_bearer_token,
@@ -217,6 +218,115 @@ def test_disposition_is_terminal_one_per_hit(store):
     assert disp["OFAC-1"]["disposition"] == "true_positive"
     with pytest.raises(IntegrityError):  # unique(customer_id, hit_id) — no second ruling on the same hit
         store.add_disposition("CUS-3", "OFAC-1", "false_positive", "x", "officer", "compliance_admin")
+
+
+# --------------------------------------------------------------------------
+# Watchlist entries (sanctions/PEP/adverse-media screening data)
+# --------------------------------------------------------------------------
+
+
+def test_seed_demo_watchlist_is_idempotent(store, db_url):
+    store.seed_demo_watchlist()
+    first = store.list_watchlist_entries()
+    store.seed_demo_watchlist()
+    assert reopen(db_url).list_watchlist_entries() == first
+
+
+def test_seed_demo_watchlist_never_overwrites_real_data(store):
+    store.replace_watchlist_source("ofac", [
+        WatchlistRecord(source="ofac", source_id="REAL-1", name="Real Name", category="sanctions"),
+    ])
+    store.seed_demo_watchlist()  # ofac already has rows — must not touch it
+    ofac_entries = [e for e in store.list_watchlist_entries() if e["list_source"] == "ofac"]
+    assert [e["name"] for e in ofac_entries] == ["Real Name"]
+
+
+def test_seed_demo_watchlist_still_seeds_untouched_sources_after_an_early_refresh(store):
+    """A real ops workflow can run scripts/refresh_watchlists.py for ofac/un
+    before anyone has ever opened the app (which is what normally triggers
+    the seed). pep/adverse_media have no real source to refresh from at all
+    — a whole-table "already has data" check would leave them permanently
+    empty in that ordering; seeding must be evaluated per source instead."""
+    store.replace_watchlist_source("ofac", [
+        WatchlistRecord(source="ofac", source_id="REAL-1", name="Real Name", category="sanctions"),
+    ])
+    store.seed_demo_watchlist()
+    entries = store.list_watchlist_entries()
+    assert [e["name"] for e in entries if e["list_source"] == "ofac"] == ["Real Name"]
+    assert any(e["list_source"] == "pep" for e in entries), "pep must still get its demo seed"
+    assert any(e["list_source"] == "adverse_media" for e in entries), "adverse_media must still get its demo seed"
+
+
+def test_replace_watchlist_source_evicts_only_that_source(store):
+    store.seed_demo_watchlist()
+    before_eu = [e for e in store.list_watchlist_entries() if e["list_source"] == "eu"]
+    assert before_eu  # sanity: the demo seed has an EU entry
+
+    n = store.replace_watchlist_source("ofac", [
+        WatchlistRecord(source="ofac", source_id="R1", name="Fresh One", category="sanctions",
+                        aliases=("Alias One",), dates_of_birth=("1990-01-01",), countries=("IL",),
+                        program="SDGT", remarks="real data"),
+        WatchlistRecord(source="ofac", source_id="R2", name="Fresh Two", category="sanctions"),
+    ])
+    assert n == 2
+
+    entries = store.list_watchlist_entries()
+    ofac_names = {e["name"] for e in entries if e["list_source"] == "ofac"}
+    assert ofac_names == {"Fresh One", "Fresh Two"}, "the old demo OFAC entry must be gone"
+    after_eu = [e for e in entries if e["list_source"] == "eu"]
+    assert after_eu == before_eu, "refreshing ofac must not touch eu's rows at all"
+
+
+def test_replace_watchlist_source_on_an_empty_table_just_inserts(store):
+    n = store.replace_watchlist_source("un", [
+        WatchlistRecord(source="un", source_id="U1", name="Someone", category="sanctions"),
+    ])
+    assert n == 1
+    assert len(store.list_watchlist_entries()) == 1
+
+
+def test_list_watchlist_entries_dict_shape_matches_what_the_matcher_and_ui_expect(store):
+    store.replace_watchlist_source("ofac", [
+        WatchlistRecord(source="ofac", source_id="R1", name="Jane Doe", category="sanctions",
+                        aliases=("J. Doe",), dates_of_birth=("1980-05-01", "1980-06-01"),
+                        countries=("IL", "CY"), program="SDGT", remarks="test"),
+    ])
+    entry = store.list_watchlist_entries()[0]
+    assert entry["id"] == "ofac:R1"
+    assert entry["name"] == "Jane Doe"
+    assert entry["aliases"] == ["J. Doe"]
+    assert entry["dates_of_birth"] == ["1980-05-01", "1980-06-01"]
+    assert entry["countries"] == ["IL", "CY"]
+    assert entry["dob"] == "1980-05-01"  # first of several, for display
+    assert entry["country"] == "IL"
+    assert entry["list_source"] == "ofac"
+    assert entry["category"] == "sanctions"
+    assert entry["reason"] == "test"
+
+
+def test_watchlist_source_status_counts_and_freshness(store, db_url):
+    store.seed_demo_watchlist()
+    status_before = {row["source"]: row for row in store.watchlist_source_status()}
+    assert status_before["ofac"]["count"] == 1
+    assert status_before["ofac"]["last_refreshed"] is not None
+
+    store.replace_watchlist_source("ofac", [
+        WatchlistRecord(source="ofac", source_id="R1", name="A", category="sanctions"),
+        WatchlistRecord(source="ofac", source_id="R2", name="B", category="sanctions"),
+    ])
+    status_after = {row["source"]: row for row in reopen(db_url).watchlist_source_status()}
+    assert status_after["ofac"]["count"] == 2
+    assert status_after["ofac"]["last_refreshed"] >= status_before["ofac"]["last_refreshed"]
+    # other sources are untouched by the ofac refresh
+    assert status_after["eu"]["count"] == status_before["eu"]["count"]
+
+
+def test_watchlist_source_status_omits_sources_with_no_rows(store):
+    store.replace_watchlist_source("un", [
+        WatchlistRecord(source="un", source_id="U1", name="Someone", category="sanctions"),
+    ])
+    sources_present = {row["source"] for row in store.watchlist_source_status()}
+    assert sources_present == {"un"}
 
 
 # --------------------------------------------------------------------------

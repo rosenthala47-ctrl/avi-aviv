@@ -31,7 +31,6 @@ Set ``CRR_API_URL`` to point at a running API (default http://127.0.0.1:8000).
 from __future__ import annotations
 
 import datetime as dt
-import difflib
 import html
 import os
 import random
@@ -53,7 +52,8 @@ _SRC = Path(__file__).resolve().parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from crr.workflow import (  # noqa: E402  (path setup must run first)
+from crr.screening import screen as screen_watchlist  # noqa: E402  (path setup must run first)
+from crr.workflow import (  # noqa: E402
     AUTH_HEADER_NAME,
     DEMO_USERS,
     SESSION_COOKIE_NAME,
@@ -84,6 +84,7 @@ def get_store() -> WorkflowStore:
     and shares it across browser sessions in the same server process."""
     store = WorkflowStore(create_session_factory(resolve_database_url()))
     store.seed_default_users()
+    store.seed_demo_watchlist()
     return store
 
 
@@ -356,34 +357,14 @@ PRESET_LABEL_HE: dict[str, str] = {
 # built into a payload below), only into entry["profile"] for display and
 # for this screening module to read.
 #
-# WATCHLIST_ENTRIES is fabricated demo reference data standing in for a
-# real OFAC/EU/UN/PEP/adverse-media feed — every entry is fictional. The
-# three demo archetypes' identity pools are almost entirely clean; a
-# handful of the AML-concern archetype's variants are deliberately close
-# or exact matches (including matching aliases and dates of birth) so the
-# feature has something to show without requiring an operator to hand-type
-# a match first.
-# --------------------------------------------------------------------------
-WATCHLIST_ENTRIES: list[dict[str, Any]] = [
-    {"id": "OFAC-2201", "name": "Mikhail Aslanov", "aliases": ["Michael Aslanov"], "dob": "1975-11-02",
-     "country": "CY", "list_source": "ofac", "category": "sanctions",
-     "reason": "Specially Designated National — asset-freeze order (demo data)."},
-    {"id": "EU-3105", "name": "Khaled Marwan", "aliases": ["Khalid Marwan"], "dob": "1969-06-19",
-     "country": "AE", "list_source": "eu", "category": "sanctions",
-     "reason": "EU consolidated sanctions list — arms trafficking (demo data)."},
-    {"id": "UN-1042", "name": "Elena Petrova", "aliases": ["Yelena Petrova"], "dob": "1982-01-30",
-     "country": "RU", "list_source": "un", "category": "sanctions",
-     "reason": "UN Security Council sanctions list (demo data)."},
-    {"id": "PEP-0087", "name": "Rustam Aliyev", "aliases": [], "dob": "1958-09-12",
-     "country": "TR", "list_source": "pep", "category": "pep",
-     "reason": "Former deputy minister of finance — politically exposed person (demo data)."},
-    {"id": "PEP-0142", "name": "Fatima Al-Sayed", "aliases": [], "dob": "1971-04-05",
-     "country": "AE", "list_source": "pep", "category": "pep",
-     "reason": "Spouse of a serving head of state — politically exposed person (demo data)."},
-    {"id": "AM-0509", "name": "Dmitri Volkov", "aliases": ["Dmitry Volkov"], "dob": "1966-12-24",
-     "country": "CY", "list_source": "adverse_media", "category": "adverse_media",
-     "reason": "Named in investigative reporting on offshore shell structures (demo data)."},
-]
+# Watchlist reference data — OFAC/EU/UN sanctions plus PEP/adverse-media —
+# now lives in the workflow database (wf_watchlist_entries), not a Python
+# constant: crr.workflow.store.WorkflowStore.seed_demo_watchlist() seeds a
+# small set of fictional entries on first run, and scripts/refresh_watchlists
+# .py replaces a source's rows with a real, freshly parsed OFAC/UN/EU list
+# (see crr.screening). This module reads whatever is currently in that table
+# via st.session_state.watchlist_entries, hydrated fresh every rerun next to
+# the queue/rules/audit log below — see screen_customer().
 
 # Six identities per archetype (matching seed_queue's default per_archetype),
 # indexed by position — deterministic, no RNG needed since none of this
@@ -407,7 +388,6 @@ _DEMO_IDENTITY_POOL: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
-WATCHLIST_MATCH_THRESHOLD = 60.0
 WATCHLIST_CATEGORIES = ("sanctions", "pep", "adverse_media")
 WATCHLIST_SOURCES = ("ofac", "eu", "un", "pep", "adverse_media")
 # Reuses the existing band palette rather than inventing new hues: a
@@ -425,44 +405,16 @@ def _watchlist_severity(score: float) -> str:
     return "medium"
 
 
-def _normalize_name(name: str) -> str:
-    return " ".join(name.strip().lower().split())
-
-
-def _name_similarity(a: str, b: str) -> float:
-    return difflib.SequenceMatcher(None, _normalize_name(a), _normalize_name(b)).ratio()
-
-
 def screen_customer(full_name: str | None, date_of_birth: str | None, country: str | None) -> list[dict[str, Any]]:
-    """Fuzzy-match one customer's identity against WATCHLIST_ENTRIES.
-
-    Pure string similarity (difflib's SequenceMatcher — a ratio of matching
-    character runs, the same family of algorithm as Levenshtein-based
-    fuzzy matchers) against the entry's primary name and every alias, the
-    best of which becomes the match score; a same-value date of birth or
-    country then nudges that score up rather than gating on it, since a
-    real screening hit is corroborating evidence, not a second independent
-    filter — two different people can share a country, and a transliterated
-    name alone should already be enough to surface for human review.
-    Returns every entry clearing WATCHLIST_MATCH_THRESHOLD, most severe
-    first. Recomputed fresh on every call — nothing here is cached or
-    persisted, only a disposition recorded against a hit is (see
-    entry["watchlist_dispositions"] in page_customer360).
-    """
-    if not full_name or not full_name.strip():
-        return []
-    hits = []
-    for entry in WATCHLIST_ENTRIES:
-        candidates = [entry["name"], *entry["aliases"]]
-        best = max(_name_similarity(full_name, candidate) for candidate in candidates)
-        score = best * 100
-        if date_of_birth and entry.get("dob") and date_of_birth == entry["dob"]:
-            score = min(100.0, score + 15)
-        if country and entry.get("country") and country == entry["country"]:
-            score = min(100.0, score + 5)
-        if score >= WATCHLIST_MATCH_THRESHOLD:
-            hits.append({**entry, "match_score": round(score, 1)})
-    return sorted(hits, key=lambda h: h["match_score"], reverse=True)
+    """Fuzzy-match one customer's identity against the watchlist entries
+    hydrated into session state for this run (see the "hydrate persisted
+    workflow state" block near the bottom of this file). The actual scoring
+    (rapidfuzz, DOB/country corroboration bonuses) lives in
+    crr.screening.matcher — this is a thin wrapper so none of this module's
+    call sites need to know where the entries came from. Recomputed fresh on
+    every call; only a disposition recorded against a hit is persisted (see
+    entry["watchlist_dispositions"] in page_customer360)."""
+    return screen_watchlist(full_name, date_of_birth, country, st.session_state.watchlist_entries)
 
 
 # --------------------------------------------------------------------------
@@ -518,6 +470,19 @@ I18N: dict[str, dict[str, str]] = {
         "users.created": "Created user {username}.",
         "users.error": "Could not create user: {detail}",
         "users.existing": "{n} accounts",
+        "watchlist_sources.header": "Watchlist data sources",
+        "watchlist_sources.caption": "Where each screening source's data currently comes from and how "
+                                     "current it is. \"ofac\"/\"eu\"/\"un\" start as fictional demo entries and "
+                                     "are replaced by a real, freshly parsed list the first time "
+                                     "`scripts/refresh_watchlists.py` runs for that source; \"pep\"/"
+                                     "\"adverse media\" have no free authoritative source and stay demo data.",
+        "watchlist_sources.col_source": "Source",
+        "watchlist_sources.col_count": "Entries",
+        "watchlist_sources.col_refreshed": "Last refreshed",
+        "watchlist_sources.never": "never (demo data)",
+        "watchlist_sources.refresh_hint": "Run from a shell with access to this deployment's database "
+                                          "(`CRR_WORKFLOW_DB_URL`) — not from this page, which only reads "
+                                          "what is already there:",
         "sidebar.footer": "Scores, explanations and re-scoring all come from the live FastAPI service over "
                           "its public endpoints — no model or policy logic is duplicated here. Case "
                           "decisions, notes, rules, watchlist rulings and the audit trail are persisted to "
@@ -824,9 +789,11 @@ I18N: dict[str, dict[str, str]] = {
         "sim.unknown_sent": "{n} field(s) sent as unknown: {fields}",
         "sim.why_audience": "Why — top factors ({audience} view)",
         "sim.watchlist_header": "Watchlist screening (test)",
-        "sim.watchlist_caption": "Fuzzy-matches the name and date of birth above against the demo watchlist — "
-                                 "nothing here is sent to the API or saved until this result is added to the "
-                                 "queue.",
+        "sim.watchlist_caption": "Fuzzy-matches the name and date of birth above against whatever is "
+                                 "currently in the watchlist database — demo entries, or a real OFAC/UN/EU "
+                                 "list if one has been loaded (see the sidebar's Watchlist data sources "
+                                 "panel). Nothing here is sent to the API or saved until this result is "
+                                 "added to the queue.",
         "sim.watchlist_none": "No watchlist matches for this identity.",
         "sim.overwrite_warning": "`{id}` already exists in the queue — adding will overwrite its profile, "
                                  "score and timeline with this sandbox result. Its case status and prior "
@@ -944,10 +911,12 @@ I18N: dict[str, dict[str, str]] = {
         "auditlog.detail_user_created": "{username} ({role})",
 
         "watchlist.panel_header": "Watchlist Hits",
-        "watchlist.panel_caption": "Fuzzy name/date-of-birth/country match against a demo OFAC/EU/UN/PEP/"
-                                   "adverse-media reference list — recomputed live, never cached. The API's "
-                                   "own AML signals above (PEP flag, sanctions hits, adverse media) are a "
-                                   "separate thing and are unaffected by this module.",
+        "watchlist.panel_caption": "Fuzzy name/date-of-birth/country match against the OFAC/EU/UN/PEP/"
+                                   "adverse-media reference list currently loaded (demo data, or a real "
+                                   "ingested list — see the sidebar's Watchlist data sources panel) — "
+                                   "recomputed live, never cached. The API's own AML signals above (PEP "
+                                   "flag, sanctions hits, adverse media) are a separate thing and are "
+                                   "unaffected by this module.",
         "watchlist.none": "No watchlist hits for this identity.",
         "watchlist.note_label": "Review note (required)",
         "watchlist.note_placeholder": "Document why this is, or isn't, a genuine match — required for the "
@@ -1011,6 +980,18 @@ I18N: dict[str, dict[str, str]] = {
         "users.created": "המשתמש {username} נוצר.",
         "users.error": "לא ניתן ליצור משתמש: {detail}",
         "users.existing": "{n} חשבונות",
+        "watchlist_sources.header": "מקורות נתוני רשימת מעקב",
+        "watchlist_sources.caption": "מהיכן מגיעים נתוני כל מקור סינון וכמה הם עדכניים. \"OFAC\"/\"האיחוד "
+                                     "האירופי\"/\"האו״ם\" מתחילים כרשומות הדגמה בדויות ומוחלפים ברשימה "
+                                     "אמיתית ועדכנית בפעם הראשונה שמריצים את `scripts/refresh_watchlists.py` "
+                                     "עבור אותו מקור; ל-PEP ותקשורת שלילית אין מקור חינמי ורשמי, ולכן הם "
+                                     "נשארים נתוני הדגמה.",
+        "watchlist_sources.col_source": "מקור",
+        "watchlist_sources.col_count": "רשומות",
+        "watchlist_sources.col_refreshed": "עדכון אחרון",
+        "watchlist_sources.never": "מעולם לא (נתוני הדגמה)",
+        "watchlist_sources.refresh_hint": "יש להריץ ממסוף עם גישה למסד הנתונים של הפריסה הזו "
+                                          "(`CRR_WORKFLOW_DB_URL`) — לא מהעמוד הזה, שרק קורא את מה שכבר קיים:",
         "sidebar.footer": "כל הציונים, ההסברים והניקוד מחדש מגיעים משירות ה-FastAPI החי דרך נקודות "
                           "הקצה הציבוריות שלו — אין כאן שכפול של לוגיקת מודל או מדיניות. החלטות תיק, "
                           "הערות, כללים, החלטות רשימת מעקב ויומן הביקורת נשמרים במסד נתוני העבודה "
@@ -1307,8 +1288,10 @@ I18N: dict[str, dict[str, str]] = {
         "sim.unknown_sent": "{n} שדה/שדות נשלחו כלא ידועים: {fields}",
         "sim.why_audience": "מדוע — גורמים מובילים (תצוגת {audience})",
         "sim.watchlist_header": "סינון רשימת מעקב (בדיקה)",
-        "sim.watchlist_caption": "מבצע התאמה מטושטשת של השם ותאריך הלידה שלמעלה מול רשימת המעקב לדוגמה — "
-                                 "שום דבר כאן לא נשלח ל-API או נשמר עד שהתוצאה הזו תתווסף לתור.",
+        "sim.watchlist_caption": "מבצע התאמה מטושטשת של השם ותאריך הלידה שלמעלה מול מה שקיים כרגע במסד "
+                                 "נתוני רשימת המעקב — נתוני הדגמה, או רשימת OFAC/UN/EU אמיתית אם כבר נטענה "
+                                 "(ראו את פאנל מקורות נתוני רשימת המעקב בסרגל הצד). שום דבר כאן לא נשלח "
+                                 "ל-API או נשמר עד שהתוצאה הזו תתווסף לתור.",
         "sim.watchlist_none": "אין התאמות ברשימת המעקב לזהות זו.",
         "sim.overwrite_warning": "`{id}` כבר קיים בתור — ההוספה תחליף את הפרופיל, הציון וציר הזמן שלו "
                                  "בתוצאת ארגז החול הזו. סטטוס התיק וההחלטות הקודמות שלו נשמרים.",
@@ -1422,10 +1405,12 @@ I18N: dict[str, dict[str, str]] = {
         "auditlog.detail_user_created": "{username} ({role})",
 
         "watchlist.panel_header": "פגיעות רשימת מעקב",
-        "watchlist.panel_caption": "התאמה מטושטשת של שם/תאריך לידה/מדינה מול רשימת ייחוס לדוגמה של "
-                                   "OFAC/EU/UN/PEP/תקשורת שלילית — מחושבת מחדש בכל פעם, לעולם לא נשמרת "
-                                   "במטמון. האותות למניעת הלבנת הון של ה-API עצמו למעלה (דגל PEP, פגיעות "
-                                   "סנקציות, תקשורת שלילית) הם דבר נפרד ואינם מושפעים ממודול זה.",
+        "watchlist.panel_caption": "התאמה מטושטשת של שם/תאריך לידה/מדינה מול רשימת הייחוס הטעונה כרגע של "
+                                   "OFAC/EU/UN/PEP/תקשורת שלילית (נתוני הדגמה, או רשימה אמיתית שנקלטה — "
+                                   "ראו את פאנל מקורות נתוני רשימת המעקב בסרגל הצד) — מחושבת מחדש בכל פעם, "
+                                   "לעולם לא נשמרת במטמון. האותות למניעת הלבנת הון של ה-API עצמו למעלה "
+                                   "(דגל PEP, פגיעות סנקציות, תקשורת שלילית) הם דבר נפרד ואינם מושפעים "
+                                   "ממודול זה.",
         "watchlist.none": "אין פגיעות ברשימת המעקב לזהות זו.",
         "watchlist.note_label": "הערת סקירה (חובה)",
         "watchlist.note_placeholder": "תעד/י מדוע זו התאמה אמיתית או לא — נדרש למסלול הביקורת.",
@@ -2045,21 +2030,22 @@ def render_watchlist_preview(hits: list[dict[str, Any]]) -> None:
     """Read-only preview for the sandbox tab: nothing has been added to the
     queue yet at this point, so there is no entry to record a disposition
     against — see render_watchlist_panel (Customer 360) for the full
-    investigate/dispose workflow. hit["name"]/["reason"] come from
-    WATCHLIST_ENTRIES, a fixed constant this module controls, not from
-    anything an operator typed, so unlike a disposition note they need no
-    HTML-escaping here."""
+    investigate/dispose workflow. hit["name"]/["reason"] can now come from a
+    real, network-ingested OFAC/UN/EU list (scripts/refresh_watchlists.py),
+    not just this module's own fictional seed data — HTML-escaped before
+    going through unsafe_allow_html for the same reason a disposition note
+    is, even though this text is ops-ingested rather than end-user-typed."""
     if not hits:
         st.caption(t("sim.watchlist_none"))
         return
     for hit in hits:
         st.markdown(
             f'<div style="padding:6px 0;border-bottom:1px solid {HAIRLINE};">'
-            f'<span style="font-weight:600;font-family:{FONT_STACK};">{hit["name"]}</span> '
+            f'<span style="font-weight:600;font-family:{FONT_STACK};">{html.escape(hit["name"])}</span> '
             f'{watchlist_hit_chip(hit)} '
             f'<span style="color:{INK_SECONDARY};font-size:0.85rem;">'
             f'{watchlist_source_label(hit["list_source"])} · {watchlist_category_label(hit["category"])}</span><br>'
-            f'<span style="color:{INK_MUTED};font-size:0.85rem;">{hit["reason"]}</span></div>',
+            f'<span style="color:{INK_MUTED};font-size:0.85rem;">{html.escape(hit["reason"])}</span></div>',
             unsafe_allow_html=True,
         )
 
@@ -2592,8 +2578,8 @@ def audit_detail_text(entry: dict[str, Any]) -> str:
 
 # --------------------------------------------------------------------------
 # Watchlist & sanctions screening — Customer 360 workflow. screen_customer()
-# itself (the fuzzy-match engine) and WATCHLIST_ENTRIES/identity pools live
-# with the other constants near the top of this file; this section is the
+# (crr.screening.matcher-backed) and the demo identity pool live with the
+# other constants near the top of this file; this section is the
 # investigate/dispose UI built on top of it. A disposition, once recorded,
 # is never edited or removed from entry["watchlist_dispositions"] — the
 # same append-only discipline as the audit log above, and for the same
@@ -2619,8 +2605,8 @@ def render_watchlist_panel(entry: dict[str, Any]) -> None:
         disposition = dispositions.get(hit["id"])
         with st.container(border=True):
             st.markdown(
-                f'<div><span style="font-weight:600;font-family:{FONT_STACK};">{hit["name"]}</span>&nbsp;&nbsp;'
-                f'{watchlist_hit_chip(hit)}&nbsp;&nbsp;'
+                f'<div><span style="font-weight:600;font-family:{FONT_STACK};">{html.escape(hit["name"])}</span>'
+                f'&nbsp;&nbsp;{watchlist_hit_chip(hit)}&nbsp;&nbsp;'
                 f'<span style="color:{INK_SECONDARY};font-size:0.85rem;">'
                 f'{watchlist_source_label(hit["list_source"])} · {watchlist_category_label(hit["category"])}'
                 f'</span></div>',
@@ -3736,6 +3722,24 @@ def render_user_panel(store: WorkflowStore) -> None:
                 st.success(t("users.created", username=account["username"]))
                 st.rerun()
 
+    with st.expander(t("watchlist_sources.header")):
+        st.caption(t("watchlist_sources.caption"))
+        status = store.watchlist_source_status()
+        rows = []
+        for source in WATCHLIST_SOURCES:
+            row = next((r for r in status if r["source"] == source), None)
+            rows.append({
+                t("watchlist_sources.col_source"): watchlist_source_label(source),
+                t("watchlist_sources.col_count"): row["count"] if row else 0,
+                t("watchlist_sources.col_refreshed"): (
+                    _parse_dt(row["last_refreshed"]).strftime("%Y-%m-%d %H:%M UTC")
+                    if row and row["last_refreshed"] else t("watchlist_sources.never")
+                ),
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.caption(t("watchlist_sources.refresh_hint"))
+        st.code("python scripts/refresh_watchlists.py --source ofac", language="bash")
+
 
 # --------------------------------------------------------------------------
 # App shell
@@ -3859,6 +3863,7 @@ st.session_state.setdefault("language", "he")
 st.session_state.setdefault("queue", {})
 st.session_state.setdefault("custom_rules", [])
 st.session_state.setdefault("audit_log", [])
+st.session_state.setdefault("watchlist_entries", [])
 # Shadow copy used only to detect a language CHANGE for audit logging.
 # Comparing against st.session_state.language directly does not work here:
 # Streamlit applies an in-flight widget interaction to its bound
@@ -3884,6 +3889,7 @@ if resolve_current_user(store) is None:
 st.session_state.queue = store.load_queue()
 st.session_state.custom_rules = store.list_rules()
 st.session_state.audit_log = store.list_audit()
+st.session_state.watchlist_entries = store.list_watchlist_entries()
 
 with st.sidebar:
     st.selectbox(
