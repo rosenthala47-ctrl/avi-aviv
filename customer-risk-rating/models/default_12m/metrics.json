@@ -1,0 +1,53 @@
+{
+  "train": {
+    "is_probability": true,
+    "brier": 0.04070686706905651,
+    "expected_calibration_error": 0.01340503047132983,
+    "max_calibration_error": 0.061979838572304824,
+    "calibration_bins_within_2se": 1,
+    "n": 53361,
+    "positives": 2932,
+    "prevalence": 0.05494649650493806,
+    "auc": 0.8700282882553909,
+    "auc_std_error": 0.004266331722839566,
+    "gini": 0.7400565765107818,
+    "pr_auc": 0.43464008071178284,
+    "ks": 0.5745457318634493,
+    "calibration_bins": 10,
+    "mean_predicted": 0.05544454540532613
+  },
+  "validation": {
+    "is_probability": true,
+    "brier": 0.045337956985773836,
+    "expected_calibration_error": 0.0025768141690448087,
+    "max_calibration_error": 0.0063089645297664115,
+    "calibration_bins_within_2se": 10,
+    "n": 13454,
+    "positives": 727,
+    "prevalence": 0.054035974431395864,
+    "auc": 0.7916517743419124,
+    "auc_std_error": 0.010123644322270173,
+    "gini": 0.5833035486838247,
+    "pr_auc": 0.2539929597484751,
+    "ks": 0.451999772170398,
+    "calibration_bins": 10,
+    "mean_predicted": 0.05403203861940829
+  },
+  "test": {
+    "is_probability": true,
+    "brier": 0.04701977722492149,
+    "expected_calibration_error": 0.006742214829028444,
+    "max_calibration_error": 0.014149540772523242,
+    "calibration_bins_within_2se": 8,
+    "n": 13505,
+    "positives": 768,
+    "prevalence": 0.056867826730840426,
+    "auc": 0.8016795310905236,
+    "auc_std_error": 0.009705007414335514,
+    "gini": 0.6033590621810472,
+    "pr_auc": 0.27280903252074457,
+    "ks": 0.4854248858313051,
+    "calibration_bins": 10,
+    "mean_predicted": 0.05443688394096026
+  }
+}

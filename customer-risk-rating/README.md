@@ -1,0 +1,828 @@
+# Customer Risk Rating (CRR)
+
+A hybrid ML + LLM customer risk rating engine: a gradient-boosted model over
+structured financial data, an LLM branch over unstructured text (support calls,
+underwriter notes, KYC documents), SHAP explanations, and a policy layer a risk
+manager can retune without a deploy.
+
+**Status: all 8 phases complete.** The synthetic data foundation, the
+point-in-time feature pipeline, a calibrated LightGBM baseline, a SHAP
+explainability layer, a FastAPI serving layer with the three endpoints,
+persistence and audit, a safe, versioned, no-code rule engine, event-driven
+real-time re-scoring, an LLM extraction branch feeding bounded, explainable
+features into the same model, and a feedback loop with champion/challenger
+promotion, drift monitoring, group fairness testing and a generated
+documentation pack are built, tested and measured. See
+[`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan and
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design.
+
+## Quickstart
+
+```bash
+pip install -e ".[dev,model,frontend]"
+
+# generate a 10k-customer training set (bilingual narratives)
+python scripts/generate_synthetic_data.py -n 10000 --language mixed
+
+# prove the data carries learnable signal before training anything on it
+python scripts/validate_dataset.py --data data/raw
+
+# train the calibrated baseline, with a per-feature-block ablation
+python scripts/train_baseline.py --ablation
+
+# validate SHAP additivity, map to reason codes, check against ground truth
+python scripts/explain_model.py
+
+# run the API (in-memory backends, no infra needed) and measure latency
+python scripts/serve.py &
+python scripts/benchmark_api.py --requests 500
+
+# the web UI — API and front end together, exactly as the container runs them
+./scripts/start_all.sh          # then open http://localhost:8501
+
+# verify the rule engine's exit criteria, then try a proposed policy change
+python scripts/verify_rule_engine.py
+python scripts/simulate_policy.py --proposed config/risk_policy_proposed.example.yaml
+
+# verify real-time re-scoring: trigger-to-score p95 vs the 5s exit criterion
+python scripts/verify_rescoring.py
+
+# verify the LLM branch: AUC lift, extraction agreement, prompt-injection suite
+python scripts/verify_extraction.py
+
+# retrain on outcomes (never on human decisions), evaluate fairness/drift and
+# the champion/challenger promotion gate, then verify the phase 8 exit criteria
+python scripts/retrain.py --target default_12m
+python scripts/retrain.py --target financial_crime_12m
+python scripts/verify_governance.py
+
+pytest
+```
+
+`make help` lists the shortcuts.
+
+## What phase 1 produced
+
+A synthetic data generator built as an explicit **structural causal model**:
+latent risk factors → observable features → outcomes, through a documented
+log-odds equation. That ordering matters. A generator that draws random features
+and a random label produces data on which no model can beat AUC 0.5, and training
+on it teaches you nothing.
+
+Five joined frames per run:
+
+| file | one row per | purpose |
+|---|---|---|
+| `customers.csv` | customer | 77 model input columns — profile, financial, behavioural, AML/KYC |
+| `narratives.csv` | customer | support call summary, underwriter note, KYC extract (EN + HE) |
+| `events.csv` | event | trailing transaction log, drives real-time re-scoring |
+| `outcomes.csv` | customer | labels after the performance window + the human decision |
+| `ground_truth.csv` | customer | generator internals — **evaluation only, never a feature** |
+
+Plus `manifest.json`: seed, config hash, library versions, realised prevalence and
+a SHA-256 per file, so a trained model is traceable back to its exact training data.
+
+### Properties that were designed in on purpose
+
+- **Two independent risk dimensions.** Credit default and financial crime run off
+  near-uncorrelated latent factors, because a wealthy, perfectly-performing
+  customer can still be an AML risk.
+- **Signal that lives only in the text.** 70% of the narrative distress signal is
+  independent of the tabular block. This is what the LLM branch has to earn.
+- **Non-linearity that a scorecard cannot capture** — products, absolute
+  differences, occupation-conditional slopes, and the credit seasoning curve
+  (hazard peaks 12-18 months in, then falls).
+- **Realistic defects** — MCAR, MAR *and* MNAR missingness, dirty categoricals,
+  near-duplicate records, fat tails.
+- **Out-of-time splits.** The most recent cohorts are held out. Random row splits
+  leak the macro cycle across folds and flatter the model.
+- **Deliberately biased human decisions.** Underwriters are modelled as lenient on
+  private banking and harsh on high-risk jurisdictions — so the phase 8 feedback
+  loop has a real bias to discover, and so nobody trains on decisions by accident.
+
+### Measured (40k customers, out-of-time test split)
+
+| | credit default | financial crime |
+|---|---|---|
+| prevalence | 5.4% | 1.5% |
+| logistic regression (tabular) | 0.761 AUC | 0.780 AUC |
+| gradient boosting (tabular) | 0.774 AUC | 0.781 AUC |
+| headroom for a perfect text reader | +0.026 | +0.050 |
+
+0.77 AUC is where real credit models live. An earlier version of this generator
+produced 0.90 — that was a bug in the generator, and `scripts/validate_dataset.py`
+is what caught it.
+
+## Layout
+
+Note: this project lives in a subdirectory of its git repo (alongside an
+unrelated site at the repo root). `render.yaml` therefore lives at the
+**repository root**, not here — Render's Blueprint sync only scans the repo
+root — with `rootDir: customer-risk-rating` pointing back into this folder.
+Everything else below is local to `customer-risk-rating/`.
+
+```
+customer-risk-rating/
+├── app.py                       Streamlit front end — a pure HTTP client of the API
+├── Dockerfile                   API + UI in one image; copies the pre-trained models in, no build-time training
+├── railway.json                 Railway config (1-click deploy)
+├── requirements.txt             flat deps for platforms that do not read pyproject
+├── config/
+│   ├── data_generation.yaml               generation profiles (smoke / alpha / adversarial)
+│   ├── risk_policy.yaml                   bands, rules, triggers — the no-code control surface
+│   ├── risk_policy_proposed.example.yaml  a ready-to-try proposed edit for simulate_policy.py
+│   └── policy_history/                    every policy version ever loaded, immutable, archived
+├── data/                        generated output (git-ignored, reproducible from seed)
+├── models/                      the two directories the API serves — committed (see Deployment); everything
+│   │                            else here (retrain.py's challenger runs, local experiments) stays git-ignored
+│   ├── default_12m/
+│   └── financial_crime_12m/
+├── docs/
+│   ├── ROADMAP.md               eight phases with measurable exit criteria
+│   ├── ARCHITECTURE.md          system design and the decisions behind it
+│   └── DATA_DICTIONARY.md       generated from live data, never hand-edited
+├── scripts/
+│   ├── generate_synthetic_data.py
+│   ├── validate_dataset.py      proves the data is fit to train on
+│   ├── train_baseline.py        trains, calibrates, ablates, judges exit criteria
+│   ├── explain_model.py         SHAP additivity, reason codes, ground-truth check
+│   ├── serve.py                 run the API with uvicorn
+│   ├── benchmark_api.py         measure scoring latency against the p99 target
+│   ├── verify_rule_engine.py    measures the phase 5 exit criteria, judges PASS/FAIL
+│   ├── simulate_policy.py       what would change if a proposed policy went live
+│   ├── manage_policy.py         list / show / diff / rollback policy versions
+│   ├── verify_rescoring.py      measures the phase 6 exit criteria, judges PASS/FAIL
+│   ├── verify_extraction.py     measures the phase 7 exit criteria, judges PASS/FAIL
+│   ├── retrain.py               phase 8 — retrain on outcomes, fairness/drift, promotion gate
+│   ├── generate_model_card.py   phase 8 — assembles the documentation pack from disk
+│   ├── verify_governance.py     measures the phase 8 exit criteria, judges PASS/FAIL
+│   ├── start_all.sh             container entrypoint: API + UI, health-gated
+│   └── render_data_dictionary.py
+├── src/crr/
+│   ├── data/                    ✅ phase 1 — synthetic generator, taxonomy, narratives
+│   ├── features/                ✅ phase 2/7 — point-in-time pipeline, feature contract, text block
+│   ├── models/                  ✅ phase 2 — LightGBM core, calibration, metrics
+│   ├── explain/                 ✅ phase 3/7 — TreeSHAP → reason codes, two audiences
+│   ├── api/                     ✅ phase 4/6/7 — FastAPI, scoring service, persistence, events
+│   ├── db/                      ✅ phase 4/6/7 — SQLAlchemy models (Postgres / SQLite)
+│   ├── policy.py                ✅ phase 4/5/6 — loader, versioning, archive, rollback, triggers
+│   ├── rules/                   ✅ phase 5 — safe expressions, engine, simulation
+│   ├── security/                ◻ phase 4 — anonymisation, crypto
+│   ├── pipelines/               ✅ phase 6 — real-time re-scoring, notifications
+│   ├── llm/                     ✅ phase 7 — extraction schema, prompts, reference + Claude extractors, cache
+│   └── governance/              ✅ phase 8 — drift, fairness, human-model disagreement, promotion gate
+└── tests/
+```
+
+## What phase 2 produced
+
+One `FeaturePipeline` used for **both** batch training and single-customer
+serving — there is no second implementation to drift. It emits 134 features
+across five blocks, validated against a contract that is saved with the model.
+
+- **Point-in-time correctness is enforced.** Event aggregates are filtered at the
+  snapshot date, and the test suite injects 300 future-dated events worth
+  −9,999,999 each and asserts the matrix is byte-identical.
+- **Leakage is rejected by construction.** Outcome labels, generator latents and
+  PII are refused by name and by pattern on every frame the pipeline builds, not
+  just in tests.
+- **Missingness is preserved, not imputed** — `source_of_funds_verified` goes
+  missing precisely when the declared source is 'undeclared', and imputing that
+  away destroys more signal than it recovers.
+- **Calibrated output.** Platt scaling on the validation split: expected
+  calibration error 0.0055, and 8 of 10 deciles within two standard errors.
+
+### Measured (60k customers, out-of-time test split)
+
+| | credit default | financial crime |
+|---|---|---|
+| test AUC / Gini | 0.769 / 0.538 | 0.799 / 0.598 |
+| expected calibration error | 0.0055 | 0.0016 |
+| top-decile lift | 4.5x | — |
+
+### The finding worth reading
+
+The feature blocks **do not move AUC beyond the noise floor**. 57 raw columns
+score 0.7722; all 134 score 0.7710, with ±0.002 seed noise. The pipeline's value
+in this phase is correctness — point-in-time safety, training/serving parity,
+dirty-data handling, calibration — not accuracy. Three specific things the
+ablation caught: six engineered features that were monotone transforms of a
+single column and therefore invisible to a tree; LightGBM categorical splits
+overfitting two 30-level columns at a cost of 0.005 AUC; and isotonic calibration
+collapsing 8,217 scores into 43 steps. All three are written up in
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+## What phase 3 produced
+
+TreeSHAP over the model, aggregated into **31 policy-owned reason codes** that a
+regulator or an adverse-action notice can use. Not the `shap` library — LightGBM's
+native `pred_contrib` is byte-identical to it (0.0e0 difference) and additive to
+5e-15, so the serving path stays dependency-light.
+
+- **Every one of the 134 features maps to a reason code.** All the delinquency
+  features become "adverse repayment history"; the customer is owed a reason, not
+  a coefficient.
+- **Two audiences.** The internal view shows every code and the SHAP value behind
+  each feature; the customer view drops the codes suppressed by
+  `config/risk_policy.yaml` (PEP, prior SAR, sanctions, structuring) and never
+  exposes a raw value.
+- **Additivity is the guarantee.** SHAP values plus the bias reconstruct the raw
+  margin to 5e-15, so every reason code is a real share of the decision, not a
+  plausible story.
+
+### The finding that matters
+
+Because phase 1 wrote the true generative coefficients, we can check whether SHAP
+importance tracks the drivers the generator actually used. The credit model
+does (Spearman 0.62). **The financial-crime model does not (0.03):** it rides
+`structuring_score` and all but ignores the rare regulatory flags — PEP,
+sanctions, opaque ownership — that any compliance regime treats as primary. SHAP
+is faithful (additivity 1e-14); the *model* is memorising one dense feature. A
+compliance model that scores acceptably but explains through the wrong factors is
+exactly what model-risk review exists to catch, and here the ground-truth check
+caught it. Written up in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+## What phase 4 produced
+
+A FastAPI service with the three endpoints, built to run with no infrastructure
+(in-memory backends) and to swap to PostgreSQL + Redis by setting two env vars.
+
+- **`POST /api/v1/score`** — composite 0-100 score, band, per-dimension
+  probabilities, and the top reason factors merged from both models.
+- **`POST /api/v1/batch-score`** — returns a job id; polled for status.
+- **`GET /api/v1/explain/{customer_id}`** — the stored explanation, reason-code
+  factors, with a customer/internal audience switch.
+
+Design decisions that matter:
+
+- **Missing is not zero.** Every input field is optional; a missing field becomes
+  NaN and flows through the missing-value machinery. Zero-filling an absent
+  `credit_utilization_ratio` would invent a perfect borrower. Malformed data is a
+  422.
+- **Every score is reproducible.** The append-only history stores the model
+  version, policy version and input hash, so any decision recomputes bit-for-bit.
+  A structured JSON audit line is emitted per score.
+- **Persistence is behind an interface.** In-memory by default; the SQLAlchemy
+  path is the same ORM code in production (PostgreSQL) and tests (SQLite).
+
+### Latency: the exit criterion, and how it was met
+
+Naive scoring was p99 234 ms — over the 150 ms budget. The fix was measurement,
+not guessing: an empty-event fast path, single-pass categorical normalisation, and
+— the big one — `gc.freeze()` after model load, because the p99 tail was **entirely
+GC pauses, not compute**. Final, with the GC tuning the service applies at startup:
+
+| path | p50 | p99 | target |
+|---|---|---|---|
+| score only | 64 ms | **91 ms** | < 150 ms ✅ |
+| score + explanation | 89 ms | **107 ms** | < 150 ms ✅ |
+
+The honest caveat: p99 < 150 ms is latency; 100 rps is throughput. A score is
+~90 ms of GIL-bound CPU, so 100 rps needs ~9 worker processes, not threads. The
+benchmark's throughput probe shows the GIL ceiling directly. Written up in
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+## What phase 5 produced
+
+A rule engine that lets a risk manager change what the system does by editing
+`config/risk_policy.yaml` — no code, no deploy — without that editability
+becoming a way to silently weaken a control.
+
+- **A safe expression evaluator**, not `eval()`. The policy file is explicitly
+  designed for a non-engineer to edit, which makes its `when` clauses an
+  untrusted-enough input; the evaluator parses with `ast` and walks a
+  whitelist (booleans, comparisons, `in`, literals, names — nothing else), so
+  every one of 24 tested injection attempts (`__import__`, attribute access,
+  comprehensions, `exec`, …) is rejected at policy-load time, before a bad
+  rule ever reaches a scoring request.
+- **Raise-only, structurally.** A fired rule's floor combines with the model's
+  band via `max(...)` on ordinal rank. A test tries to build a rule that
+  lowers a band — an always-firing `floor_band: Low` rule against a model band
+  of `Extreme` — and confirms it cannot.
+- **Immutable, archived, rollback-able versions.** Reusing a version number for
+  different content is a load error, checked against a durable on-disk
+  archive (not only in-memory state, so the guarantee survives a restart).
+  `rollback_to(N)` restores the exact bytes that ran under version N.
+- **Fails safe.** A broken edit degrades to "serve the last known-good policy,
+  log loudly" rather than 500ing every request.
+- **Simulation before go-live**: `scripts/simulate_policy.py` replays stored
+  probabilities against a proposed policy — no ML re-inference needed, since
+  everything downstream of the model's two probabilities is a pure function
+  of policy content — and reports exactly which customers would change band
+  or review status.
+
+### Exit criteria (measured by `scripts/verify_rule_engine.py`)
+
+| criterion | measured |
+|---|---|
+| policy change takes effect within 60s, no deploy | **9.4 ms** |
+| fully audit-logged | `policy.changed` JSON event on every version change |
+| rollback to any prior version | exact byte-for-byte restore, verified |
+| rules can only raise risk | tested against all 4 bands; none lowered |
+
+Two real bugs surfaced along the way, both fixed: a Python default-argument
+late-binding gotcha that silently defeated archive isolation in tests (and
+would have made `DEFAULT_ARCHIVE_DIR` unoverridable anywhere), and a
+`datetime.date` inside a JSON column that would have failed every score save
+against the real SQLAlchemy backend — invisible against the in-memory
+repository, caught only because the SQLite-backed path is tested too. Both
+are written up in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+## What phase 6 produced
+
+A `RescoringEngine` that consumes one event at a time and re-scores a customer
+without the caller resending their ~65-field profile — it rebuilds the input
+from the last stored snapshot plus the full event log — debounced per
+`(customer, event_type)`, and a notification only when the published band
+actually moves.
+
+- **`POST /api/v1/events/{customer_id}`** — push one event, get back whether it
+  triggered a re-score and, if so, the new result. Always 200: a non-trigger
+  or debounced event is a stored fact, not an error.
+- **A staleness sweep** — `rescoring.max_score_age_days` catches customers whose
+  accumulated non-trigger events should still eventually move the score even
+  though none of them individually crossed a trigger.
+- **Notification behind an interface**, same reason as everywhere else here:
+  in-memory for tests, a structured JSON log line as the zero-infrastructure
+  production default.
+
+### Exit criterion (measured by `scripts/verify_rescoring.py`)
+
+| criterion | measured |
+|---|---|
+| trigger-to-updated-score p95 < 5s | **126 ms** (p50 113ms, max 129ms, n=33) |
+| false-alert rate, measured | 97.0% of 33 triggered re-scores did not cross a band boundary (1 did) — every one measurably moved the underlying score (mean \|Δ\| 1.91 on a 0-100 scale), and nearly all not far enough to cross a 25-point band. See `docs/ROADMAP.md` for why that is a real, explained finding rather than a broken engine. |
+
+Three real bugs surfaced along the way, the first genuinely serious: the
+engine re-scored using the stored snapshot's **stale** `snapshot_date`
+unchanged, so the leakage guard treated every event dated after it — i.e.
+every event that could ever realistically trigger a re-score — as being in
+the future and silently dropped it. The recompute ran, returned
+`rescored=True`, and produced the exact same score every time. Fixed by
+advancing `snapshot_date` to `now` before re-scoring (verified safe: it is
+dropped before modelling and used nowhere except to anchor the event window).
+The other two — a model feature (`is_trigger_event`) that was trusted from
+untrustable caller input instead of derived, and a timezone-aware timestamp
+that crashed feature building — are both written up in full, with how each
+was caught, in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+## What phase 7 produced
+
+An LLM extraction branch that reads a customer's free-text notes and returns
+four bounded signals — never a score, a band, or a decision — that flow into
+the *same* tabular model everything else here trains. `distress_level` and
+`concealment_level` (0-3, with confidence) are model features, chosen because
+they are exactly the two latents the generator's own outcome equations weight;
+`stated_life_events` and `evasiveness_detected` are explainability-only, the
+same "give the reviewer a reason, not just a number" principle as phase 3's
+SHAP reason codes.
+
+- **Two layers of prompt-injection defence** (`crr/llm/prompts.py`): an
+  escaped `<customer_notes>` envelope plus a system instruction that content
+  inside it is data, never commands — and underneath that, a schema so
+  narrow a successful injection still cannot express a decision, because no
+  field means one.
+- **`ReferenceExtractor`** (deterministic, no API key) and
+  **`AnthropicExtractor`** (the real Claude-backed extractor) behind one
+  interface — the zero-infrastructure-by-default pattern used everywhere in
+  this project. The reference extractor is hand-written from general
+  judgement, deliberately not tuned against the synthetic phrase banks it is
+  measured against — see the caveat below for why that distinction matters.
+- **Cached on content hash + extractor version**, so a prompt or model
+  upgrade invalidates stale results instead of serving them forever; only
+  successful extractions are cached, so a transient failure can always retry.
+- **Fails to tabular-only, marked `degraded`**, never fails the request.
+
+### Exit criteria (measured by `scripts/verify_extraction.py`, fresh 60k customers)
+
+| criterion | measured |
+|---|---|
+| AUC lift over the phase 2 baseline | **met** — `default_12m` +0.0178 AUC, `financial_crime_12m` +0.0351 AUC, both real retrains, both well beyond seed noise |
+| extraction agreement, Cohen's κ ≥ 0.8 | **not met with the free reference extractor** — 0.72 / 0.79 quadratic-weighted. This measures the no-API floor, not the real LLM; see the caveat |
+| prompt-injection test suite | **met** — 8/8 adversarial payloads in the verify script, 39 more in `tests/test_extraction_security.py` |
+
+`text_distress_level` is the 4th most important feature by gain in
+`default_12m`; `text_concealment_level`/`_confidence` are 2nd and 3rd in
+`financial_crime_12m`. One real bug surfaced: `nan or ""` is `nan` in Python
+(NaN is truthy), so a customer with a genuinely missing note type extracted as
+the literal string `"nan"` instead of empty — invisible against this
+project's own data (no customer is ever missing a note type) until a test
+built one on purpose. Fixed with an explicit `pd.isna()` check. Full write-up,
+including why the reference extractor reads concealment better than
+distress relative to bag-of-words, in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+**This still cannot be validated on synthetic data alone** — the same caveat
+this project already carried before phase 7 was built, now acted on rather
+than deferred: `ReferenceExtractor` was deliberately not tuned against
+`crr.data.narratives`'s own phrase banks (that would make its measured
+accuracy a rigged number), and every exit-criterion script takes
+`--extractor anthropic` to re-run the identical measurement against the real
+LLM the moment `ANTHROPIC_API_KEY` is available. Do that before treating the
+Cohen's κ criterion — or the AUC-lift number — as validated for production.
+
+## What phase 8 produced
+
+A feedback loop that retrains on outcomes, never on human decisions, and a
+champion/challenger gate where automatic checks decide *eligibility* and a
+human decides *promotion* — never the same actor.
+
+- **`scripts/retrain.py`** fits exclusively on the true outcome labels.
+  `underwriter_decision` — deliberately biased in the generator (lenient
+  toward private banking and corporate, with no legitimate causal role in
+  either outcome model) — is used only to measure human-model disagreement,
+  and to train a second, throwaway booster purely to quantify what training
+  on the decision *would* have reproduced. That check worked: the
+  decision-trained model shows a −0.021 to −0.027 extra private-banking
+  leniency gap beyond the true-outcome-trained model, matching the
+  generator's documented bias in both sign and target.
+- **The promotion gate is threshold-driven, not automatic**
+  (`crr/governance/promotion.py`): eligible only on a measured out-of-time
+  AUC gain past `policy.feedback.promotion_min_auc_gain`, with no non-exempt
+  fairness failure; promoted only when `--approve` is explicitly passed.
+- **`country_of_residence` is both a legitimate AML factor and a proxy for
+  national origin** — resolved not by picking a side, but by measuring the
+  same way on every protected axis (age, AML jurisdiction tier, residency
+  status) and letting the generator's own causal structure decide which
+  disparities are expected: jurisdiction risk is a real, intended driver of
+  `financial_crime_12m` (documented, listed as an exemption requiring named
+  sign-off) but has no legitimate role in `default_12m` at all (an ordinary,
+  blocking failure there). See `crr/governance/fairness.py`'s module
+  docstring for the full reasoning.
+- **`scripts/generate_model_card.py`** assembles a documentation pack from
+  files other scripts already produced — data lineage from the manifest,
+  performance and fairness from the artefact's own metrics and the last
+  retrain's governance report, the monitoring plan from the live policy —
+  rather than hand-written prose that goes stale the moment the model changes.
+
+### Exit criteria (measured by `scripts/verify_governance.py`)
+
+| criterion | measured |
+|---|---|
+| promotion gate is threshold-driven, not automatic | **met** — proven with controlled synthetic gains/policies (a real retrain on unchanged data legitimately produces a 0.0000 gain, which correctly blocks promotion — the gate working, not a null result) |
+| fairness measured for every (target, protected axis) combination | **met** — 6/6 on the real trained models against real held-out data |
+| documentation pack generates with every required section | **met** — both targets |
+
+Real fairness testing on the live models found four genuine, non-exempt
+equal-opportunity gaps (solid false-positive counts behind each, not
+small-sample noise) — `default_12m` by jurisdiction tier (0.74) and residency
+status (0.57), `financial_crime_12m` by age (0.68) and residency status
+(0.49). The `default_12m` findings are the interesting ones: jurisdiction and
+residency have no direct causal term in that target's outcome model at all,
+so this is a proxy effect — almost certainly via legitimate credit features
+(thin file, income volatility, account tenure) that happen to correlate with
+residency status. That is a real finding a governance process exists to
+catch, reported honestly rather than suppressed; closing it is out of scope
+for the governance *mechanism* this phase delivers. Full numbers and the
+per-group breakdown in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+One correctness bug the work surfaced before it shipped: a group landing on a
+0% false-positive rate purely by chance (rare-event target, small group) made
+every other group's equal-opportunity ratio collapse toward 0 against that
+accidental zero. Fixed with `MIN_FALSE_POSITIVE_EVENTS` — below 5 raw false
+positives, a group is excluded from the comparison entirely, on both sides.
+
+## The web UI
+
+`app.py` is a Streamlit front end over the same public endpoints an integrator
+would call, shaped as an operations console (Unit21/Feedzai-style) rather than
+a single calculator. It is a **client only** — no model, no policy, no copy of
+the reason-code vocabulary lives in it, so a number on screen can only be
+wrong if the API is wrong. Bilingual — a language selector at the top of the
+sidebar (Hebrew default, English toggle) switches every page instantly:
+titles, KPI tiles, table headers, status/band badges, form labels, chart
+axes and legends, and the ~65-term operational vocabulary (occupations,
+segments, event types, ...) all read from one `I18N`/`VOCAB` lookup rather
+than being hardcoded, so nothing is half-translated. The API itself is never
+localised — band/status/reason values stay the fixed English identifiers it
+returns and expects; only their on-screen labels change. The page also ships
+the standard signals (`<meta name="google" content="notranslate">`, `<html
+translate="no">`, a `notranslate` CSS class) that stop a browser's own
+translate feature from rewriting the page — that fights the Hebrew/English
+toggle for the same text nodes and is what throws Streamlit's React frontend
+into a `removeChild` crash. Three pages:
+
+- **Risk Operations Queue** — every customer scored this session, highest
+  risk first, with KPI tiles (total scored, high-risk pending review, SLA
+  breaches, escalated to AML), and search/filter by band, status, segment,
+  occupation or country. Selecting a row loads that customer's full,
+  already-scored profile straight into Customer 360 — no form to fill in.
+  New customers are onboarded from one of three realistic starting profiles
+  in one click, not a wall of sliders.
+- **Customer 360 & Decision Center** — profile, composite score, band badge
+  and degradation status; a chronological timeline merging score events,
+  pushed transactions and case decisions; an explainability panel with the
+  internal reviewer's view beside the customer-facing one and an explicit
+  list of what was withheld and why (filterable by dimension, direction and
+  visibility); and a case-decision panel (Approve / Escalate to AML /
+  Request KYC / Block), gated on a mandatory review note. Case status, SLA,
+  notes, dynamic rules, watchlist rulings and a hash-chained audit trail are
+  persisted via `crr.workflow` (SQLite by default, PostgreSQL via
+  `CRR_WORKFLOW_DB_URL`) — not the scoring API, which stays a pure client of
+  this console and still has no case-management endpoints of its own — so a
+  refresh, a new tab or a restart all land back on the same queue. Access is
+  gated behind a real login; see [Reverse proxy + cookie-based
+  auth](#reverse-proxy--cookie-based-auth-production) below for running it
+  with httpOnly session cookies instead of the built-in URL-parameter
+  fallback.
+- **Event Simulator & Sandbox** — push one event against any queued customer
+  and see whether the policy triggered, debounced or ignored it and what the
+  score did; or, in a second tab, score a fully custom payload through the
+  original ~40-field manual form (three starting profiles, a control to send
+  chosen fields as *unknown* — that exists to make the missing-data contract
+  visible: an omitted field reaches the model as a genuine NaN plus a
+  missing-indicator, never a fabricated zero) for testing rules and the API
+  directly, with an option to add the result to the queue.
+
+The SHAP chart is a diverging bar of summed log-odds contributions: red raises
+risk, blue lowers it, zero is a real midpoint. That colour pair is validated
+for colour-vision deficiency against the page's surface, and direction is never
+carried by colour alone — every bar is labelled and each chart carries a table
+view with exact values.
+
+```bash
+./scripts/start_all.sh                      # API + UI, one command
+CRR_API_URL=https://api.example.com streamlit run app.py   # UI against a remote API
+```
+
+## Deployment
+
+`Dockerfile` builds one image that runs both processes: the API on an internal
+port, Streamlit on `$PORT`. One container because a PaaS web service exposes
+one port and this is a demo; at real scale they are two services.
+
+**The models are pre-trained and committed, not trained during the image
+build.** `models/default_12m/` and `models/financial_crime_12m/` are real,
+tracked files (~650 KB total — see `.gitignore`); `data/` stays git-ignored,
+since the dataset that produced them is reproducible from the seed in
+`models/*/metadata.json` and has no runtime use. The build now just installs
+dependencies and copies those two directories in, then runs a one-line sanity
+check (`ModelBundle.load()`) so a commit that ever ships a broken or missing
+model directory fails the build rather than the first request.
+
+This used to run `generate_synthetic_data.py` + `train_baseline.py` as a build
+step — self-contained and reproducible-from-a-seed, in principle. In practice,
+training enough rows to calibrate `financial_crime_12m`'s ~1.5% prevalence
+needs several hundred MB of peak RSS, and a free-tier PaaS build container
+(Render Free: 512 MB) either OOMs or times out doing that inside `docker
+build`; no row count both fit that budget and cleared the calibration bar (see
+this repo's git history for the measurements that pinned that down). The fix
+is to stop asking the build to train at all — train offline where memory isn't
+the constraint, commit the result, let the build be a copy. Build time no
+longer depends on dataset size, and it no longer varies with CPU contention on
+a shared free-tier builder either.
+
+**To ship a freshly retrained model:** run `make data train` (or just `python
+scripts/generate_synthetic_data.py -n 50000 --language mixed` followed by
+`python scripts/train_baseline.py --target <target>` for each target) anywhere
+without a tight memory ceiling — a laptop, a CI runner, this dev container.
+Confirm `PHASE 2 EXIT CRITERIA` prints `PASS` for all four criteria on both
+targets (`train_baseline.py` exits non-zero and the build's sanity check would
+never even get a chance to matter otherwise — `--allow-degraded-build` exists
+for a deliberately-labelled exception, not a default), then commit the updated
+`models/` directory.
+
+Measured steady-state RSS serving real requests — both processes, one worker
+each, no training ever in the picture — is ~330 MB, comfortably inside a
+512 MB free-tier container with real headroom; see `render.yaml`'s plan-
+selection note for when to move to a paid tier instead.
+
+| Platform | How |
+|---|---|
+| Render | New → Blueprint on the repo root (not this subfolder) — `render.yaml` lives there and sets `rootDir: customer-risk-rating`. If you already created the service by hand instead, set **Root Directory** to `customer-risk-rating` in its dashboard Settings, since a manually-created service never reads `render.yaml`. |
+| Railway | New → Deploy from repo, then set **Root Directory** to `customer-risk-rating` in the service's Settings so it finds `railway.json` and the Dockerfile |
+| Any Docker host | `cd customer-risk-rating && docker build -t crr . && docker run -p 8501:8501 crr` |
+
+`CRR_ANTHROPIC_API_KEY` is optional everywhere. Unset — the default — means the
+deterministic reference extractor: no network calls, no cost, and narrative
+text never leaves the container.
+
+### Reverse proxy + cookie-based auth (production)
+
+The single-container setup above authenticates with a bearer token in the
+URL's `?auth=` query parameter — Streamlit's own runtime can *read* a cookie
+or header on the request that opened a session, but has no API to *set* one
+(there is no `st.set_cookie`: a `Set-Cookie` can only come from a real HTTP
+response, and a Streamlit script never gets a hook into the page's initial
+one). A URL parameter is visible in browser history, server access logs and
+the `Referer` header — a known, accepted limitation of that fallback path, not
+of the login system as a whole.
+
+The fix is a small extra service, **`crr.workflow.gateway`**, that sits behind
+the same reverse proxy as Streamlit and is the one thing in this system
+allowed to issue the session as an httpOnly cookie. The flow:
+
+1. The existing in-app Streamlit login form authenticates exactly as before
+   (`WorkflowStore.authenticate` / `create_login_session`) and mints a token.
+2. If `CRR_AUTH_GATEWAY_URL` is set, instead of putting that token in the URL
+   for good, the app triggers a real top-level browser navigation to
+   `{gateway}/adopt?token=…&next=/` (a `<meta http-equiv="refresh">` tag
+   rendered via `st.markdown` — the only real page navigation a Streamlit
+   script can drive; an in-app `st.rerun()` cannot leave the page, and a
+   sandboxed `components.v1.html` iframe cannot navigate the top-level window
+   at all, which is what an earlier attempt at this used and why it silently
+   failed). The gateway checks the token is valid (the same check every
+   request already makes) and responds with
+   `Set-Cookie: crr_session=…; HttpOnly; Secure; SameSite=Lax`, then redirects
+   back to `/`. Because `<meta refresh>` is GET-only, the token is briefly
+   visible in that one redirect's URL and whatever logs it — a real, narrow
+   exposure, honestly no better than the old `?auth=` fallback for that single
+   hop, but confined to it: no other request, and no ongoing session, ever
+   carries the token in a URL again.
+3. Every request after that carries the cookie automatically. `app.py` reads
+   it via `st.context.cookies` (and, as an alternative some proxy setups
+   prefer, an `X-Auth-Token` header via `st.context.headers`) — see
+   `crr.workflow.auth.extract_bearer_token` for the exact precedence
+   (header → cookie → URL parameter, so the old fallback still works with no
+   gateway configured at all). Sign-out is the mirror image: the same
+   navigation trick against `{gateway}/logout?next=/`, which carries no token
+   at all, so it has no such exposure.
+
+Nothing about `WorkflowStore`, `resolve_session`, password hashing or the
+audit log changed for any of this — the gateway only ever cookie-izes a
+session the store already considers valid; it does not authenticate on its
+own or duplicate that logic.
+
+#### Run it with Docker Compose
+
+```bash
+docker compose up --build
+open http://localhost   # sign in with any of the demo accounts the login page lists
+```
+
+`docker-compose.yml` runs four small containers from the same image as the
+single-container Dockerfile — `proxy` (Caddy), `api` (the scoring service),
+`gateway`, and `streamlit` — with `deploy/Caddyfile` routing `/auth/*` to the
+gateway and everything else, WebSocket runtime connection included, to
+Streamlit. `gateway` and `streamlit` share one SQLite file over a named
+volume; swap in PostgreSQL by uncommenting the `workflow-db` service and the
+matching `CRR_WORKFLOW_DB_URL` lines (and rebuilding with `pip install -e
+".[db]"` for the psycopg driver) — see `crr/workflow/db.py`'s docstring. To use
+nginx instead of Caddy, point `proxy.image` at `nginx:alpine` and mount
+`./deploy/nginx.conf` in place of the Caddyfile.
+
+Before a real deployment, validate whichever config you're using —
+`caddy validate --config deploy/Caddyfile --adapter caddyfile` or
+`nginx -t -c deploy/nginx.conf` — the versions of those tools you're actually
+shipping with are the ground truth, not this file.
+
+#### Run it with local binaries (no Docker)
+
+```bash
+# 1. the scoring API
+python scripts/serve.py &
+
+# 2. the auth gateway — CRR_COOKIE_SECURE=false only because this is plain
+#    HTTP on localhost; a browser never sends a Secure cookie back over HTTP,
+#    so leaving the default (true) here would look like a silent failure
+CRR_COOKIE_SECURE=false python -m uvicorn crr.workflow.gateway:create_app \
+  --factory --host 127.0.0.1 --port 8600 &
+
+# 3. Streamlit — CRR_AUTH_GATEWAY_URL points at wherever the proxy will
+#    expose the gateway's /auth mount to the BROWSER, and must already end in
+#    "/auth" (app.py appends only "/adopt"/"/logout" to it) — a same-origin
+#    path once a proxy is in front, e.g. "/auth"; a full origin+path like
+#    below only when testing straight against the gateway with no proxy at all
+CRR_AUTH_GATEWAY_URL=http://127.0.0.1:8600/auth streamlit run app.py &
+
+# 4. the reverse proxy — pick one
+caddy run --config deploy/Caddyfile --adapter caddyfile
+# or: nginx -c "$(pwd)/deploy/nginx.conf" -p "$(pwd)"
+```
+
+Both `deploy/Caddyfile` and `deploy/nginx.conf` default to Docker Compose's
+service names (`streamlit`, `gateway`) as upstream hosts; running the binaries
+directly on one machine, replace those with `127.0.0.1`.
+
+#### Environment variables
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CRR_AUTH_GATEWAY_URL` | *(unset)* | Base URL of the auth gateway's `/auth` mount, as the **browser** reaches it — must already end in `/auth` (e.g. a same-origin path like `/auth` behind a proxy, or a full `http://host:port/auth` for local testing without one). Unset keeps every auth flow exactly as the single-container setup: a token in the URL, no cookie, no gateway process needed at all. |
+| `CRR_WORKFLOW_DB_URL` | `sqlite:///data/workflow.db` | Shared by `crr.workflow`'s Streamlit code and the gateway — both must point at the same database. |
+| `CRR_COOKIE_SECURE` | `true` | Set `false` only for plain-HTTP local testing; a `Secure` cookie is never returned by a browser without TLS. |
+| `CRR_COOKIE_SAMESITE` | `lax` | `lax`, `strict`, or `none` (the last requires `Secure`). |
+
+The demo accounts the login page lists (`analyst` / `manager` / `officer`,
+passwords printed right there) are exactly that — a demo. A real deployment
+disables `WorkflowStore.seed_default_users()` or rotates those passwords
+immediately, and provisions real accounts through the admin-only user form in
+the sidebar (or an external identity provider, if one is already in place).
+
+## Data provenance
+
+All data is synthetic and generated locally — no external API, no real customer
+data, nothing leaves the machine, **by default**. The one exception, opt-in
+only: if `CRR_ANTHROPIC_API_KEY` is set, `AnthropicExtractor` (phase 7) sends
+narrative text to Anthropic's API for extraction, inside the data envelope
+described in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). With no key set
+— the default — extraction uses the local, offline `ReferenceExtractor` and
+nothing leaves the machine, same as every other phase.
+
+The jurisdiction and occupation taxonomies in `src/crr/data/taxonomy.py` are
+illustrative structure for the alpha, **not** a compliance source; production
+must replace each with a live, versioned feed (FATF risk ratings and similar).
+Sanctions screening is different: see the next section — `crr.screening` and
+`scripts/refresh_watchlists.py` ingest OFAC's and the UN's real, free,
+government-published lists directly, not a placeholder.
+
+### Sanctions & PEP watchlist screening
+
+The Watchlist Hits panel (Customer 360) and the Sandbox's screening preview
+fuzzy-match a customer's name/DOB/country against whatever is currently in
+the `wf_watchlist_entries` table — see `crr.screening` for the matching and
+parsing code, and the sidebar's admin-only **Watchlist data sources** panel
+(Compliance Officer / Admin role) for what is loaded right now and how stale
+it is.
+
+**Three sources, three different levels of "real" out of the box:**
+
+| Source | Where the data comes from | Free? |
+|---|---|---|
+| OFAC (US) | `crr.screening.parsers.parse_ofac_sdn` — the real [SDN.XML](https://www.treasury.gov/ofac/downloads/sdn.xml) schema | Yes |
+| UN Security Council | `parse_un_consolidated` — the real [consolidated list](https://scsanctions.un.org/resources/xml/en/consolidated.xml) XML schema | Yes |
+| EU | `parse_eu_fsf` — the EU FSF export schema; no stable public URL (the Commission serves it through the interactive Sanctions Map UI, which mints a short-lived download token) — fetch a copy through that UI and pass it with `--file` | Yes, but manual |
+| PEP / adverse media | fictional demo entries only | No free, authoritative source exists — a real deployment integrates a paid vendor (World-Check, Dow Jones) here |
+
+Until `scripts/refresh_watchlists.py` has been run, every source shows a
+small set of fictional demo entries (clearly marked as such in the sidebar
+panel) — enough to exercise the screening/disposition workflow end to end
+without any setup. Run the script to replace a source's demo rows with the
+real thing:
+
+```bash
+# OFAC and the UN have a built-in default URL:
+python scripts/refresh_watchlists.py --source ofac
+python scripts/refresh_watchlists.py --source un
+python scripts/refresh_watchlists.py --source all   # both of the above
+
+# EU: fetch xmlFullSanctionsList through https://webgate.ec.europa.eu/fsd/fsf/public/
+# (the Sanctions Map UI) first, then:
+python scripts/refresh_watchlists.py --source eu --file /path/to/downloaded_fsf_export.xml
+
+# Any source can be loaded from a file you already have instead of fetching —
+# some regulated environments require this regardless of connectivity:
+python scripts/refresh_watchlists.py --source ofac --file /path/to/sdn.xml
+```
+
+The refresh replaces only the named source's rows (`WorkflowStore
+.replace_watchlist_source`), in one transaction, so a UN refresh never
+touches OFAC or EU data and a failed refresh can't leave a source half
+loaded. It reads/writes `CRR_WORKFLOW_DB_URL`, the same database the app
+itself uses — run it against whichever database the deployment actually
+points at, then the app picks up the new data on its next page load with no
+restart needed. Put it on a daily cron in a real deployment; these lists
+change.
+
+**Honest disclosure on the parsers**: every parser here is written against
+each publisher's real, documented XML schema and is verified against small,
+schema-accurate fixture files (`tests/fixtures/screening/`, `tests/
+test_screening_parsers.py`) — but this project was built in a sandboxed
+environment with no outbound network access to `treasury.gov`,
+`un.org` or `ec.europa.eu`, so the live fetch path (`crr.screening.ingest
+.fetch`) could not be exercised against the real, current files before
+shipping. Run `scripts/refresh_watchlists.py --source ofac` (or `un`) once
+against a real network and check the printed row count looks like the real
+list's size (tens of thousands for OFAC, low thousands for the UN) as the
+first thing to verify after wiring this in for real — a field renamed or
+restructured upstream would make the parser quietly return 0 rows rather
+than raise (see `crr/screening/parsers.py`'s module docstring).
+
+### Suspicious activity reporting (goAML-style STR/SAR)
+
+Screening a customer and deciding a case are not the end of the compliance
+workflow — a genuine hit has to become a filing to the jurisdiction's
+Financial Intelligence Unit (FIU). Customer 360's **Suspicious Activity
+Reports** panel (Compliance Officer / Admin role — the same `file_report`
+capability gate as `manage_rules`) assembles a case's evidence — the
+customer's identity fields, watchlist screening hits, and the event
+timeline's transactions — into a goAML-style XML report, ready to hand to
+compliance/legal for review before a real submission. See `crr.reporting`:
+`models.py` for the report shape, `builder.py` for "assemble a report from
+an existing case" (`build_report_from_case`), `goaml_xml.py` for the
+serializer. Every filing is persisted (`wf_filed_reports`), downloadable as
+XML from the panel, and logged to both the case timeline and the audit
+trail — nothing about a filing is ever silent.
+
+**goAML** is the IBM-built AML case/reporting platform UNODC provides to
+national FIUs — Israel's Money Laundering and Terror Financing Prohibition
+Authority (IMPA) included — for suspicious transaction/activity report
+intake. The app **never transmits a report anywhere on its own** — filing
+here means producing a correctly-assembled XML file a human downloads and
+hands to compliance/legal, not a live submission to any FIU.
+
+**Honest disclosure, matching the sanctions-screening disclosure above**:
+`crr/reporting/goaml_xml.py` was written from documented goAML XML schema
+knowledge (`report_code`, `submission_code`, `entity_reference`,
+`reporting_person`, `reason`, `report_indicators`, `transactions`,
+`persons`) — not validated against a live, current XSD, since this
+environment has no outbound network access to any FIU's portal. Every FIU
+running goAML, IMPA included, layers its own customized field set and
+indicator-code table on top of the base platform, and that customization is
+exactly the part no amount of general schema knowledge substitutes for.
+Treat the generated file as a **filing-ready draft that correctly assembles
+the case evidence into the right shape**, not as a submission guaranteed to
+validate against IMPA's (or any specific FIU's) importer unmodified — the
+missing step before a real filing is checking one generated report against
+IMPA's current reporting guide, the same "verify against the real thing"
+step the watchlist-refresh section above already asks for. The same
+disclosure text appears in the app itself, right above the filing form.

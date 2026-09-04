@@ -1,0 +1,29 @@
+# Deployment requirements: the API, the model stack and the Streamlit front end
+# in one file, because the container in Dockerfile runs both processes.
+#
+# pyproject.toml remains the source of truth for developing the library (and
+# splits these into extras: [model], [db], [llm], [frontend]). This file exists
+# for platforms that install from a plain requirements.txt — Render, Railway,
+# Streamlit Community Cloud — and mirrors pyproject's floors rather than
+# inventing new ones.
+
+# --- core service ---------------------------------------------------------
+numpy>=1.26
+pandas>=2.1
+scikit-learn>=1.4
+lightgbm>=4.3
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+pydantic-settings>=2.2
+sqlalchemy>=2.0
+pyyaml>=6.0
+
+# --- model artefacts (SHAP explanations, parquet IO) ----------------------
+shap>=0.45
+pyarrow>=15.0
+
+# --- Streamlit front end (app.py) -----------------------------------------
+streamlit>=1.40
+plotly>=5.20
+requests>=2.31

@@ -1,0 +1,22 @@
+# The page commits to a single light look on purpose.
+#
+# The charts in app.py use a colour pair validated against one known surface,
+# and red there carries a specific meaning — "this factor raises risk".
+# Streamlit's stock primary colour is also red, which would put a meaningless
+# red on every button and slider next to a meaningful red in the charts. The
+# primary below is the same blue the charts use for "lowers risk", so nothing
+# in the chrome impersonates a semantic colour.
+
+[theme]
+base = "light"
+primaryColor = "#2a78d6"
+backgroundColor = "#f9f9f7"
+secondaryBackgroundColor = "#f2f1ed"
+textColor = "#0b0b0b"
+font = "sans serif"
+
+# Server settings are deliberately left at their defaults: CORS and XSRF
+# protection stay on. Headless mode is set by the launch command, not here.
+
+[browser]
+gatherUsageStats = false

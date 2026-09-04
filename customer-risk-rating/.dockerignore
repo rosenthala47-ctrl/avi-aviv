@@ -1,0 +1,32 @@
+# The trained models (default_12m/, financial_crime_12m/) are committed to
+# the repo and copied straight into the image — see Dockerfile. The build no
+# longer trains, so the raw dataset that produced them has no runtime use and
+# would only bloat the context; same for anything else under models/ (local
+# retrain.py champion/challenger runs, experiments) that isn't one of the two
+# directories the API actually loads.
+data/
+models/*
+!models/default_12m/
+!models/financial_crime_12m/
+mlruns/
+
+.git/
+.github/
+tests/
+notebooks/
+docs/
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+.env
+.env.*
+!.env.example

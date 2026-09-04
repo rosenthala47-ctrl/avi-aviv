@@ -1,0 +1,48 @@
+# Render blueprint — https://render.com/docs/blueprint-spec
+#
+# This file MUST live at the repository root: Render's Blueprint sync (New →
+# Blueprint) only scans the repo root for render.yaml, never subdirectories.
+# The actual service — Dockerfile, pyproject.toml, app.py — lives in
+# customer-risk-rating/, which is why rootDir below points there.
+#
+# One-click: push this repo, then on Render choose New → Blueprint and point
+# it at the repo. Render reads this file, builds the Dockerfile — which now
+# just copies in the pre-trained models committed at customer-risk-rating/
+# models/ (see that Dockerfile's top comment for why) — and serves the
+# Streamlit UI on the port it injects as $PORT. No dashboard config needed.
+#
+# If you already created the service manually (not via Blueprint), this file
+# will not retroactively apply — go to the service's Settings in the Render
+# dashboard and set Root Directory to `customer-risk-rating` by hand, or
+# delete the service and recreate it via New → Blueprint instead.
+#
+# Plan selection:
+#   - free (512 MB RAM) works: the build no longer trains anything (it only
+#     installs deps and copies committed files), and measured steady-state
+#     RSS serving real requests — both processes, one worker each — is
+#     ~330 MB, leaving real but not huge headroom under 512 MB. If Render's
+#     dashboard shows memory pressure under your actual traffic, move to
+#     starter rather than fight it.
+#   - starter (1 GB RAM): the same image, comfortable headroom instead of
+#     tight — no build or model-quality difference, just more room to grow
+#     (concurrent load, CRR_API_WORKERS > 1, a larger retrained model).
+services:
+  - type: web
+    name: customer-risk-rating
+    runtime: docker
+    plan: free              # see the headroom note above; switch to starter if you outgrow it
+    rootDir: customer-risk-rating   # everything below (Dockerfile, dockerContext) is relative to this
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /_stcore/health   # Streamlit's own readiness endpoint
+    autoDeploy: true
+    envVars:
+      # The API is internal to the container; the UI reaches it over loopback.
+      - key: CRR_API_PORT
+        value: "8000"
+      - key: CRR_API_WORKERS
+        value: "1"
+      # Optional. Unset means the deterministic reference extractor: no network
+      # calls, no cost, and narrative text never leaves the container.
+      - key: CRR_ANTHROPIC_API_KEY
+        sync: false

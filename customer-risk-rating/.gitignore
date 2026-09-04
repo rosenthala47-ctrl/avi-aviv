@@ -1,0 +1,49 @@
+# Generated data — reproducible from the seed in manifest.json, so never committed.
+data/raw/
+data/interim/
+data/processed/
+!data/**/README.md
+
+# Trained model artefacts. default_12m/ and financial_crime_12m/ — the two
+# directories crr.api.scoring._TARGET_FOR_DIMENSION actually loads — are
+# committed on purpose: the Docker build no longer trains (see Dockerfile),
+# it just copies these in, which is what keeps a free-tier PaaS build fast
+# and light instead of running LightGBM training inside the container.
+# Everything else under models/ — scripts/retrain.py's champion/challenger
+# runs, ad-hoc local experiments — stays out of version control.
+# Anchored with a leading slash: a bare "models/" also matches the
+# src/crr/models/ source package and silently excludes it from the repo.
+/models/*
+!/models/default_12m/
+!/models/financial_crime_12m/
+mlruns/
+*.pkl
+*.joblib
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets — never commit real credentials
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Workflow store (case management / auth / audit) — local SQLite
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm

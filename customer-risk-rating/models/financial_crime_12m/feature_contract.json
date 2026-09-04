@@ -1,0 +1,1488 @@
+{
+  "version": "1.0.0",
+  "pipeline_version": "1.1.0",
+  "specs": [
+    {
+      "name": "age",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: age.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "years_at_employer",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: years_at_employer.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "account_age_months",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: account_age_months.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "dependents_count",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: dependents_count.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "num_products_held",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: num_products_held.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "declared_annual_income",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: declared_annual_income.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "verified_income_ratio",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: verified_income_ratio.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "income_volatility_cv",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: income_volatility_cv.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "income_months_missing_12m",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: income_months_missing_12m.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "total_credit_limit",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: total_credit_limit.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "credit_utilization_ratio",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: credit_utilization_ratio.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "revolving_balance",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: revolving_balance.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "num_open_loans",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: num_open_loans.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "dti_ratio",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: dti_ratio.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "num_credit_inquiries_12m",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: num_credit_inquiries_12m.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "delinquencies_30d_12m",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: delinquencies_30d_12m.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "delinquencies_60d_24m",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: delinquencies_60d_24m.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "delinquencies_90d_24m",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: delinquencies_90d_24m.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "max_days_past_due_24m",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: max_days_past_due_24m.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "months_since_last_delinquency",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: months_since_last_delinquency.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "prior_default_flag",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: prior_default_flag.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "num_bounced_payments_12m",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: num_bounced_payments_12m.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "bureau_score",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: bureau_score.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "payment_history_score",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: payment_history_score.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "avg_monthly_balance",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: avg_monthly_balance.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "min_monthly_balance",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: min_monthly_balance.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "balance_volatility",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: balance_volatility.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "overdraft_events_12m",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: overdraft_events_12m.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "overdraft_days_12m",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: overdraft_days_12m.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "savings_to_income_ratio",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: savings_to_income_ratio.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "loan_to_value",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: loan_to_value.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "collateral_coverage_ratio",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: collateral_coverage_ratio.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "txn_count_90d",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: txn_count_90d.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "txn_volume_90d",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: txn_volume_90d.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "avg_txn_amount",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: avg_txn_amount.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "cash_intensity_ratio",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: cash_intensity_ratio.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "large_cash_deposits_90d",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: large_cash_deposits_90d.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "cross_border_txn_count_90d",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: cross_border_txn_count_90d.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "cross_border_txn_ratio",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: cross_border_txn_ratio.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "night_txn_ratio",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: night_txn_ratio.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "new_counterparty_ratio_90d",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: new_counterparty_ratio_90d.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "merchant_category_entropy",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: merchant_category_entropy.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "txn_velocity_change_pct",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: txn_velocity_change_pct.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "gambling_spend_ratio_90d",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: gambling_spend_ratio_90d.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "crypto_exposure_ratio_90d",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: crypto_exposure_ratio_90d.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "structuring_score",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: structuring_score.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "expected_vs_actual_turnover_ratio",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: expected_vs_actual_turnover_ratio.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "pass_through_velocity_hours",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: pass_through_velocity_hours.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "volume_spike_ratio_6m",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: volume_spike_ratio_6m.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "vpn_or_high_risk_ip_flag",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: vpn_or_high_risk_ip_flag.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "device_change_frequency_30d",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: device_change_frequency_30d.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "cash_to_total_volume_ratio",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: cash_to_total_volume_ratio.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "crypto_vasp_exposure_flag",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: crypto_vasp_exposure_flag.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "pep_flag",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: pep_flag.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "sanctions_screen_hits",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: sanctions_screen_hits.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "adverse_media_hits_12m",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: adverse_media_hits_12m.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "high_risk_jurisdiction_exposure",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: high_risk_jurisdiction_exposure.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "medium_risk_jurisdiction_exposure",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: medium_risk_jurisdiction_exposure.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "offshore_entity_links",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: offshore_entity_links.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "source_of_funds_verified",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: source_of_funds_verified.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "kyc_document_completeness",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: kyc_document_completeness.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "kyc_refresh_overdue_days",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: kyc_refresh_overdue_days.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "sar_filed_prior",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: sar_filed_prior.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "edd_required",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: edd_required.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "complex_ownership_structure_flag",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: complex_ownership_structure_flag.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "recent_ubo_change_flag",
+      "kind": "numeric",
+      "block": "customer",
+      "description": "Customer attribute or derived ratio: recent_ubo_change_flag.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "credit_limit_to_income",
+      "kind": "numeric",
+      "block": "derived",
+      "description": "Engineered ratio or composite: credit_limit_to_income.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "revolving_balance_to_income",
+      "kind": "numeric",
+      "block": "derived",
+      "description": "Engineered ratio or composite: revolving_balance_to_income.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "balance_months_of_income",
+      "kind": "numeric",
+      "block": "derived",
+      "description": "Engineered ratio or composite: balance_months_of_income.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "min_balance_months_of_income",
+      "kind": "numeric",
+      "block": "derived",
+      "description": "Engineered ratio or composite: min_balance_months_of_income.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "overdraft_days_per_event",
+      "kind": "numeric",
+      "block": "derived",
+      "description": "Engineered ratio or composite: overdraft_days_per_event.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "delinquency_severity",
+      "kind": "numeric",
+      "block": "derived",
+      "description": "Engineered ratio or composite: delinquency_severity.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "inquiries_per_open_loan",
+      "kind": "numeric",
+      "block": "derived",
+      "description": "Engineered ratio or composite: inquiries_per_open_loan.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "products_per_tenure_year",
+      "kind": "numeric",
+      "block": "derived",
+      "description": "Engineered ratio or composite: products_per_tenure_year.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "tenure_to_age_ratio",
+      "kind": "numeric",
+      "block": "derived",
+      "description": "Engineered ratio or composite: tenure_to_age_ratio.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "screening_hit_total",
+      "kind": "numeric",
+      "block": "derived",
+      "description": "Engineered ratio or composite: screening_hit_total.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "kyc_deficiency_score",
+      "kind": "numeric",
+      "block": "derived",
+      "description": "Engineered ratio or composite: kyc_deficiency_score.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "aml_flag_count",
+      "kind": "numeric",
+      "block": "derived",
+      "description": "Engineered ratio or composite: aml_flag_count.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "cash_and_crypto_exposure",
+      "kind": "numeric",
+      "block": "derived",
+      "description": "Engineered ratio or composite: cash_and_crypto_exposure.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "bureau_score_is_missing",
+      "kind": "indicator",
+      "block": "indicator",
+      "description": "Source value for bureau_score was absent.",
+      "minimum": 0,
+      "maximum": 1,
+      "nullable": true
+    },
+    {
+      "name": "verified_income_ratio_is_missing",
+      "kind": "indicator",
+      "block": "indicator",
+      "description": "Source value for verified_income_ratio was absent.",
+      "minimum": 0,
+      "maximum": 1,
+      "nullable": true
+    },
+    {
+      "name": "income_volatility_cv_is_missing",
+      "kind": "indicator",
+      "block": "indicator",
+      "description": "Source value for income_volatility_cv was absent.",
+      "minimum": 0,
+      "maximum": 1,
+      "nullable": true
+    },
+    {
+      "name": "education_level_is_missing",
+      "kind": "indicator",
+      "block": "indicator",
+      "description": "Source value for education_level was absent.",
+      "minimum": 0,
+      "maximum": 1,
+      "nullable": true
+    },
+    {
+      "name": "years_at_employer_is_missing",
+      "kind": "indicator",
+      "block": "indicator",
+      "description": "Source value for years_at_employer was absent.",
+      "minimum": 0,
+      "maximum": 1,
+      "nullable": true
+    },
+    {
+      "name": "source_of_funds_verified_is_missing",
+      "kind": "indicator",
+      "block": "indicator",
+      "description": "Source value for source_of_funds_verified was absent.",
+      "minimum": 0,
+      "maximum": 1,
+      "nullable": true
+    },
+    {
+      "name": "loan_to_value_is_missing",
+      "kind": "indicator",
+      "block": "indicator",
+      "description": "Source value for loan_to_value was absent.",
+      "minimum": 0,
+      "maximum": 1,
+      "nullable": true
+    },
+    {
+      "name": "collateral_coverage_ratio_is_missing",
+      "kind": "indicator",
+      "block": "indicator",
+      "description": "Source value for collateral_coverage_ratio was absent.",
+      "minimum": 0,
+      "maximum": 1,
+      "nullable": true
+    },
+    {
+      "name": "segment",
+      "kind": "categorical",
+      "block": "categorical",
+      "description": "Normalised category: segment.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "occupation",
+      "kind": "categorical",
+      "block": "categorical",
+      "description": "Normalised category: occupation.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "employment_status",
+      "kind": "categorical",
+      "block": "categorical",
+      "description": "Normalised category: employment_status.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "education_level",
+      "kind": "categorical",
+      "block": "categorical",
+      "description": "Normalised category: education_level.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "marital_status",
+      "kind": "categorical",
+      "block": "categorical",
+      "description": "Normalised category: marital_status.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "preferred_channel",
+      "kind": "categorical",
+      "block": "categorical",
+      "description": "Normalised category: preferred_channel.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "residency_status",
+      "kind": "categorical",
+      "block": "categorical",
+      "description": "Normalised category: residency_status.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "country_of_residence",
+      "kind": "categorical",
+      "block": "categorical",
+      "description": "Normalised category: country_of_residence.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "pep_relationship",
+      "kind": "categorical",
+      "block": "categorical",
+      "description": "Normalised category: pep_relationship.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "source_of_funds_declared",
+      "kind": "categorical",
+      "block": "categorical",
+      "description": "Normalised category: source_of_funds_declared.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "beneficial_ownership_transparency",
+      "kind": "categorical",
+      "block": "categorical",
+      "description": "Normalised category: beneficial_ownership_transparency.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "jurisdiction_risk_tier",
+      "kind": "categorical",
+      "block": "categorical",
+      "description": "Normalised category: jurisdiction_risk_tier.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "cash_deposit_amount_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Total value of cash deposit events over 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "cash_deposit_count_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Count of cash deposit events over 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "chargeback_amount_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Total value of chargeback events over 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "chargeback_count_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Count of chargeback events over 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "crypto_transfer_amount_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Total value of crypto transfer events over 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "crypto_transfer_count_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Count of crypto transfer events over 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "days_since_last_cash_deposit",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Days since the most recent cash deposit.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "days_since_last_event",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Days since the most recent event.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "days_since_last_missed_payment",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Days since the most recent missed payment.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "days_since_last_trigger_event",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Days since the most recent trigger event.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "distinct_counterparty_countries_180d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Distinct counterparty jurisdictions over 180 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "distinct_counterparty_countries_30d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Distinct counterparty jurisdictions over 30 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "distinct_counterparty_countries_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Distinct counterparty jurisdictions over 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "event_count_180d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Events in the trailing 180 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "event_count_30d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Events in the trailing 30 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "event_count_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Events in the trailing 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "event_count_velocity_ratio",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Short-window event rate over the medium-window rate.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "foreign_event_ratio_180d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Share of events with a foreign counterparty over 180 days.",
+      "minimum": 0,
+      "maximum": 1,
+      "nullable": true
+    },
+    {
+      "name": "foreign_event_ratio_30d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Share of events with a foreign counterparty over 30 days.",
+      "minimum": 0,
+      "maximum": 1,
+      "nullable": true
+    },
+    {
+      "name": "foreign_event_ratio_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Share of events with a foreign counterparty over 90 days.",
+      "minimum": 0,
+      "maximum": 1,
+      "nullable": true
+    },
+    {
+      "name": "has_event_history",
+      "kind": "indicator",
+      "block": "event",
+      "description": "Customer has any event history at all.",
+      "minimum": 0,
+      "maximum": 1,
+      "nullable": true
+    },
+    {
+      "name": "inflow_180d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Money in over 180 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "inflow_30d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Money in over 30 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "inflow_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Money in over 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "max_abs_amount_180d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Largest single event over 180 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "max_abs_amount_30d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Largest single event over 30 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "max_abs_amount_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Largest single event over 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "missed_payment_amount_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Total value of missed payment events over 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "missed_payment_count_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Count of missed payment events over 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "net_flow_180d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Inflow minus outflow over 180 days.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "net_flow_30d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Inflow minus outflow over 30 days.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "net_flow_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Inflow minus outflow over 90 days.",
+      "minimum": null,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "night_event_ratio_180d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Share of events outside normal hours over 180 days.",
+      "minimum": 0,
+      "maximum": 1,
+      "nullable": true
+    },
+    {
+      "name": "night_event_ratio_30d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Share of events outside normal hours over 30 days.",
+      "minimum": 0,
+      "maximum": 1,
+      "nullable": true
+    },
+    {
+      "name": "night_event_ratio_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Share of events outside normal hours over 90 days.",
+      "minimum": 0,
+      "maximum": 1,
+      "nullable": true
+    },
+    {
+      "name": "outflow_180d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Money out over 180 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "outflow_30d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Money out over 30 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "outflow_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Money out over 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "outflow_velocity_ratio",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Short-window outflow rate over the medium-window rate.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "overdraft_breach_amount_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Total value of overdraft breach events over 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "overdraft_breach_count_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Count of overdraft breach events over 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "trigger_event_count_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Re-scoring trigger events over 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "wire_transfer_out_amount_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Total value of wire transfer out events over 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "wire_transfer_out_count_90d",
+      "kind": "numeric",
+      "block": "event",
+      "description": "Count of wire transfer out events over 90 days.",
+      "minimum": 0,
+      "maximum": null,
+      "nullable": true
+    },
+    {
+      "name": "text_distress_level",
+      "kind": "numeric",
+      "block": "text_extraction",
+      "description": "LLM-extracted signal: text_distress_level.",
+      "minimum": 0,
+      "maximum": 3,
+      "nullable": true
+    },
+    {
+      "name": "text_distress_confidence",
+      "kind": "numeric",
+      "block": "text_extraction",
+      "description": "LLM-extracted signal: text_distress_confidence.",
+      "minimum": 0,
+      "maximum": 1,
+      "nullable": true
+    },
+    {
+      "name": "text_concealment_level",
+      "kind": "numeric",
+      "block": "text_extraction",
+      "description": "LLM-extracted signal: text_concealment_level.",
+      "minimum": 0,
+      "maximum": 3,
+      "nullable": true
+    },
+    {
+      "name": "text_concealment_confidence",
+      "kind": "numeric",
+      "block": "text_extraction",
+      "description": "LLM-extracted signal: text_concealment_confidence.",
+      "minimum": 0,
+      "maximum": 1,
+      "nullable": true
+    }
+  ],
+  "categories": {
+    "segment": [
+      "corporate",
+      "private_banking",
+      "retail",
+      "sme",
+      "__missing__",
+      "__unknown__"
+    ],
+    "occupation": [
+      "accountant",
+      "art_antiques_dealer",
+      "casino_operator",
+      "civil_servant",
+      "construction_contractor",
+      "consultant",
+      "crypto_trader",
+      "factory_worker",
+      "financial_analyst",
+      "import_export_trader",
+      "jewellery_dealer",
+      "lawyer",
+      "logistics_manager",
+      "military_officer",
+      "money_service_operator",
+      "nonprofit_director",
+      "nurse",
+      "physician",
+      "politician_aide",
+      "real_estate_agent",
+      "restaurant_owner",
+      "retail_shop_owner",
+      "retired",
+      "sales_representative",
+      "software_engineer",
+      "student",
+      "taxi_driver",
+      "teacher",
+      "truck_driver",
+      "unemployed",
+      "__missing__",
+      "__unknown__"
+    ],
+    "employment_status": [
+      "business_owner",
+      "retired",
+      "salaried",
+      "self_employed",
+      "student",
+      "unemployed",
+      "__missing__",
+      "__unknown__"
+    ],
+    "education_level": [
+      "bachelor",
+      "doctorate",
+      "high_school",
+      "master",
+      "vocational",
+      "__missing__",
+      "__unknown__"
+    ],
+    "marital_status": [
+      "divorced",
+      "married",
+      "single",
+      "widowed",
+      "__missing__",
+      "__unknown__"
+    ],
+    "preferred_channel": [
+      "branch",
+      "mobile",
+      "online",
+      "relationship_manager",
+      "__missing__",
+      "__unknown__"
+    ],
+    "residency_status": [
+      "citizen",
+      "non_resident",
+      "permanent_resident",
+      "temporary_visa",
+      "__missing__",
+      "__unknown__"
+    ],
+    "country_of_residence": [
+      "ae",
+      "af",
+      "au",
+      "bz",
+      "ca",
+      "ch",
+      "cy",
+      "de",
+      "fr",
+      "gb",
+      "hk",
+      "ht",
+      "il",
+      "jp",
+      "ky",
+      "ly",
+      "mm",
+      "mt",
+      "ng",
+      "nl",
+      "pa",
+      "ru",
+      "sc",
+      "sg",
+      "ss",
+      "sy",
+      "tr",
+      "ua",
+      "us",
+      "vg",
+      "vu",
+      "ye",
+      "za",
+      "__missing__",
+      "__unknown__"
+    ],
+    "pep_relationship": [
+      "close_associate",
+      "family_member",
+      "none",
+      "self",
+      "__missing__",
+      "__unknown__"
+    ],
+    "source_of_funds_declared": [
+      "business_income",
+      "crypto_disposal",
+      "gift",
+      "inheritance",
+      "investment_returns",
+      "loan_proceeds",
+      "property_sale",
+      "salary",
+      "undeclared",
+      "__missing__",
+      "__unknown__"
+    ],
+    "beneficial_ownership_transparency": [
+      "clear",
+      "opaque",
+      "partial",
+      "__missing__",
+      "__unknown__"
+    ],
+    "jurisdiction_risk_tier": [
+      "high",
+      "low",
+      "medium",
+      "__missing__",
+      "__unknown__"
+    ]
+  }
+}

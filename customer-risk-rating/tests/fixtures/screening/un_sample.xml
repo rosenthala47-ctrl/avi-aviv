@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONSOLIDATED_LIST>
+  <INDIVIDUALS>
+    <INDIVIDUAL>
+      <DATAID>100001</DATAID>
+      <VERSIONNUM>1</VERSIONNUM>
+      <FIRST_NAME>Khaled</FIRST_NAME>
+      <SECOND_NAME>Marwan</SECOND_NAME>
+      <THIRD_NAME/>
+      <UN_LIST_TYPE>Al-Qaida</UN_LIST_TYPE>
+      <REFERENCE_NUMBER>QDi.9001</REFERENCE_NUMBER>
+      <LISTED_ON>2020-01-01</LISTED_ON>
+      <NATIONALITY>
+        <VALUE>United Arab Emirates</VALUE>
+      </NATIONALITY>
+      <INDIVIDUAL_ALIAS>
+        <QUALITY>Good</QUALITY>
+        <ALIAS_NAME>Khalid Marwan</ALIAS_NAME>
+      </INDIVIDUAL_ALIAS>
+      <INDIVIDUAL_DATE_OF_BIRTH>
+        <TYPE_OF_DATE>EXACT</TYPE_OF_DATE>
+        <DATE>1969-06-19</DATE>
+      </INDIVIDUAL_DATE_OF_BIRTH>
+      <COMMENTS1>UN Security Council sanctions list (fixture data, fictional).</COMMENTS1>
+    </INDIVIDUAL>
+  </INDIVIDUALS>
+  <ENTITIES>
+    <ENTITY>
+      <FIRST_NAME>Northgate Trading FZE</FIRST_NAME>
+      <UN_LIST_TYPE>Al-Qaida</UN_LIST_TYPE>
+      <REFERENCE_NUMBER>QDe.9002</REFERENCE_NUMBER>
+      <NATIONALITY>
+        <VALUE>United Arab Emirates</VALUE>
+      </NATIONALITY>
+      <COMMENTS1>Fixture data, fictional shell entity.</COMMENTS1>
+    </ENTITY>
+  </ENTITIES>
+</CONSOLIDATED_LIST>

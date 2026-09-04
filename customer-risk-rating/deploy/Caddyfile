@@ -1,0 +1,64 @@
+# Customer Risk Rating — reverse proxy in front of Streamlit and the auth
+# gateway (crr.workflow.gateway).
+#
+# Why a reverse proxy is the productionised auth story: Streamlit's own
+# runtime can only READ a cookie or header on the request that opened a
+# session — there is no public API for it to SET one, so an httpOnly session
+# cookie has to come from a real HTTP response somewhere else on the same
+# origin. crr.workflow.gateway is that "somewhere else"; this proxy is what
+# puts it and Streamlit behind one address so the browser sees a single
+# origin and the cookie applies to both.
+#
+# Usage (local binary, no docker-compose):
+#   caddy run --config deploy/Caddyfile --adapter caddyfile
+#   # then replace the upstreams below with 127.0.0.1:8501 / 127.0.0.1:8600 —
+#   # "streamlit"/"gateway" are Docker Compose service names, not resolvable
+#   # outside that network. See docker-compose.yml for the containerised path,
+#   # where those names resolve automatically.
+#
+# TLS: pointed at a real domain (replace `localhost` below), Caddy obtains and
+# renews a Let's Encrypt certificate with no further configuration — that is
+# the normal, recommended way to run Caddy in production, not an extra step.
+# `localhost` here keeps this file runnable as-is for local testing over
+# plain HTTP; see CRR_COOKIE_SECURE in the README for why a `Secure` cookie
+# needs that swapped for real TLS before it will actually come back to you.
+
+localhost {
+	encode gzip
+
+	# Applied to every response from this proxy, backend included, so neither
+	# Streamlit nor the gateway needs to know about them.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# The auth gateway: the only service in this system allowed to issue the
+	# httpOnly session cookie (see crr/workflow/gateway.py's module docstring).
+	handle /auth/* {
+		reverse_proxy gateway:8600 {
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up Host {host}
+		}
+	}
+
+	handle /healthz {
+		reverse_proxy gateway:8600
+	}
+
+	# Everything else: the Streamlit app, WebSocket runtime connection
+	# included. Caddy detects the Upgrade header on its own and proxies it
+	# transparently — unlike nginx, no separate websocket configuration is
+	# needed here at all.
+	handle {
+		reverse_proxy streamlit:8501 {
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up Host {host}
+		}
+	}
+}

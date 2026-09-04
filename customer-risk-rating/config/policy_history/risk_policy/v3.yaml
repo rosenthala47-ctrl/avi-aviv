@@ -1,0 +1,132 @@
+# Risk policy — the no-code control surface for the risk manager.
+#
+# Requirement 4c of the brief: a risk manager must be able to retune the system
+# without a code change or a redeploy. Everything a non-engineer is allowed to
+# change lives in this file. The scoring engine reads it at request time (with a
+# short Redis-backed cache), so an edit takes effect on the next score.
+#
+# What is deliberately NOT here: model coefficients. Those come from training and
+# are versioned with the model artefact. Letting a human hand-edit them would
+# break every calibration and fairness guarantee we can otherwise make.
+
+version: 3
+effective_from: 2026-08-28
+
+# --------------------------------------------------------------------------
+# Band thresholds on the 0-100 risk score
+# --------------------------------------------------------------------------
+bands:
+  Low:     {max_score: 25}
+  Medium:  {max_score: 50}
+  High:    {max_score: 75}
+  Extreme: {max_score: 100}
+
+# --------------------------------------------------------------------------
+# Blend of the two model dimensions into the published score
+# --------------------------------------------------------------------------
+composite:
+  credit_weight: 0.60
+  financial_crime_weight: 0.40
+  score_exponent: 0.45   # spreads a low-base-rate probability across 0-100
+
+# --------------------------------------------------------------------------
+# Rule engine — deterministic overrides applied AFTER the model score.
+#
+# Rules can only ever move a customer to a HIGHER risk band (`floor_band`) or
+# force a review. A rule that lowers risk would let a policy edit quietly disable
+# a control, so the engine rejects those at load time.
+# --------------------------------------------------------------------------
+rules:
+  # customer_visible defaults to true (see crr.policy.Rule) and is set to
+  # false below on the three rules whose reason would tip off the subject of
+  # a compliance concern if shown in a customer-facing explanation — the same
+  # rationale crr/explain/reason_codes.py applies to PEP/SAR/sanctions codes.
+  # The rule still fires, floors the band and forces review for every
+  # audience; only whether it is NAMED in a customer response is affected.
+  - id: SANCTIONS_MATCH
+    description: Any unresolved sanctions-list match is Extreme, regardless of model output.
+    when: "sanctions_screen_hits > 0"
+    action: {floor_band: Extreme, require_review: true, reason_code: AML-001, customer_visible: false}
+    enabled: true
+
+  - id: PEP_HIGH_RISK_JURISDICTION
+    description: A politically exposed person operating from a high-risk jurisdiction.
+    when: "pep_flag == 1 and high_risk_jurisdiction_exposure == 1"
+    action: {floor_band: High, require_review: true, reason_code: AML-002, customer_visible: false}
+    enabled: true
+
+  - id: UNVERIFIED_SOURCE_OF_FUNDS
+    description: Source of funds requiring EDD that remains unevidenced.
+    when: "source_of_funds_declared in ['undeclared','gift','crypto_disposal'] and source_of_funds_verified == 0"
+    action: {floor_band: High, require_review: true, reason_code: AML-003, customer_visible: false}
+    enabled: true
+
+  - id: KYC_REFRESH_OVERDUE
+    description: Periodic KYC review materially overdue.
+    when: "kyc_refresh_overdue_days > 180"
+    action: {floor_band: Medium, require_review: true, reason_code: KYC-001}
+    enabled: true
+
+  - id: SEVERE_ARREARS
+    description: Currently 90+ days past due.
+    when: "max_days_past_due_24m >= 90 and months_since_last_delinquency <= 3"
+    action: {floor_band: High, require_review: false, reason_code: CR-001}
+    enabled: true
+
+  - id: THIN_FILE_HIGH_EXPOSURE
+    description: New relationship drawing most of a large limit.
+    when: "account_age_months < 6 and credit_utilization_ratio > 0.8"
+    action: {floor_band: Medium, require_review: false, reason_code: CR-002}
+    enabled: true
+
+# --------------------------------------------------------------------------
+# Band-level review threshold
+#
+# A separate, simpler lever from the rules above: these bands always require
+# human review on the MODEL SCORE ALONE, with no individual rule needing to
+# fire. It is a policy-level threshold rather than a rule because it compares
+# the computed band, which only exists after scoring — a `when` expression
+# only ever sees the raw customer record. Editing this list is exactly the
+# kind of change requirement 4c asks for: a risk manager raises or lowers the
+# review bar with a one-line YAML edit, no code, no deploy.
+# --------------------------------------------------------------------------
+review:
+  require_for_bands: [High, Extreme]
+
+# --------------------------------------------------------------------------
+# Real-time re-scoring triggers (requirement 4a)
+# --------------------------------------------------------------------------
+rescoring:
+  triggers:
+    - {event_type: missed_payment,   debounce_minutes: 0}
+    - {event_type: overdraft_breach, debounce_minutes: 60}
+    - {event_type: chargeback,       debounce_minutes: 60}
+    - {event_type: cash_deposit,     min_amount: 50000, debounce_minutes: 15}
+    - {event_type: wire_transfer_out, min_amount: 100000, debounce_minutes: 15}
+    - {event_type: crypto_transfer,  min_amount: 25000, debounce_minutes: 15}
+  # Re-score anyway if the score is older than this, whatever the events say.
+  max_score_age_days: 90
+  # Notify downstream systems only when the band actually moves.
+  notify_on_band_change_only: true
+
+# --------------------------------------------------------------------------
+# Explainability (requirement 1c)
+# --------------------------------------------------------------------------
+explainability:
+  top_factors: 5
+  min_absolute_shap: 0.01
+  # Features never shown to a customer-facing user, even when influential.
+  suppress_from_customer_view: [pep_flag, sar_filed_prior, adverse_media_hits_12m, sanctions_screen_hits,
+                                 text_concealment_level, text_concealment_confidence,
+                                 pass_through_velocity_hours]
+
+# --------------------------------------------------------------------------
+# Feedback loop (requirement 4b)
+# --------------------------------------------------------------------------
+feedback:
+  min_labelled_cases_before_retrain: 500
+  retrain_schedule: monthly
+  # A retrained model is promoted only if it beats the incumbent on the
+  # out-of-time split by at least this much AUC, and fails no fairness check.
+  promotion_min_auc_gain: 0.005
+  require_human_approval: true
