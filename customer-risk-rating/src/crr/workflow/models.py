@@ -215,6 +215,30 @@ class WatchlistDisposition(Base):
     __table_args__ = (UniqueConstraint("customer_id", "hit_id", name="uq_wf_disposition_hit"),)
 
 
+class FiledReport(Base):
+    """A suspicious transaction/activity report filed against a case (see
+    :mod:`crr.reporting` for how it is assembled and serialized). ``id`` is
+    the report's own ``entity_reference`` — already a globally unique,
+    human-meaningful string (``CRR-<customer_id>-<timestamp>``), so no
+    separate surrogate key is needed. ``xml_content`` is the exact goAML-
+    style XML this report was filed with, snapshotted at filing time: a
+    later change to the serializer must never change what an already-filed
+    report is recorded as having said, the same reasoning that keeps
+    ``wf_cases.result`` a snapshot rather than a recomputed value."""
+
+    __tablename__ = "wf_filed_reports"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    customer_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    report_code: Mapped[str] = mapped_column(String(16), nullable=False, default="STR")
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    indicators: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    xml_content: Mapped[str] = mapped_column(Text, nullable=False)
+    filed_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    filed_by_role: Mapped[str] = mapped_column(String(32), nullable=False)
+    filed_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow, index=True)
+
+
 # --------------------------------------------------------------------------
 # Immutable audit log
 # --------------------------------------------------------------------------

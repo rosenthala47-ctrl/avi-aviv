@@ -29,6 +29,7 @@ from crr.workflow.models import (
     AuditEntry,
     Case,
     CustomRule,
+    FiledReport,
     TimelineEvent,
     User,
     UserSession,
@@ -433,6 +434,30 @@ class WorkflowStore:
             ))
             s.commit()
 
+    # ---- filed reports (suspicious transaction/activity reports) --------
+
+    def create_report(self, report_id: str, customer_id: str, *, report_code: str, reason: str,
+                      indicators: list[str], xml_content: str, filed_by: str, filed_by_role: str) -> None:
+        with self._sf() as s:
+            s.add(FiledReport(
+                id=report_id, customer_id=customer_id, report_code=report_code, reason=reason,
+                indicators=list(indicators), xml_content=xml_content, filed_by=filed_by,
+                filed_by_role=filed_by_role, filed_at=_utcnow(),
+            ))
+            s.commit()
+
+    def list_reports(self, customer_id: str | None = None) -> list[dict[str, Any]]:
+        with self._sf() as s:
+            stmt = select(FiledReport).order_by(FiledReport.filed_at.desc())
+            if customer_id is not None:
+                stmt = stmt.where(FiledReport.customer_id == customer_id)
+            return [_report_dict(r) for r in s.scalars(stmt).all()]
+
+    def get_report(self, report_id: str) -> dict[str, Any] | None:
+        with self._sf() as s:
+            row = s.get(FiledReport, report_id)
+            return _report_dict(row) if row is not None else None
+
     # ---- audit log (append-only, hash-chained) ---------------------------
 
     def append_audit(self, action: str, actor: str, role: str, customer_id: str | None = None,
@@ -501,6 +526,20 @@ def _watchlist_entry_dict(row: WatchlistEntry) -> dict[str, Any]:
         "list_source": row.source,
         "category": row.category,
         "reason": row.remarks or row.program or f"Listed on the {row.source.upper()} sanctions list.",
+    }
+
+
+def _report_dict(row: FiledReport) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "customer_id": row.customer_id,
+        "report_code": row.report_code,
+        "reason": row.reason,
+        "indicators": row.indicators or [],
+        "xml_content": row.xml_content,
+        "filed_by": row.filed_by,
+        "filed_by_role": row.filed_by_role,
+        "filed_at": row.filed_at,
     }
 
 

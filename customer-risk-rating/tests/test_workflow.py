@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+from crr.reporting import build_report_from_case, to_xml
 from crr.screening.models import WatchlistRecord
 from crr.workflow import WorkflowStore, create_session_factory
 from crr.workflow.auth import (
@@ -327,6 +328,81 @@ def test_watchlist_source_status_omits_sources_with_no_rows(store):
     ])
     sources_present = {row["source"] for row in store.watchlist_source_status()}
     assert sources_present == {"un"}
+
+
+# --------------------------------------------------------------------------
+# Filed reports (suspicious transaction/activity reports — crr.reporting)
+# --------------------------------------------------------------------------
+
+
+def test_create_and_get_report_round_trips(store, db_url):
+    store.upsert_case("CUS-5", {}, {}, {"risk_score": 90, "risk_band": "Extreme"}, actor="officer")
+    store.create_report(
+        "CRR-CUS-5-1", "CUS-5", report_code="STR", reason="unusual cash activity",
+        indicators=["STRUCTURING", "ADVERSE_MEDIA"], xml_content="<report/>",
+        filed_by="Noa", filed_by_role="compliance_admin",
+    )
+    got = reopen(db_url).get_report("CRR-CUS-5-1")
+    assert got["customer_id"] == "CUS-5"
+    assert got["report_code"] == "STR"
+    assert got["reason"] == "unusual cash activity"
+    assert got["indicators"] == ["STRUCTURING", "ADVERSE_MEDIA"]
+    assert got["xml_content"] == "<report/>"
+    assert got["filed_by"] == "Noa"
+    assert got["filed_by_role"] == "compliance_admin"
+    assert got["filed_at"] is not None
+
+
+def test_get_report_returns_none_for_an_unknown_id(store):
+    assert store.get_report("does-not-exist") is None
+
+
+def test_list_reports_filters_by_customer(store):
+    store.create_report("R1", "CUS-A", report_code="STR", reason="r", indicators=[], xml_content="<x/>",
+                        filed_by="A", filed_by_role="compliance_admin")
+    store.create_report("R2", "CUS-B", report_code="SAR", reason="r", indicators=[], xml_content="<x/>",
+                        filed_by="A", filed_by_role="compliance_admin")
+    assert [r["id"] for r in store.list_reports("CUS-A")] == ["R1"]
+    assert [r["id"] for r in store.list_reports("CUS-B")] == ["R2"]
+    assert {r["id"] for r in store.list_reports()} == {"R1", "R2"}
+
+
+def test_list_reports_newest_first(store):
+    store.create_report("R1", "CUS-A", report_code="STR", reason="r", indicators=[], xml_content="<x/>",
+                        filed_by="A", filed_by_role="compliance_admin")
+    store.create_report("R2", "CUS-A", report_code="STR", reason="r", indicators=[], xml_content="<x/>",
+                        filed_by="A", filed_by_role="compliance_admin")
+    ids = [r["id"] for r in store.list_reports("CUS-A")]
+    assert ids == ["R2", "R1"]
+
+
+def test_list_reports_for_a_customer_with_none_filed_is_empty(store):
+    assert store.list_reports("CUS-NOTHING-FILED") == []
+
+
+def test_filing_a_report_end_to_end_through_the_real_builder_and_serializer(store):
+    """The same path app.py's render_report_filing_panel takes: build a
+    SarReport from a case dict, serialize it, persist it — proving the
+    store, builder and serializer actually fit together, not just each in
+    isolation."""
+    entry = {
+        "customer_id": "CUS-9",
+        "profile": {"full_name": "Mikhail Aslanov", "date_of_birth": "1975-11-02", "country_of_residence": "CY"},
+        "timeline": [{"kind": "event", "at": dt.datetime(2026, 1, 1), "event_type": "wire_transfer_out",
+                      "amount": 5000, "reason": "trigger", "rescored": True, "band_changed": True}],
+    }
+    hits = [{"name": "Mikhail Aslanov", "list_source": "ofac", "match_score": 95.0, "reason": "SDN"}]
+    report = build_report_from_case(entry, reason="Screening hit under review.", indicators=["SANCTIONS_OR_PEP_MATCH"],
+                                    officer_name="Noa", officer_role="compliance_admin", watchlist_hits=hits)
+    xml_content = to_xml(report)
+    store.create_report(report.report_ref, entry["customer_id"], report_code=report.report_code,
+                        reason=report.reason, indicators=list(report.indicators), xml_content=xml_content,
+                        filed_by="Noa", filed_by_role="compliance_admin")
+
+    stored = store.get_report(report.report_ref)
+    assert stored["xml_content"] == xml_content
+    assert "Mikhail Aslanov" in stored["xml_content"]
+    assert "<report_code>STR</report_code>" in stored["xml_content"]
 
 
 # --------------------------------------------------------------------------

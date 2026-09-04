@@ -786,3 +786,43 @@ list's size (tens of thousands for OFAC, low thousands for the UN) as the
 first thing to verify after wiring this in for real — a field renamed or
 restructured upstream would make the parser quietly return 0 rows rather
 than raise (see `crr/screening/parsers.py`'s module docstring).
+
+### Suspicious activity reporting (goAML-style STR/SAR)
+
+Screening a customer and deciding a case are not the end of the compliance
+workflow — a genuine hit has to become a filing to the jurisdiction's
+Financial Intelligence Unit (FIU). Customer 360's **Suspicious Activity
+Reports** panel (Compliance Officer / Admin role — the same `file_report`
+capability gate as `manage_rules`) assembles a case's evidence — the
+customer's identity fields, watchlist screening hits, and the event
+timeline's transactions — into a goAML-style XML report, ready to hand to
+compliance/legal for review before a real submission. See `crr.reporting`:
+`models.py` for the report shape, `builder.py` for "assemble a report from
+an existing case" (`build_report_from_case`), `goaml_xml.py` for the
+serializer. Every filing is persisted (`wf_filed_reports`), downloadable as
+XML from the panel, and logged to both the case timeline and the audit
+trail — nothing about a filing is ever silent.
+
+**goAML** is the IBM-built AML case/reporting platform UNODC provides to
+national FIUs — Israel's Money Laundering and Terror Financing Prohibition
+Authority (IMPA) included — for suspicious transaction/activity report
+intake. The app **never transmits a report anywhere on its own** — filing
+here means producing a correctly-assembled XML file a human downloads and
+hands to compliance/legal, not a live submission to any FIU.
+
+**Honest disclosure, matching the sanctions-screening disclosure above**:
+`crr/reporting/goaml_xml.py` was written from documented goAML XML schema
+knowledge (`report_code`, `submission_code`, `entity_reference`,
+`reporting_person`, `reason`, `report_indicators`, `transactions`,
+`persons`) — not validated against a live, current XSD, since this
+environment has no outbound network access to any FIU's portal. Every FIU
+running goAML, IMPA included, layers its own customized field set and
+indicator-code table on top of the base platform, and that customization is
+exactly the part no amount of general schema knowledge substitutes for.
+Treat the generated file as a **filing-ready draft that correctly assembles
+the case evidence into the right shape**, not as a submission guaranteed to
+validate against IMPA's (or any specific FIU's) importer unmodified — the
+missing step before a real filing is checking one generated report against
+IMPA's current reporting guide, the same "verify against the real thing"
+step the watchlist-refresh section above already asks for. The same
+disclosure text appears in the app itself, right above the filing form.

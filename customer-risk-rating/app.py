@@ -52,7 +52,8 @@ _SRC = Path(__file__).resolve().parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from crr.screening import screen as screen_watchlist  # noqa: E402  (path setup must run first)
+from crr.reporting import INDICATOR_CODES, build_report_from_case, to_xml  # noqa: E402  (path setup must run first)
+from crr.screening import screen as screen_watchlist  # noqa: E402
 from crr.workflow import (  # noqa: E402
     AUTH_HEADER_NAME,
     DEMO_USERS,
@@ -184,7 +185,8 @@ SLA_HOURS = {"Extreme": 4, "High": 24, "Medium": 72, "Low": 168}
 # --------------------------------------------------------------------------
 ROLE_KEYS = ("junior_analyst", "risk_manager", "compliance_admin")
 ROLE_RANK = {"junior_analyst": 0, "risk_manager": 1, "compliance_admin": 2}
-_CAPABILITY_MIN_ROLE = {"decide_case": "risk_manager", "manage_rules": "compliance_admin"}
+_CAPABILITY_MIN_ROLE = {"decide_case": "risk_manager", "manage_rules": "compliance_admin",
+                        "file_report": "compliance_admin"}
 
 
 def has_permission(capability: str) -> bool:
@@ -554,6 +556,7 @@ I18N: dict[str, dict[str, str]] = {
         "timeline.event_band_changed": "  ·  <b>band changed</b>",
         "timeline.decision": "<b>{label}</b> by {actor} — &ldquo;{note}&rdquo;",
         "timeline.note": "<b>Note</b> by {actor} — &ldquo;{note}&rdquo;",
+        "timeline.report_filed": "<b>{code} filed</b> ({id}) by {actor}",
 
         "queue.title": "Risk Operations Queue",
         "queue.caption": "Every customer scored in this session, highest risk first. Score, band and "
@@ -624,6 +627,8 @@ I18N: dict[str, dict[str, str]] = {
                                          "Manager or Compliance Officer / Admin is required.",
         "permission.manage_rules_denied": "Your role ({role}) can view rules but not create, edit or delete "
                                           "them — Compliance Officer / Admin is required.",
+        "permission.file_report_denied": "Your role ({role}) can view filed reports but not file a new one "
+                                         "— Compliance Officer / Admin is required.",
 
         "explain.caption": "The stored explanation for this customer's most recent score — read back from "
                            "the API rather than recomputed, so this is provably the same event as the "
@@ -899,6 +904,7 @@ I18N: dict[str, dict[str, str]] = {
         "auditlog.action_login": "Signed in",
         "auditlog.action_logout": "Signed out",
         "auditlog.action_user_created": "User created",
+        "auditlog.action_report_filed": "Report filed",
         "auditlog.detail_decision": "{label} — “{note}”",
         "auditlog.detail_note": "“{note}”",
         "auditlog.detail_rule_created": "{name}: {conditions} → {action}",
@@ -938,6 +944,37 @@ I18N: dict[str, dict[str, str]] = {
         "watchlist.category_pep": "PEP",
         "watchlist.category_adverse_media": "Adverse Media",
         "watchlist.category_none": "None",
+
+        "report.panel_header": "Suspicious Activity Reports",
+        "report.panel_caption": "Assembles this case's evidence — profile, watchlist hits, event timeline — "
+                                "into a goAML-style STR/SAR XML filing, ready to hand to compliance/legal for "
+                                "review before real submission. Not a live submission to any FIU: this app "
+                                "never transmits a report anywhere on its own.",
+        "report.disclosure": "⚠️ Modeled on the documented goAML XML schema, not validated against a live, "
+                             "current FIU XSD (this environment has no outbound network access to any FIU's "
+                             "portal). Every FIU — including Israel's IMPA — customizes its own field set and "
+                             "indicator codes on top of the base platform. Treat the generated file as a "
+                             "filing-ready **draft** that correctly assembles the evidence, not as a "
+                             "submission guaranteed to validate against a specific FIU's importer unmodified.",
+        "report.none_filed": "No reports filed for this customer yet.",
+        "report.history_header": "Filing history",
+        "report.filed_line": "**{code}** {id} — filed by {actor} ({role}) on {date}",
+        "report.download": "⬇️ Download XML",
+        "report.file_new_header": "File a new report",
+        "report.type_label": "Report type",
+        "report.type_str": "STR — Suspicious Transaction Report",
+        "report.type_sar": "SAR — Suspicious Activity Report",
+        "report.reason_label": "Reason for suspicion (required)",
+        "report.reason_placeholder": "Explain, in your own words, why this case is being reported — this "
+                                     "becomes the filing's narrative, with watchlist evidence appended "
+                                     "automatically.",
+        "report.indicators_label": "Typology indicators",
+        "report.transactions_note": "{n} transaction(s) from this case's event timeline will be attached "
+                                    "automatically as supporting evidence.",
+        "report.submit": "File report",
+        "report.reason_required": "A reason for suspicion is required before filing.",
+        "report.filed_success": "Report {id} filed and logged to the audit trail.",
+        "auditlog.detail_report_filed": "{code} {id} — {n} indicator(s)",
     },
     "he": {
         "sidebar.title": "דירוג סיכון לקוחות",
@@ -1063,6 +1100,7 @@ I18N: dict[str, dict[str, str]] = {
         "timeline.event_band_changed": "  ·  <b>הרמה השתנתה</b>",
         "timeline.decision": "<b>{label}</b> על ידי {actor} — &ldquo;{note}&rdquo;",
         "timeline.note": "<b>הערה</b> מאת {actor} — &ldquo;{note}&rdquo;",
+        "timeline.report_filed": "<b>{code} הוגש</b> ({id}) על ידי {actor}",
 
         "queue.title": "תור פעולות סיכון",
         "queue.caption": "כל לקוח שנוקד בסשן זה, מהסיכון הגבוה ביותר תחילה. הציון, הרמה והגורמים מגיעים "
@@ -1131,6 +1169,8 @@ I18N: dict[str, dict[str, str]] = {
                                          "נדרש/ת מנהל/ת סיכונים או קצין/ת ציות / מנהל/ת מערכת.",
         "permission.manage_rules_denied": "התפקיד שלך ({role}) יכול לצפות בכללים אך לא ליצור, לערוך או "
                                           "למחוק אותם — נדרש/ת קצין/ת ציות / מנהל/ת מערכת.",
+        "permission.file_report_denied": "התפקיד שלך ({role}) יכול לצפות בדיווחים שהוגשו אך לא להגיש דיווח "
+                                         "חדש — נדרש/ת קצין/ת ציות / מנהל/ת מערכת.",
 
         "explain.caption": "ההסבר השמור לציון האחרון של לקוח זה — נקרא בחזרה מה-API ולא חושב מחדש, כך "
                            "שזהו באופן מוכח אותו אירוע כמו הציון למעלה.",
@@ -1393,6 +1433,7 @@ I18N: dict[str, dict[str, str]] = {
         "auditlog.action_login": "התחברות",
         "auditlog.action_logout": "התנתקות",
         "auditlog.action_user_created": "משתמש נוצר",
+        "auditlog.action_report_filed": "דיווח הוגש",
         "auditlog.detail_decision": "{label} — “{note}”",
         "auditlog.detail_note": "“{note}”",
         "auditlog.detail_rule_created": "{name}: {conditions} → {action}",
@@ -1431,6 +1472,35 @@ I18N: dict[str, dict[str, str]] = {
         "watchlist.category_pep": "PEP",
         "watchlist.category_adverse_media": "תקשורת שלילית",
         "watchlist.category_none": "ללא",
+
+        "report.panel_header": "דיווחים על פעילות חשודה",
+        "report.panel_caption": "מרכיב את ראיות התיק — פרופיל, פגיעות רשימת מעקב, ציר זמן אירועים — לכדי "
+                                "דיווח STR/SAR בסגנון goAML, מוכן למסירה לצוות ציות/משפטי לבדיקה לפני הגשה "
+                                "אמיתית. אין כאן הגשה חיה לאף רשות: האפליקציה אינה מעבירה דיווח לשום מקום "
+                                "בעצמה.",
+        "report.disclosure": "⚠️ מבוסס על סכמת ה-XML המתועדת של goAML, לא אומת מול XSD חי ועדכני של רשות "
+                             "כלשהי (לסביבה זו אין גישת רשת יוצאת לפורטל של אף רשות). כל רשות — כולל הרשות "
+                             "לאיסור הלבנת הון בישראל — מתאימה אישית את שדותיה וקודי הטיפולוגיה שלה מעל "
+                             "הפלטפורמה הבסיסית. יש להתייחס לקובץ שנוצר כאל **טיוטה** מוכנה להגשה שמרכיבה "
+                             "את הראיות נכון, לא כדיווח שמובטח לעבור אימות מול מייבא של רשות ספציפית ללא "
+                             "שינוי.",
+        "report.none_filed": "טרם הוגשו דיווחים עבור לקוח זה.",
+        "report.history_header": "היסטוריית הגשות",
+        "report.filed_line": "**{code}** {id} — הוגש על ידי {actor} ({role}) בתאריך {date}",
+        "report.download": "⬇️ הורדת XML",
+        "report.file_new_header": "הגשת דיווח חדש",
+        "report.type_label": "סוג דיווח",
+        "report.type_str": "STR — דיווח על עסקה חשודה",
+        "report.type_sar": "SAR — דיווח על פעילות חשודה",
+        "report.reason_label": "סיבת החשד (חובה)",
+        "report.reason_placeholder": "הסבר/י במילים שלך מדוע התיק הזה מדווח — זה יהפוך לנרטיב הדיווח, "
+                                     "וראיות רשימת המעקב יתווספו אליו אוטומטית.",
+        "report.indicators_label": "מדדי טיפולוגיה",
+        "report.transactions_note": "{n} עסק(ות) מציר הזמן של התיק יצורפו אוטומטית כראיות תומכות.",
+        "report.submit": "הגש דיווח",
+        "report.reason_required": "נדרשת סיבת חשד לפני ההגשה.",
+        "report.filed_success": "הדיווח {id} הוגש ונרשם ביומן הביקורת.",
+        "auditlog.detail_report_filed": "{code} {id} — {n} מדד(י) טיפולוגיה",
     },
 }
 
@@ -1528,6 +1598,12 @@ VOCAB: dict[str, dict[str, str]] = {
         "atm": "כספומט", "wire": "העברה בנקאית",
     },
     "audience": {"internal": "פנימי", "customer": "לקוח"},
+    "report_indicator": {
+        "STRUCTURING": "פיצול עסקאות (Structuring)", "UNUSUAL_CASH_ACTIVITY": "פעילות מזומן חריגה",
+        "SANCTIONS_OR_PEP_MATCH": "התאמת סנקציות / PEP", "ADVERSE_MEDIA": "תקשורת שלילית",
+        "OPAQUE_OWNERSHIP": "מבנה בעלות לא שקוף", "HIGH_RISK_JURISDICTION": "מדינה בסיכון גבוה",
+        "RAPID_MOVEMENT_OF_FUNDS": "תנועת כספים מהירה", "INCONSISTENT_WITH_PROFILE": "אינה תואמת לפרופיל הלקוח",
+    },
 }
 
 _HUMANIZE_OVERRIDES = {"sme": "SME", "pep": "PEP", "kyc": "KYC", "edd": "EDD",
@@ -2160,6 +2236,10 @@ def render_timeline(entries: list[dict[str, Any]]) -> None:
         elif kind == "note":
             icon = "🗒️"
             text = t("timeline.note", actor=html.escape(item["actor"]), note=html.escape(item["note"]))
+        elif kind == "report_filed":
+            icon = "📄"
+            text = t("timeline.report_filed", code=item["report_code"], id=item["report_id"],
+                      actor=html.escape(item["actor"]))
         else:
             icon = _DECISION_ICON.get(item["action"], "📌")
             text = t("timeline.decision", label=status_label(item["action"]), actor=html.escape(item["actor"]),
@@ -2573,6 +2653,8 @@ def audit_detail_text(entry: dict[str, Any]) -> str:
                   label=label, note=d["note"])
     if action == "user_created":
         return t("auditlog.detail_user_created", username=d["username"], role=role_label(d["role"]))
+    if action == "report_filed":
+        return t("auditlog.detail_report_filed", code=d["report_code"], id=d["report_id"], n=d["n_indicators"])
     return ""
 
 
@@ -2663,6 +2745,81 @@ def render_watchlist_panel(entry: dict[str, Any]) -> None:
                 log_audit("case_decision", customer_id=cid, decision="escalated_aml", note=escalation_note)
             flash_success(f"watchlist_{cid}", t("watchlist.disposition_recorded"))
             st.rerun()
+
+
+# --------------------------------------------------------------------------
+# Suspicious activity reporting (goAML-style STR/SAR) — crr.reporting builds
+# and serializes the report; this section is the file/download/history UI on
+# top of it, following the same shape as the watchlist panel above: a fresh
+# screen_customer() call for supporting evidence, a form gated by a
+# capability check, and every write logged to both the timeline and the
+# audit trail.
+# --------------------------------------------------------------------------
+
+
+def render_report_filing_panel(entry: dict[str, Any]) -> None:
+    cid = entry["customer_id"]
+    show_flash(f"report_{cid}")
+    store = get_store()
+
+    reports = store.list_reports(cid)
+    if reports:
+        for r in reports:
+            filed_at = _parse_dt(r["filed_at"]).strftime("%Y-%m-%d %H:%M UTC")
+            st.markdown(t("report.filed_line", code=r["report_code"], id=r["id"],
+                          actor=html.escape(r["filed_by"]), role=role_label(r["filed_by_role"]), date=filed_at))
+            st.download_button(t("report.download"), data=r["xml_content"], file_name=f"{r['id']}.xml",
+                               mime="application/xml", key=f"dl_{r['id']}", use_container_width=False)
+    else:
+        st.caption(t("report.none_filed"))
+
+    can_file = has_permission("file_report")
+    file_help = None if can_file else t("permission.file_report_denied", role=role_label(current_role()))
+
+    with st.expander(t("report.file_new_header")):
+        st.caption(t("report.disclosure"))
+        n_txns = sum(1 for e in entry.get("timeline", []) if e.get("kind") == "event")
+        if n_txns:
+            st.caption(t("report.transactions_note", n=n_txns))
+        with st.form(f"file_report_{cid}"):
+            report_code = st.selectbox(t("report.type_label"), ["STR", "SAR"],
+                                       format_func=lambda c: t(f"report.type_{c.lower()}"),
+                                       key=f"report_code_{cid}")
+            reason = st.text_area(t("report.reason_label"), placeholder=t("report.reason_placeholder"),
+                                  height=100, key=f"report_reason_{cid}")
+            indicators = st.multiselect(t("report.indicators_label"), INDICATOR_CODES,
+                                        format_func=lambda code: vocab_label("report_indicator", code),
+                                        key=f"report_indicators_{cid}")
+            submitted = st.form_submit_button(t("report.submit"), disabled=not can_file, help=file_help)
+
+        if not submitted:
+            return
+        if not can_file:
+            st.error(file_help)
+            return
+        if not reason.strip():
+            st.error(t("report.reason_required"))
+            return
+
+        profile = entry["profile"]
+        hits = screen_customer(profile.get("full_name"), profile.get("date_of_birth"),
+                                profile.get("country_of_residence"))
+        actor, role = current_actor(), current_role()
+        report = build_report_from_case(
+            entry, reason=reason.strip(), indicators=indicators, officer_name=actor, officer_role=role,
+            watchlist_hits=hits, report_code=report_code,
+        )
+        xml_content = to_xml(report)
+        store.create_report(
+            report.report_ref, cid, report_code=report_code, reason=reason.strip(), indicators=indicators,
+            xml_content=xml_content, filed_by=actor, filed_by_role=role,
+        )
+        store.add_timeline(cid, "report_filed", actor, report_id=report.report_ref,
+                           report_code=report_code, n_indicators=len(indicators))
+        log_audit("report_filed", customer_id=cid, report_id=report.report_ref, report_code=report_code,
+                  n_indicators=len(indicators))
+        flash_success(f"report_{cid}", t("report.filed_success", id=report.report_ref))
+        st.rerun()
 
 
 # --------------------------------------------------------------------------
@@ -2926,6 +3083,10 @@ def page_customer360() -> None:
     st.markdown(f"##### {t('watchlist.panel_header')}")
     st.caption(t("watchlist.panel_caption"))
     render_watchlist_panel(entry)
+
+    st.markdown(f"##### {t('report.panel_header')}")
+    st.caption(t("report.panel_caption"))
+    render_report_filing_panel(entry)
 
     st.divider()
     left, right = st.columns([3, 2], gap="large")
