@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "157";
+  const APP_VERSION = "158";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1127,6 +1127,9 @@
   function subStatus() {
     const cfg = UG_CONFIG.subscription || {};
     if (!cfg.enabled) return { state: "off" };
+    // try היא מספרת הבדיקות שלך, לא לקוח — אף פעם לא ננעלת. בלי זה, כשהניסיון
+    // שלה נגמר, אתה ננעל בדיוק מהמסך שדרכו פותחים את פאנל ניהול המנויים.
+    if (SHOP === "try") return { state: "grandfathered" };
     const st = Store.get();
     if (!st || !st.shop) return { state: "off" };
     const now = Date.now();
