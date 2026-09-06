@@ -1,0 +1,8 @@
+{
+  "name": "ori-grushko-push-sender",
+  "description": "Sends FCM push notifications from GitHub Actions (no billing required)",
+  "private": true,
+  "dependencies": {
+    "firebase-admin": "^12.6.0"
+  }
+}
