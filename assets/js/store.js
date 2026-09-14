@@ -42,7 +42,10 @@ UG.Store = (function () {
       let active = true, open = "09:00", close = "19:00";
       if (i === 5) { close = "14:00"; }          // שישי — עד הצהריים
       if (i === 6) { active = false; }            // שבת — סגור
-      schedule[i] = { active, open, close };
+      // variable: "אין לי שעות קבועות ביום הזה" — שונה מ"סגור": מוצג ללקוח
+      // כ"משתנה" (לא כסגור), וההזמנה ביום זה מתבססת רק על שעות שנפתחו ידנית
+      // ביומן (בדיוק כמו active:false, רק עם תיוג/תצוגה שונים).
+      schedule[i] = { active, open, close, variable: false };
     }
     return {
       version: 1,
@@ -748,6 +751,18 @@ UG.Store = (function () {
           icon: x.icon || "✂️", active: true,
         }));
     }
+    // שעות פעילות שנקבעו בשאלון (אם יש) — לכל יום: active/open/close/variable
+    if (data && Array.isArray(data.schedule) && data.schedule.length === 7) {
+      data.schedule.forEach((d, i) => {
+        if (!d) return;
+        s.schedule[i] = {
+          active: !!d.active,
+          open: d.open || s.schedule[i].open,
+          close: d.close || s.schedule[i].close,
+          variable: !!d.variable,
+        };
+      });
+    }
     await b.write(s);
     // לוגו למספרה חדשה — נכתב לצומת המדיה הנפרד (לא לתוך המספרה)
     if (data && data.logo && b.saveMedia) { try { await b.saveMedia({ logo: data.logo }); } catch (e) {} }
@@ -827,6 +842,19 @@ UG.Store = (function () {
   /* ---------- מוטציות (בעלים) ---------- */
   function setDay(day, patch) {
     Object.assign(state.schedule[day], patch);
+    return persist();
+  }
+  /* מסמן/מבטל "משתנה" לכל השבוע בבת אחת (במקום שבעה עדכונים נפרדים).
+     הפעלה: כל הימים ללא שעות קבועות — ההזמנה תתבסס רק על שעות שנפתחו ידנית
+     ביומן. ביטול: חזרה לשעות ברירת המחדל הרגילות (לא לשעות הקודמות — אין להן
+     זיכרון). */
+  function setWeekVariable(on) {
+    if (on) {
+      for (let i = 0; i < 7; i++) Object.assign(state.schedule[i], { active: false, variable: true });
+    } else {
+      const def = defaultState().schedule;
+      for (let i = 0; i < 7; i++) Object.assign(state.schedule[i], def[i]);
+    }
     return persist();
   }
   function saveShop(patch) { Object.assign(state.shop, patch); return persist(); }
@@ -1325,7 +1353,7 @@ UG.Store = (function () {
 
   return {
     init, subscribe, get,
-    setDay, saveShop, upsertService, removeService, upsertProduct, removeProduct,
+    setDay, setWeekVariable, saveShop, upsertService, removeService, upsertProduct, removeProduct,
     addContacts, removeContact, addBroadcast, addClosedDates, removeClosedDate,
     setSlotOpen, blockClient, unblockClient,
     createBooking, setBookingStatus, deleteBooking,

@@ -149,6 +149,18 @@
 .staff-opt .stm-name { font-weight: 700; font-size: 14.5px; }
 .staff-opt .so-check { position: absolute; top: 8px; inset-inline-end: 10px; font-size: 16px; color: var(--sky); opacity: 0; }
 .staff-opt.selected .so-check { opacity: 1; }
+
+/* בורר "שעות קבועות / משתנה / סגור" ליום בודד (הגדרות שעות + שאלון) */
+.daymode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+.daymode-opt {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 13px 6px; border-radius: 14px; background: var(--surface-2);
+  border: 1.5px solid var(--line); font: inherit; color: inherit; cursor: pointer;
+}
+.daymode-opt.selected { border-color: var(--sky); box-shadow: 0 0 0 3px var(--sky-glow); }
+.daymode-opt:active { transform: scale(.97); }
+.daymode-opt .dmo-ico { font-size: 21px; }
+.daymode-opt .dmo-name { font-weight: 700; font-size: 12px; text-align: center; }
 .wiz-staff-row { display: flex; gap: 8px; align-items: center; margin-bottom: 9px; }
 .wiz-staff-row .input { height: 48px; font-size: 15px; text-align: start; flex: 1; }
 .wiz-staff-row .sv-del {

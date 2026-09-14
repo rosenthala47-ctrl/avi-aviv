@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "158";
+  const APP_VERSION = "159";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1623,11 +1623,15 @@
     const dayChips = days.map((k) => {
       const d = u.parseKey(k);
       const vac = closed.has(k);
-      const off = !hasHours(k) || vac;
+      const noHours = !hasHours(k);
+      const off = noHours || vac;
+      // יום "משתנה" שעדיין לא נפתחו לו שעות השבוע — מוצג כ"משתנה", לא כ"סגור"
+      const dowLabel = vac ? "חופשה" : !noHours ? u.DOW_SHORT[d.getDay()]
+        : st.schedule[d.getDay()].variable ? "משתנה" : "סגור";
       return `
       <button class="day-chip ${view.selDate === k ? "selected" : ""} ${off ? "off" : ""}"
               data-day="${k}" ${off ? "disabled" : ""}>
-        <div class="dc-dow">${vac ? "חופשה" : off ? "סגור" : u.DOW_SHORT[d.getDay()]}</div>
+        <div class="dc-dow">${dowLabel}</div>
         <div class="dc-num">${d.getDate()}</div>
         <div class="dc-mon">${u.MON[d.getMonth()]}</div>
       </button>`;
@@ -1936,10 +1940,11 @@
     const rows = [];
     for (let i = 0; i < 7; i++) {
       const d = st.schedule[i];
+      const timeTxt = d.active ? `${esc(d.open)}–${esc(d.close)}` : (d.variable ? "משתנה" : "סגור");
       rows.push(`
         <div class="hours-row ${i === todayDow ? "today" : ""}">
           <span class="hr-day">${u.DOW[i]}${i === todayDow ? " · היום" : ""}</span>
-          <span class="hr-time" dir="ltr">${d.active ? `${esc(d.open)}–${esc(d.close)}` : "סגור"}</span>
+          <span class="hr-time"${d.active ? ' dir="ltr"' : ""}>${timeTxt}</span>
         </div>`);
     }
     return `
@@ -2730,10 +2735,11 @@
       const d = u.parseKey(k);
       const off = !st.schedule[d.getDay()].active;
       const hasExtra = openedFor(st, k).length > 0;
+      const dowLabel = !off ? u.DOW_SHORT[d.getDay()] : (st.schedule[d.getDay()].variable ? "משתנה" : "סגור");
       return `
       <button class="day-chip ${view.oDate === k ? "selected" : ""} ${off && !hasExtra ? "off" : ""}"
               data-oday="${k}">
-        <div class="dc-dow">${off ? "סגור" : u.DOW_SHORT[d.getDay()]}${hasExtra ? " ⏰" : ""}</div>
+        <div class="dc-dow">${dowLabel}${hasExtra ? " ⏰" : ""}</div>
         <div class="dc-num">${d.getDate()}</div>
         <div class="dc-mon">${u.MON[d.getMonth()]}</div>
       </button>`;
@@ -2775,6 +2781,54 @@
       ${body}
       <p class="hint">כל שעות היממה (00:00–24:00) מוצגות כאן — אפשר לפתוח תורים גם בלילה ומוקדם בבוקר. הדליקו מתג כדי לפתוח שעה ללקוחות — <b>גם מחוץ לשעות הפעילות הרגילות</b> (מסומן ⏰). כבו מתג כדי לסמן שעה כלא-פנויה. שעה שכבר נקבעה מסומנת ״תפוס״.</p>
     `;
+  }
+
+  // ערך תצוגה קצר ליום ברשימה: טווח שעות / "משתנה" / "סגור"
+  function dayModeVal(d) { return d.active ? d.open + "–" + d.close : (d.variable ? "משתנה" : "סגור"); }
+
+  /* בורר "שעות קבועות / משתנה / סגור" ליום בודד — משותף להגדרות ולשאלון
+     פתיחת מספרה חדשה. "משתנה" קיים בשביל ספרים בלי יום עבודה קבוע: הלקוח
+     רואה "משתנה" (לא "סגור"), וההזמנה מתבססת על שעות שנפתחות ידנית ביומן. */
+  function dayModePicker(i, d, act, timeAttr) {
+    act = act || "set-day-mode";
+    timeAttr = timeAttr || "time";
+    const mode = d.active ? "fixed" : (d.variable ? "variable" : "off");
+    const modeBtn = (m, ico, name) => `
+      <button type="button" class="daymode-opt ${mode === m ? "selected" : ""}" data-act="${act}" data-day="${i}" data-mode="${m}">
+        <span class="dmo-ico">${ico}</span><span class="dmo-name">${esc(name)}</span>
+      </button>`;
+    const hint = mode === "fixed"
+      ? `שעות קבועות ליום ${esc(u.DOW[i])} — כך יופיע ללקוחות בכל שבוע.`
+      : mode === "variable"
+      ? `אין לכם שעות קבועות ביום ${esc(u.DOW[i])}? הלקוחות יראו ״משתנה״ (לא ״סגור״) — ואתם פותחים שעות ספציפיות מראש בלשונית ״יומן״, שבוע אחרי שבוע, לפי מה שמתאים לכם.`
+      : `היום סגור לגמרי — הלקוחות לא יראו אפשרות לקבוע תור ביום ${esc(u.DOW[i])}.`;
+    return `
+      <div class="daymode-grid">
+        ${modeBtn("fixed", "🕐", "קבועות")}
+        ${modeBtn("variable", "🔀", "משתנה")}
+        ${modeBtn("off", "🚫", "סגור")}
+      </div>
+      ${mode === "fixed" ? `
+      <div class="field-row" style="margin-top:14px">
+        <div class="field"><label>שעת פתיחה</label>
+          <select class="input" data-${timeAttr}="open" data-day="${i}">${timeOptions(d.open)}</select></div>
+        <div class="field"><label>שעת סגירה</label>
+          <select class="input" data-${timeAttr}="close" data-day="${i}">${timeOptions(d.close)}</select></div>
+      </div>` : ""}
+      <p class="hint" style="margin:14px 0 0">${hint}</p>`;
+  }
+
+  // תקציר קצר לשעות הפעילות (מסך הסיכום בשאלון) — עם התאמת יחיד/רבים בעברית
+  function wizScheduleSummary(schedule) {
+    const fixed = schedule.filter((x) => x.active).length;
+    const variable = schedule.filter((x) => !x.active && x.variable).length;
+    const off = 7 - fixed - variable;
+    const phrase = (n, singular, plural) => n === 1 ? "יום אחד " + singular : n + " ימים " + plural;
+    const parts = [];
+    if (fixed) parts.push(phrase(fixed, "קבוע", "קבועים"));
+    if (variable) parts.push(phrase(variable, "משתנה", "משתנים"));
+    if (off) parts.push(phrase(off, "סגור", "סגורים"));
+    return parts.join(" · ");
   }
 
   // לשונית ״שעות״ — ימי הפעילות ושעות העבודה השבועיות
@@ -2825,28 +2879,26 @@
         return subBack("חזרה לשעות") + `
           <div class="section-title">🕐 יום ${esc(u.DOW[i])}</div>
           <div class="card">
-            <label class="ab-custom" style="margin-top:0">
-              <input type="checkbox" data-active="${i}" ${d.active ? "checked" : ""}>
-              <span>פתוח ביום ${esc(u.DOW[i])}</span>
-            </label>
-            ${d.active ? `
-            <div class="field-row" style="margin-top:14px">
-              <div class="field"><label>שעת פתיחה</label>
-                <select class="input" data-time="open" data-day="${i}">${timeOptions(d.open)}</select></div>
-              <div class="field"><label>שעת סגירה</label>
-                <select class="input" data-time="close" data-day="${i}">${timeOptions(d.close)}</select></div>
-            </div>` : `<p class="hint" style="margin:14px 0 0">היום סגור. הדליקו את המתג כדי לקבוע שעות עבודה.</p>`}
-            <p class="hint" style="margin:14px 0 0">כל שינוי נשמר מיד ומתעדכן אצל הלקוחות בזמן אמת.</p>
+            ${dayModePicker(i, d)}
+            <p class="hint" style="margin:10px 0 0">כל שינוי נשמר מיד ומתעדכן אצל הלקוחות בזמן אמת.</p>
           </div>`;
       }
       view.subPage = null;
       const dayColors = ["#0ea5e9", "#22c55e", "#f59e0b", "#8b5cf6", "#ec4899", "#14b8a6", "#64748b"];
+      const allVariable = st.schedule.every((d) => d.variable && !d.active);
       return `
         <div class="section-title">🕐 ימי הפעילות</div>
+        <div class="card">
+          <label class="ab-custom" style="margin:2px 0">
+            <input type="checkbox" data-week-variable ${allVariable ? "checked" : ""}>
+            <span>🔀 כל השבוע ללא שעות קבועות (משתנה)</span>
+          </label>
+          <p class="hint" style="margin:0">מתאים אם אין לכם יום עבודה קבוע — תפתחו שעות ספציפיות כל שבוע דרך ה״יומן״, במקום להצהיר מראש על שעות.</p>
+        </div>
         <div class="card set-list">
           ${st.schedule.map((d, i) => setRow({
             nav: `data-act="sub-page" data-sub="day${i}"`, ico: "📅", color: dayColors[i],
-            label: "יום " + u.DOW[i], val: d.active ? d.open + "–" + d.close : "סגור",
+            label: "יום " + u.DOW[i], val: dayModeVal(d),
             ltr: !!d.active,   // טווח שעות נכתב משמאל לימין, אחרת העברית הופכת אותו
           })).join("")}
         </div>
@@ -4698,6 +4750,12 @@
     document.documentElement.setAttribute("data-style", ok ? id : "sky");
   }
 
+  // ברירת מחדל לשעות הפעילות בשאלון — זהה לברירת המחדל של Store.defaultState()
+  function wizDefaultSchedule() {
+    return Array.from({ length: 7 }, (_, i) => ({
+      active: i !== 6, open: "09:00", close: i === 5 ? "14:00" : "19:00", variable: false,
+    }));
+  }
   const wiz = {
     step: 0, busy: false, returnTo: 0,
     data: {
@@ -4707,6 +4765,7 @@
       about: "", instagram: "", tiktok: "", facebook: "", youtube: "", logo: "", heardFrom: "",
       privacyOk: false,
       style: "sky", pass: "", pass2: "",
+      schedule: wizDefaultSchedule(),
     },
   };
 
@@ -4722,9 +4781,9 @@
     const line1 = [d.street, d.houseNo].filter(Boolean).join(" ").trim();
     return [line1, d.city].filter(Boolean).join(", ").trim();
   }
-  const WIZ_QUESTIONS = 13;  // שלבים 1..13 (13 = מסך הסיכום)
+  const WIZ_QUESTIONS = 14;  // שלבים 1..14 (14 = מסך הסיכום)
   // שלבים שאפשר לדלג עליהם — פרטים שאפשר להשלים אחר כך מההגדרות
-  const WIZ_SKIPPABLE = [4, 7, 8, 9, 12];
+  const WIZ_SKIPPABLE = [4, 7, 8, 9, 12, 13];
 
   // רטט קצר למשוב מגע (נתמך באנדרואיד; באייפון פשוט מתעלם)
   function haptic(ms) { try { if (navigator.vibrate) navigator.vibrate(ms || 12); } catch (e) {} }
@@ -4839,13 +4898,26 @@
            </div>
            <input class="input wiz-input" id="wz-pass2" type="password" placeholder="הקלד/י שוב לאימות" value="${esc(d.pass2 || "")}" style="margin-top:10px">`);
       case 12:
-        return wizQ("💬", "מאיפה הגעת אלינו?", "שאלה אחרונה — זה עוזר לנו לדעת איפה כדאי לספר על BarberTor.",
+        return wizQ("💬", "מאיפה הגעת אלינו?", "עוד שאלה קטנה — זה עוזר לנו לדעת איפה כדאי לספר על BarberTor.",
           `<div class="src-picker">${WIZ_SOURCES.map((s) => `
              <button type="button" class="src-opt ${d.heardFrom === s.id ? "selected" : ""}" data-act="wiz-src" data-src="${s.id}">
                <span class="src-radio"></span>
                <span class="src-body"><span class="src-name">${esc(s.label)}</span>${s.sub ? `<span class="hint" style="display:block">${esc(s.sub)}</span>` : ""}</span>
              </button>`).join("")}</div>`);
       case 13: {
+        const allVar = d.schedule.every((x) => x.variable && !x.active);
+        return wizQ("🕐", "שעות הפעילות שלכם", "לכל יום: שעות קבועות, \"משתנה\" (אם אין לכם יום עבודה קבוע — תפתחו שעות כל שבוע דרך ה״יומן״), או סגור. אפשר לדלג ולהגדיר אחר כך.",
+          `<label class="ab-custom" style="margin-top:0">
+             <input type="checkbox" id="wz-week-variable" ${allVar ? "checked" : ""}>
+             <span>🔀 כל השבוע ללא שעות קבועות (משתנה)</span>
+           </label>
+           <div id="wz-schedule-days" style="margin-top:6px">
+             ${d.schedule.map((day, i) => `
+             <div class="section-title" style="margin-top:16px">${esc(u.DOW[i])}</div>
+             ${dayModePicker(i, day, "wiz-daymode", "wiztime")}`).join("")}
+           </div>`);
+      }
+      case 14: {
         const addr = wizComposeAddress(d);
         const socLabels = SOCIAL_PLATFORMS
           .map((p) => ({ p: p, h: socialHandle(d[p.key] || "", p.key) }))
@@ -4880,6 +4952,7 @@
                 ${row("📝", "תיאור", d.about, 7)}
                 ${row("🌐", "רשתות חברתיות", socLabels, 8)}
                 ${row("🎨", "עיצוב", styleName, 10)}
+                ${row("🕐", "שעות פעילות", wizScheduleSummary(d.schedule), 13)}
               </div>
               <label class="ab-custom privacy-agree">
                 <input type="checkbox" id="wz-privacy" ${d.privacyOk ? "checked" : ""}>
@@ -5094,7 +5167,8 @@
       wizGo(12); return;
     }
     if (wiz.step === 12) { wizGo(13); return; }  // מקור ההגעה — נשמר בעת הבחירה
-    if (wiz.step === 13) {                        // סיכום — אישור פרטיות ואז יצירה
+    if (wiz.step === 13) { wizGo(14); return; }  // שעות פעילות — נשמרות בעת הבחירה
+    if (wiz.step === 14) {                        // סיכום — אישור פרטיות ואז יצירה
       d.privacyOk = !!($("#wz-privacy") && $("#wz-privacy").checked);
       if (!d.privacyOk) { toast("יש לאשר את מדיניות הפרטיות כדי להמשיך", "", "🔒"); haptic(40); return; }
       wizBuild(); return;
@@ -5129,7 +5203,7 @@
       if (el) wiz.data[p.key] = socialHandle(el.value, p.key);
     });
     if (wiz.step === 11 && $("#wz-pass2")) wiz.data.pass2 = $("#wz-pass2").value.trim();
-    if (wiz.step === 13 && $("#wz-privacy")) wiz.data.privacyOk = $("#wz-privacy").checked;
+    if (wiz.step === 14 && $("#wz-privacy")) wiz.data.privacyOk = $("#wz-privacy").checked;
     if (wiz.step === 4) wizCaptureStep4();
     if (wiz.step === 5) wizCaptureServices();
     if (wiz.step === 6) wizCaptureStaff();
@@ -5160,7 +5234,7 @@
       name: d.name, ownerPassHash: ownerPassHash, phone: d.phone, address: d.address, ownerName: d.owner,
       style: d.style, services: d.services, staff: d.multiStaff ? d.staff : [],
       about: d.about, instagram: d.instagram, tiktok: d.tiktok, facebook: d.facebook, youtube: d.youtube,
-      logo: d.logo, heardFrom: d.heardFrom,
+      logo: d.logo, heardFrom: d.heardFrom, schedule: d.schedule,
     }, passHash);
     clearInterval(timer);
     if (!res.ok) {
@@ -5545,6 +5619,16 @@
           applyShopStyle(wiz.data.style);       // תצוגה מקדימה חיה
           haptic(14); wizRenderBody();
           break;
+        // בחירת "קבועות / משתנה / סגור" ליום בודד בשלב שעות הפעילות בשאלון
+        case "wiz-daymode": {
+          const day = Number(t.dataset.day), m = t.dataset.mode;
+          const patch = m === "fixed" ? { active: true, variable: false }
+            : m === "variable" ? { active: false, variable: true }
+            : { active: false, variable: false };
+          Object.assign(wiz.data.schedule[day], patch);
+          haptic(12); wizRenderBody();
+          break;
+        }
         case "wiz-existing": wizExisting(); break;
         case "goto-shop": {
           const h = (($("#ob-existing") && $("#ob-existing").value) || "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
@@ -5790,6 +5874,16 @@
           await Store.saveShop({ style: t.dataset.style });
           haptic(14); toast("סגנון העיצוב עודכן ✓", "good", "🎨"); render(); break;
 
+        // בחירת "קבועות / משתנה / סגור" ליום בודד (הגדרות שעות פעילות)
+        case "set-day-mode": {
+          const day = Number(t.dataset.day), m = t.dataset.mode;
+          const patch = m === "fixed" ? { active: true, variable: false }
+            : m === "variable" ? { active: false, variable: true }
+            : { active: false, variable: false };
+          await Store.setDay(day, patch);
+          haptic(12); render(); break;
+        }
+
         // עורך רשימת הספרים
         case "edit-staff": openStaffEditor(); break;
         case "stf-add": captureStaffEdit(); staffEdit.push(""); refreshStaffEditor();
@@ -5868,6 +5962,12 @@
         haptic(12); render();
         return;
       }
+      // מתג "כל השבוע ללא שעות קבועות" — מסמן/מבטל את כל שבעת הימים בבת אחת
+      if (a.dataset.weekVariable !== undefined && a.type === "checkbox") {
+        await Store.setWeekVariable(a.checked);
+        haptic(12); toast(a.checked ? "השבוע כולו סומן כמשתנה" : "חזרתם לשעות ברירת המחדל", "sky", "🔀"); render();
+        return;
+      }
       if (a.dataset.slotOpen !== undefined && a.type === "checkbox") {
         // מתג פנוי/פתוח ליד שעה (checked = זמין ללקוחות)
         const [dk, time] = a.dataset.slotOpen.split("|");
@@ -5881,6 +5981,14 @@
         const patch = {}; patch[a.dataset.time] = a.value;
         await Store.setDay(day, patch);
         toast("השעות עודכנו", "sky", "🕑");
+      } else if (a.dataset.wiztime) {
+        // בחירת שעת פתיחה/סגירה בשלב השעות בשאלון — נשמר בזיכרון בלבד עד ליצירה
+        wiz.data.schedule[Number(a.dataset.day)][a.dataset.wiztime] = a.value;
+      } else if (a.id === "wz-week-variable") {
+        // "כל השבוע ללא שעות קבועות" בשאלון — מסמן/מבטל את כל שבעת הימים ומרענן
+        if (a.checked) wiz.data.schedule.forEach((day) => Object.assign(day, { active: false, variable: true }));
+        else wiz.data.schedule = wizDefaultSchedule();
+        haptic(12); wizRenderBody();
       }
     });
 
