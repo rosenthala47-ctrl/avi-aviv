@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "159";
+  const APP_VERSION = "160";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1495,6 +1495,10 @@
           <button class="btn btn-sm btn-danger" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="0">איפוס</button>
           <button class="btn btn-sm btn-danger" data-act="adm-confirm-delete" data-sid="${esc(s.id)}" data-name="${esc(s.name)}">🗑️ מחיקה</button>
         </div>
+        <div class="adm-btns" style="margin-top:6px">
+          <input type="number" min="1" inputmode="numeric" class="input adm-days-input" id="adm-days-${esc(s.id)}" placeholder="מס׳ ימים" style="width:88px;height:34px;font-size:13px">
+          <button class="btn btn-sm" data-act="adm-extend-days" data-sid="${esc(s.id)}">+ הוספת ימים</button>
+        </div>
       </div>`;
     }).join("");
   }
@@ -1538,7 +1542,9 @@
     openAdminPanel();   // רשימה מעודכנת מהשרת
   }
 
-  async function admExtend(sid, months) {
+  // unit: "month" (ברירת מחדל — כפתורי חודש/שנה/איפוס) או "day" (תיבת הימים החופשית)
+  async function admExtend(sid, amount, unit) {
+    unit = unit || "month";
     const s = adminShops.find((x) => x.id === sid);
     if (!s) return;
     // הפעלת מנוי נכתבת למסד רק מחשבון האדמין — אם לא מחוברים, מבקשים התחברות.
@@ -1549,10 +1555,11 @@
     }
     const now = Date.now();
     let until = 0;
-    if (months > 0) {
+    if (amount > 0) {
       const base = (s.paidUntil && s.paidUntil > now) ? s.paidUntil : now;
       const d = new Date(base);
-      d.setMonth(d.getMonth() + months);
+      if (unit === "day") d.setDate(d.getDate() + amount);
+      else d.setMonth(d.getMonth() + amount);
       until = d.getTime();
     }
     let ok = false;
@@ -1567,7 +1574,21 @@
     s.paidUntil = until;   // עדכון מקומי לתצוגה מיידית
     s.pending = null;
     renderAdminList();
-    toast(months === 0 ? "המנוי אופס" : (months === 12 ? "הופעל לשנה ✓" : (months === 1 ? "הופעל לחודש ✓" : `הופעל ל-${months} חודשים ✓`)), "good", "💳");
+    const msg = amount === 0 ? "המנוי אופס"
+      : unit === "day" ? `הופעל ל-${amount} ${amount === 1 ? "יום" : "ימים"} ✓`
+      : amount === 12 ? "הופעל לשנה ✓"
+      : amount === 1 ? "הופעל לחודש ✓"
+      : `הופעל ל-${amount} חודשים ✓`;
+    toast(msg, "good", "💳");
+  }
+
+  // כפתור "+ הוספה" ליד תיבת הימים בפאנל ניהול המנויים
+  async function admExtendDaysFromInput(sid) {
+    const inp = document.getElementById("adm-days-" + sid);
+    const days = inp ? parseInt(inp.value, 10) : NaN;
+    if (!days || days <= 0) { toast("הזינו מספר ימים חיובי", "", "✋"); if (inp) inp.focus(); return; }
+    await admExtend(sid, days, "day");
+    if (inp) inp.value = "";
   }
 
   function arrivalBanner(st) {
@@ -5774,6 +5795,7 @@
         // מנוי
         case "show-upgrade": handleUpgrade(); break;
         case "adm-extend": admExtend(t.dataset.sid, Number(t.dataset.m)); break;
+        case "adm-extend-days": admExtendDaysFromInput(t.dataset.sid); break;
         case "adm-google": adminGoogleSignIn(); break;
         // כניסה למספרה (עמוד הלקוח שלה) מפאנל ניהול המנויים. שינוי hash לבדו
         // (בלי reload) לא עושה כלום — אין מאזין hashchange באפליקציה, אז ה-SPA
@@ -5989,6 +6011,15 @@
         if (a.checked) wiz.data.schedule.forEach((day) => Object.assign(day, { active: false, variable: true }));
         else wiz.data.schedule = wizDefaultSchedule();
         haptic(12); wizRenderBody();
+      }
+    });
+
+    // Enter בתיבת "מס׳ ימים" בפאנל ניהול המנויים — כמו לחיצה על "+ הוספת ימים"
+    document.addEventListener("keydown", (e) => {
+      const a = e.target;
+      if (a && a.classList && a.classList.contains("adm-days-input") && e.key === "Enter") {
+        e.preventDefault();
+        admExtendDaysFromInput(a.id.replace(/^adm-days-/, ""));
       }
     });
 
