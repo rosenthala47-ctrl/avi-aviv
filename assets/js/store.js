@@ -1114,10 +1114,14 @@ UG.Store = (function () {
     let priv = null;
     if (piiPrivate(cur)) {
       priv = { name: data.userName || "", phone: data.phone || "", email: data.email || "" };
+      // תאריך לידה (אופציונלי, כרגע נאסף רק ב-try) — נוסף רק אם הוזן, כדי לא
+      // לשנות את מבנה הנתונים של שאר המספרות.
+      if (data.dob) priv.dob = data.dob;
     } else {
       booking.userName = data.userName || "";
       booking.phone = data.phone || "";
       booking.email = data.email || "";
+      if (data.dob) booking.dob = data.dob;
     }
     cur.bookings.push(booking);
     return { ok: true, booking, priv };

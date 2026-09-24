@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "160";
+  const APP_VERSION = "161";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -110,6 +110,36 @@
   function bkName(b) { const p = bkPriv(b); return (p && p.name) || (b && b.userName) || ""; }
   function bkPhone(b) { const p = bkPriv(b); return (p && p.phone) || (b && b.phone) || ""; }
   function bkEmail(b) { const p = bkPriv(b); return (p && p.email) || (b && b.email) || ""; }
+  function bkDob(b) { const p = bkPriv(b); return (p && p.dob) || (b && b.dob) || ""; }
+
+  /* פרטי יום הולדת מתוך תאריך לידה "YYYY-MM-DD": כמה ימים עד יום ההולדת הבא,
+     תצוגת DD/MM ותווית ידידותית. משמש את הספר כדי לדעת מתי לברך. */
+  function birthdayInfo(dob) {
+    if (!dob || typeof dob !== "string") return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dob);
+    if (!m) return null;
+    const mm = +m[2], dd = +m[3];
+    if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    let next = new Date(today.getFullYear(), mm - 1, dd);
+    if (next < today) next = new Date(today.getFullYear() + 1, mm - 1, dd);
+    const days = Math.round((next - today) / 86400000);
+    const ddmm = u.pad(dd) + "/" + u.pad(mm);
+    const label = days === 0 ? "היום! 🎂" : days === 1 ? "מחר 🎂" : days <= 30 ? "בעוד " + days + " ימים 🎂" : ddmm;
+    return { mm, dd, days, ddmm, label };
+  }
+  // האם יום ההולדת (לפי dob) נופל בטווח winDays מהתאריך הנתון? (לסימון 🎂 ביומן)
+  function birthdayNearDate(dob, dateKey, winDays) {
+    const bi = birthdayInfo(dob);
+    if (!bi || !dateKey) return false;
+    const d = u.parseKey(dateKey); if (isNaN(d)) return false;
+    let best = Infinity;
+    for (let y = -1; y <= 1; y++) {
+      const bd = new Date(d.getFullYear() + y, bi.mm - 1, bi.dd);
+      best = Math.min(best, Math.abs((bd - d) / 86400000));
+    }
+    return best <= (winDays || 3);
+  }
 
   /* דף מנהל מסודר: רשימת שורות אחידה עם ניווט פנימי + סרגל לשוניות מצומצם.
      נבדק על "try" ומאוגוסט 2026 חל על כל המספרות. */
@@ -604,7 +634,7 @@
     try {
       rememberGoogleIntent("client");
       const user = await UG.Auth.signInWithGoogle();
-      if (user) { clearGoogleIntent(); applyGoogleClientIdentity(user); render(); }
+      if (user) { clearGoogleIntent(); applyGoogleClientIdentity(user); render(); setTimeout(() => promptBirthday(), 900); }
     } catch (e) { clearGoogleIntent(); toast(UG.Auth.humanError(e), "", "⚠️"); }
   }
 
@@ -624,6 +654,7 @@
     view.authPhoneForm = false;
     toast("ברוכים הבאים! 🙂", "good", "✓");
     render();
+    setTimeout(() => promptBirthday(), 900);   // אחרי זיהוי — בקשת תאריך לידה (try)
   }
 
   // מסך זיהוי הלקוח — לפני שמאפשרים להזמין
@@ -1058,6 +1089,48 @@
       <button class="btn btn-primary" data-act="enable-notif" style="margin-top:6px">אישור התראות</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">אולי אחר כך</button>
     `);
+  }
+
+  /* ---------- בקשת תאריך לידה מהלקוח (כרגע try בלבד) ----------
+     מוצג פעם אחת לכל פתיחה של האפליקציה, לכל לקוח מזוהה שעדיין לא מסר תאריך
+     לידה — ותיק וגם חדש. מי שמסר — לא נשאל שוב לעולם (נשמר בזהות המקומית).
+     מי שדילג/לא מסר — יישאל שוב בכניסה הבאה. אם מודאל אחר פתוח, מנסים שוב
+     מעט מאוחר יותר (עד שהמסך פנוי), כדי לא להתנגש עם בקשת ההתראות. */
+  let birthdayPromptShown = false;
+  function promptBirthday(attempt) {
+    if (SHOP !== "try") return;                 // כרגע רק במספרת הבדיקות
+    if (birthdayPromptShown) return;
+    if (view.route !== "client" || view.ownerPreview) return;
+    if (!clientIdentified()) return;            // רק ללקוח שכבר הזדהה
+    if (identity.dob) return;                    // כבר מסר — לא שואלים שוב
+    if ($("#modalBack") && $("#modalBack").classList.contains("open")) {
+      // מודאל אחר פתוח (למשל בקשת התראות) — ננסה שוב כשהמסך יתפנה
+      if ((attempt || 0) < 6) setTimeout(() => promptBirthday((attempt || 0) + 1), 1500);
+      return;
+    }
+    birthdayPromptShown = true;
+    openModal(`
+      <div class="m-title">🎂 מתי יום ההולדת שלך?</div>
+      <div class="m-sub">כדי שהמספרה תדע מתי יום ההולדת שלך ותוכל לברך.</div>
+      <div class="field" style="margin-top:14px">
+        <label>תאריך לידה</label>
+        <input class="input" id="bd-input" type="date" max="${u.dateKey(new Date())}" value="${esc(identity.dob || "")}">
+      </div>
+      <button class="btn btn-primary" data-act="save-birthday" style="margin-top:6px">שמירה</button>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">אולי אחר כך</button>
+    `);
+  }
+  async function saveBirthday() {
+    const el = $("#bd-input");
+    const dob = (el && el.value) || "";
+    if (!dob) { toast("בחרו תאריך לידה, או ״אולי אחר כך״", "", "🎂"); if (el) el.focus(); return; }
+    if (dob > u.dateKey(new Date())) { toast("תאריך לידה לא יכול להיות בעתיד", "", "🎂"); return; }
+    identity.dob = dob;
+    saveIdentity();
+    // אם ללקוח יש תור עתידי — נצרף את תאריך הלידה לתור החדש הבא שיזמין; תורים
+    // שכבר עברו לא ניתנים לעריכה (חוקי אבטחה), אז הספר יראה מהתור הבא.
+    closeModal();
+    toast("נשמר ✓ — נדע לברך אותך 🎂", "good", "🎂");
   }
 
   // ההתראות נחסמו בדפדפן — אי אפשר לבקש שוב, אז מסבירים איך לפתוח ידנית
@@ -2143,6 +2216,10 @@
       ${(UG.Email && UG.Email.configured()) ? `
       <div class="field"><label>אימייל <span class="opt">(לא חובה — לקבלת אישור למייל)</span></label>
         <input class="input" id="cf-email" type="email" inputmode="email" autocomplete="email" placeholder="name@email.com" value="${esc(identity.email || "")}"></div>` : ""}
+      ${(SHOP === "try" && !identity.dob) ? `
+      <div class="field"><label>תאריך לידה <span class="opt">(לא חובה)</span></label>
+        <input class="input" id="cf-dob" type="date" max="${u.dateKey(new Date())}" value="${esc(identity.dob || "")}">
+        <div class="hint" style="margin-top:5px">כדי שהמספרה תדע מתי יום ההולדת שלך ותוכל לברך 🎂</div></div>` : ""}
       <button class="btn btn-primary" data-act="do-book">${isResched ? "אישור המועד החדש" : "אישור וקביעת התור"}</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
     `);
@@ -2162,10 +2239,15 @@
     // מייל אינו חובה — נבדק רק אם הוזן, כדי שנשלח אישור לכתובת תקינה
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("כתובת אימייל לא תקינה", "", "📧"); return null; }
     const name = first + " " + last;
+    // תאריך לידה (אופציונלי, try בלבד) — נשמר בזהות המקומית כדי שלא נבקש שוב.
+    const dobEl = $("#cf-dob");
+    let dob = (dobEl && dobEl.value) || identity.dob || "";
+    if (dob && dob > u.dateKey(new Date())) { toast("תאריך לידה לא יכול להיות בעתיד", "", "🎂"); return null; }
     identity.firstName = first; identity.lastName = last; identity.name = name; identity.phone = phone;
     identity.email = email;
+    if (dob) identity.dob = dob;
     saveIdentity();
-    return { first, last, phone, name, email };
+    return { first, last, phone, name, email, dob };
   }
 
   /* קישור "הוסף ליומן Google" — נבנה מהתאריך והשעה של התור (אזור זמן ישראל) */
@@ -2226,6 +2308,7 @@
       res = await Store.createBooking({
         serviceId: view.selService, date: bookedDate, start: bookedStart,
         userId: identity.userId, userName: contact.name, phone: contact.phone, email: contact.email,
+        dob: contact.dob || identity.dob || "",
         staff: staff,
         excludeBookingId: reschedId || undefined,   // אל תתנגש עם התור המקורי בעת שינוי מועד
       });
@@ -2773,7 +2856,7 @@
         <div class="slot-line booked${s.booking.spam ? " spam-slot" : ""}">
           <span class="sl-time">${s.start}</span>
           <div class="sl-mid">
-            <span class="sl-name">${esc(bkName(s.booking) || "לקוח")}${s.booking.spam ? " 🛡️" : ""}</span>
+            <span class="sl-name">${esc(bkName(s.booking) || "לקוח")}${s.booking.spam ? " 🛡️" : ""}${birthdayNearDate(bkDob(s.booking), view.oDate, 3) ? " 🎂" : ""}</span>
             <span class="sl-sub">${esc(s.booking.serviceName)}</span>
           </div>
           <span class="status-tag status-booked">תפוס</span>
@@ -3392,6 +3475,7 @@
       if (!c) { c = { key, name: nm || "לקוח", phone: ph || "", visits: 0, spent: 0, lastTs: 0, lastDate: b.date }; map.set(key, c); }
       if (nm) c.name = nm;
       if (ph) c.phone = ph;
+      const db = bkDob(b); if (db) c.dob = db;   // תאריך לידה (מגיע עם התור)
       if (b.status === "confirmed") { c.visits++; c.spent += Number(b.price || 0); }
       if (b.status === "noshow") c.noShows = (c.noShows || 0) + 1;
       const ts = u.dateTime(b.date, b.start).getTime();
@@ -3423,11 +3507,29 @@
         <p>לקוח שהוספת מרשימת הלקוחות שלך אך עדיין לא הזמין תור. ברגע שיזמין תור (או שתקבע לו תור ידני) — הוא יהפוך ללקוח מלא עם היסטוריית ביקורים והכנסות, והתג ייעלם.</p>
       </div>` : "";
 
+    // 🎂 ימי הולדת קרובים (30 יום) — התזכורת לספר. מוצג רק אם יש נתוני תאריך לידה.
+    const bdayUpcoming = clients
+      .map((c) => ({ c, bi: birthdayInfo(c.dob) }))
+      .filter((x) => x.bi && x.bi.days <= 30)
+      .sort((a, z) => a.bi.days - z.bi.days);
+    const bdaySection = bdayUpcoming.length ? `
+      <div class="section-title">🎂 ימי הולדת קרובים</div>
+      <div class="card set-list">
+        ${bdayUpcoming.map((x) => setRow({
+          ico: "🎂", color: "var(--sky)",
+          label: x.c.name,
+          sub: x.bi.days === 0 ? "היום! זה הזמן לברך" : x.bi.days === 1 ? "מחר" : "בעוד " + x.bi.days + " ימים · " + x.bi.ddmm,
+          val: x.c.phone ? "" : "",
+          nav: `data-act="client-detail" data-key="${esc(x.c.key)}"`,
+        })).join("")}
+      </div>` : "";
+
     /* מסודר: שורה אחידה לכל לקוח — לחיצה פותחת את כרטיס הלקוח עם הפעולות */
     if (tidyOwner()) {
       return `
         ${actionsRow}
         ${chips}
+        ${bdaySection}
         <div class="section-title">כל הלקוחות</div>
         <div class="card set-list">
           ${clients.map((c) => {
@@ -3436,6 +3538,8 @@
             if (c.visits) bits.push(c.visits + " ביקורים");
             if (c.lastDate) bits.push("אחרון " + u.relativeDay(c.lastDate));
             if (c.noShows) bits.push("❌ " + c.noShows + " לא הגיע");
+            const bi = birthdayInfo(c.dob);
+            if (bi && bi.days <= 14) bits.push("🎂 " + (bi.days === 0 ? "היום!" : bi.days === 1 ? "מחר" : "בעוד " + bi.days + " ימים"));
             return setRow({
               ico: (String(c.name).trim()[0]) || "?",
               color: blocked ? "var(--bad)" : "var(--sky)",
@@ -3453,6 +3557,7 @@
     return `
       ${actionsRow}
       ${chips}
+      ${bdaySection}
       <div class="section-title">כל הלקוחות</div>
       ${clients.map((c) => `
         <div class="card${isClientBlocked(c) ? " cli-blocked" : ""}" style="padding:13px 15px">
@@ -3659,6 +3764,7 @@
     openModal(`
       <div class="m-title">${esc(c.name)}${blocked ? " 🚫" : ""}</div>
       <div class="m-sub">${bks.length} תורים · ${u.fmtPrice(c.spent)} סה״כ${c.phone ? ` · <a href="tel:${esc(c.phone)}">${esc(u.fmtPhone(c.phone))}</a>` : ""}</div>
+      ${(() => { const bi = birthdayInfo(c.dob); return bi ? `<p class="hint" style="margin:10px 0 0"><b>🎂 יום הולדת:</b> ${esc(bi.ddmm)} · ${esc(bi.label)}</p>` : ""; })()}
       ${blocked ? `<p class="hint" style="margin:10px 0 0;color:var(--bad)">הלקוח חסום — לא יכול לקבוע תור אונליין.</p>` : ""}
       ${(!blocked && c.noShows >= 2) ? `<p class="hint" style="margin:10px 0 0;color:var(--bad)">⚠️ לא הגיע ${c.noShows} פעמים — כדאי לשקול חסימה.</p>` : ""}
       <div style="max-height:44vh;overflow-y:auto;margin-top:8px">
@@ -5509,6 +5615,7 @@
         }
 
         case "enable-notif": handleEnableNotif(); break;
+        case "save-birthday": saveBirthday(); break;
         case "dismiss-spam": spamDismissed = Date.now(); render(); break;
         case "notif-help": notifHelp(); break;
         case "export-report": exportReportCsv(); break;
@@ -6443,6 +6550,7 @@
     const gateShowing = newAuthShop() && view.route === "client" && !clientIdentified();
     if (!privacyAccepted() && !gateShowing) setTimeout(() => promptPrivacy(), 600);
     else setTimeout(() => promptNotif(), 1200);   // הזמנה לאישור התראות — בכל כניסה עד שיאשר
+    setTimeout(() => promptBirthday(), 2400);      // בקשת תאריך לידה (try) — אחרי בקשת ההתראות
     Store.subscribe(onStoreChange);
     // מספרה מאובטחת שמנוהלת בלי חשבון הבעלים — שמירה תיחסם ע״י חוקי האבטחה.
     // במקום כישלון שקט, מציעים לספר להתחבר עם החשבון (יש גם "שכחתי סיסמה").
