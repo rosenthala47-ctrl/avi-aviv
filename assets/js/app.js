@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "163";
+  const APP_VERSION = "164";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -654,7 +654,7 @@
     view.authPhoneForm = false;
     toast("ברוכים הבאים! 🙂", "good", "✓");
     render();
-    setTimeout(() => promptBirthday(), 900);   // אחרי זיהוי — בקשת תאריך לידה (try)
+    setTimeout(() => promptBirthday(), 900);   // אחרי זיהוי — בקשת תאריך לידה
   }
 
   // מסך זיהוי הלקוח — לפני שמאפשרים להזמין
@@ -1091,14 +1091,13 @@
     `);
   }
 
-  /* ---------- בקשת תאריך לידה מהלקוח (כרגע try בלבד) ----------
+  /* ---------- בקשת תאריך לידה מהלקוח (כל המספרות) ----------
      מוצג פעם אחת לכל פתיחה של האפליקציה, לכל לקוח מזוהה שעדיין לא מסר תאריך
      לידה — ותיק וגם חדש. מי שמסר — לא נשאל שוב לעולם (נשמר בזהות המקומית).
      מי שדילג/לא מסר — יישאל שוב בכניסה הבאה. אם מודאל אחר פתוח, מנסים שוב
      מעט מאוחר יותר (עד שהמסך פנוי), כדי לא להתנגש עם בקשת ההתראות. */
   let birthdayPromptShown = false;
   function promptBirthday(attempt) {
-    if (SHOP !== "try") return;                 // כרגע רק במספרת הבדיקות
     if (birthdayPromptShown) return;
     if (view.route !== "client" || view.ownerPreview) return;
     if (!clientIdentified()) return;            // רק ללקוח שכבר הזדהה
@@ -2216,7 +2215,7 @@
       ${(UG.Email && UG.Email.configured()) ? `
       <div class="field"><label>אימייל <span class="opt">(לא חובה — לקבלת אישור למייל)</span></label>
         <input class="input" id="cf-email" type="email" inputmode="email" autocomplete="email" placeholder="name@email.com" value="${esc(identity.email || "")}"></div>` : ""}
-      ${(SHOP === "try" && !identity.dob) ? `
+      ${(!identity.dob) ? `
       <div class="field"><label>תאריך לידה <span class="opt">(לא חובה)</span></label>
         <input class="input" id="cf-dob" type="date" max="${u.dateKey(new Date())}" value="${esc(identity.dob || "")}">
         <div class="hint" style="margin-top:5px">כדי שהמספרה תדע מתי יום ההולדת שלך ותוכל לברך 🎂</div></div>` : ""}
@@ -6562,7 +6561,7 @@
     const gateShowing = newAuthShop() && view.route === "client" && !clientIdentified();
     if (!privacyAccepted() && !gateShowing) setTimeout(() => promptPrivacy(), 600);
     else setTimeout(() => promptNotif(), 1200);   // הזמנה לאישור התראות — בכל כניסה עד שיאשר
-    setTimeout(() => promptBirthday(), 2400);      // בקשת תאריך לידה (try) — אחרי בקשת ההתראות
+    setTimeout(() => promptBirthday(), 2400);      // בקשת תאריך לידה — אחרי בקשת ההתראות
     Store.subscribe(onStoreChange);
     // מספרה מאובטחת שמנוהלת בלי חשבון הבעלים — שמירה תיחסם ע״י חוקי האבטחה.
     // במקום כישלון שקט, מציעים לספר להתחבר עם החשבון (יש גם "שכחתי סיסמה").

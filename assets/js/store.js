@@ -1114,8 +1114,8 @@ UG.Store = (function () {
     let priv = null;
     if (piiPrivate(cur)) {
       priv = { name: data.userName || "", phone: data.phone || "", email: data.email || "" };
-      // תאריך לידה (אופציונלי, כרגע נאסף רק ב-try) — נוסף רק אם הוזן, כדי לא
-      // לשנות את מבנה הנתונים של שאר המספרות.
+      // תאריך לידה (אופציונלי) — נוסף רק אם הוזן, כדי לא לשנות את מבנה הנתונים
+      // של מספרות שהלקוח עדיין לא מסר בהן תאריך לידה.
       if (data.dob) priv.dob = data.dob;
     } else {
       booking.userName = data.userName || "";
