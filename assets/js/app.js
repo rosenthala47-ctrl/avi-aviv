@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "162";
+  const APP_VERSION = "163";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1336,7 +1336,7 @@
         <button class="btn btn-primary btn-sm" data-act="show-upgrade" style="width:auto">פרטים</button>
       </div>`;
     }
-    if (s.state === "active" && s.daysLeft <= 5) {
+    if (s.state === "active" && s.daysLeft <= 7) {
       return `
       <div class="banner warn">
         <span class="bn-ico">⏳</span>
