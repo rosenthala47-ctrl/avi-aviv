@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "161";
+  const APP_VERSION = "162";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -3179,6 +3179,10 @@
     const upcoming = list.filter((x) => x.ts > now - 30 * 60000);
     const past = list.filter((x) => x.ts <= now - 30 * 60000).reverse();
 
+    // תאריך לידה לפי לקוח — נאסף מכל התורים שלו, כך שיוצג גם על תור שלא נשא אותו
+    const dobByKey = {};
+    st.bookings.forEach((b) => { const d = bkDob(b); if (d) dobByKey[clientKey(b)] = d; });
+
     const addBtn = `<button class="btn btn-primary" data-act="add-booking" style="margin-bottom:14px">＋ הוספת תור ידני</button>`;
     if (!list.length) return addBtn + emptyState("🎟️", "אין תורים עדיין", "כשלקוח יקבע תור הוא יופיע כאן — או הוסיפו תור ידני");
 
@@ -3211,6 +3215,14 @@
           <div class="bk-title">${esc(bkName(b) || "לקוח")}</div>
           <div class="bk-sub">${esc(b.serviceName)} · ${bkPhone(b) ? `<a href="tel:${esc(bkPhone(b))}">${esc(bkPhone(b))}</a>` : "ללא טלפון"}</div>
           <div class="bk-sub">${esc(u.longDate(b.date))}${b.staff ? ` · <span class="staff-req">🧑‍🔧 ביקש: ${esc(b.staff)}</span>` : ""}</div>
+          ${(() => {
+            const dob = bkDob(b) || dobByKey[clientKey(b)] || "";
+            const bi = dob ? birthdayInfo(dob) : null;
+            if (!bi) return "";
+            const near = !isPast && bi.days <= 30;
+            const rel = bi.days === 0 ? "היום! 🎉" : bi.days === 1 ? "מחר" : "בעוד " + bi.days + " ימים";
+            return `<div class="bk-sub bday-line${(!isPast && bi.days <= 14) ? " bday-hot" : ""}">🎂 יום הולדת: ${esc(bi.ddmm)}${near ? " · " + esc(rel) : ""}</div>`;
+          })()}
           ${b.priorNoShow ? `<div class="noshow-warn">⚠️ הלקוח לא הגיע בעבר${b.priorNoShow > 1 ? ` (${b.priorNoShow} פעמים)` : ""}</div>` : ""}
           ${b.spam ? `<div class="spam-warn">🛡️ ${b.spam.reason === "multi" ? "ללקוח " + b.spam.count + " תורים פעילים — כדאי לוודא שזה לגיטימי" : b.spam.reason === "burst" ? b.spam.count + " הזמנות ברצף קצר מאותו לקוח" : "הוזמנו " + b.spam.count + " תורים בזמן קצר"}</div>` : ""}
         </div>
