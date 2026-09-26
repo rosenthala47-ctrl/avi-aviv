@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "167";
+  const APP_VERSION = "168";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -162,6 +162,10 @@
     { id: "mizrahit", label: "מזרחית 🎤", url: "https://open.spotify.com/playlist/5yD2Py0dPdlAjLRPrrx4Rh" },
     { id: "mizrahit_heavy", label: "מזרחית כבד 🔥", url: "https://open.spotify.com/playlist/0HGJ7OwXOwVVRK4GV4ik9g" },
     { id: "mediterranean", label: "ים תיכוני 🌊", url: "https://open.spotify.com/playlist/37i9dQZF1DWUCy47lptxiG" },
+    { id: "hiphop", label: "היפ-הופ וראפ 🎧", url: "https://open.spotify.com/playlist/2c0bJj7DW60yQ2fosr8RTQ" },
+    { id: "trap", label: "טראפ ישראלי 💥", url: "https://open.spotify.com/playlist/3kfTB8tgXfeMMxfwIlDtrR" },
+    { id: "pop", label: "פופ לועזי 🌍", url: "https://open.spotify.com/playlist/1nzDp9OWnx1kULFNYfMCeu" },
+    { id: "nineties", label: "שנות ה-90 📼", url: "https://open.spotify.com/playlist/4SFLOyaKwD2ZQhhx1N2uko" },
   ];
   function musicPreset(id) { return MUSIC_PRESETS.find((p) => p.id === id) || null; }
   // קישור חיפוש בספוטיפי (לפלייליסטים) לפי טקסט טעם
@@ -4359,6 +4363,16 @@
           <div>
             <b>שימו לב:</b> הפיצ׳ר עובד רק למספרות שיש להן חשבון <b>Spotify Premium</b>.
             כדי לנגן פלייליסט מלא דרך הרמקול צריך Premium (בלי Premium אפשר עדיין לראות ולפתוח את הפלייליסט, אך ההשמעה מוגבלת — פרסומות ודגימות).
+          </div>
+        </div>
+        <div class="music-shuffle-note">
+          <span class="mpn-ico">🔀</span>
+          <div>
+            <b>השמעה אקראית:</b> כדי שהפלייליסטים יתנגנו בסדר אקראי, הפעילו
+            <b>ערבוב (Shuffle)</b> פעם אחת באפליקציית ספוטיפי — בזמן שמתנגן שיר,
+            לחצו על סמל הערבוב 🔀 עד שהוא נדלק בירוק. ספוטיפי זוכר את ההגדרה,
+            והיא תחול מעכשיו על כל הפלייליסטים. (זו הגדרה של ספוטיפי עצמו — היא
+            לא נקבעת מתוך האפליקציה הזו.)
           </div>
         </div>
         <div class="music-mode-list" style="margin-top:14px">
