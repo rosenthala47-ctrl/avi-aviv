@@ -1117,11 +1117,15 @@ UG.Store = (function () {
       // תאריך לידה (אופציונלי) — נוסף רק אם הוזן, כדי לא לשנות את מבנה הנתונים
       // של מספרות שהלקוח עדיין לא מסר בהן תאריך לידה.
       if (data.dob) priv.dob = data.dob;
+      // העדפת מוזיקה (אופציונלי, try) — פלייליסט ספוטיפי / טעם / "שקט". נשמר
+      // בצומת הפרטי במספרה מאובטחת, בדיוק כמו שאר פרטי הלקוח.
+      if (data.music && typeof data.music === "object") priv.music = data.music;
     } else {
       booking.userName = data.userName || "";
       booking.phone = data.phone || "";
       booking.email = data.email || "";
       if (data.dob) booking.dob = data.dob;
+      if (data.music && typeof data.music === "object") booking.music = data.music;
     }
     cur.bookings.push(booking);
     return { ok: true, booking, priv };

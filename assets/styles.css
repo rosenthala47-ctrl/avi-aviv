@@ -1313,3 +1313,66 @@ a.nav-btn { flex: 1; color: var(--text); text-decoration: none; }
 .install-card .ic-sub b { color: var(--sky-2); font-weight: 700; }
 .install-card .ic-x { color: var(--muted-2); font-size: 17px; padding: 4px 6px; flex: none; align-self: flex-start; }
 .divider-txt { text-align: center; color: var(--muted-2); font-size: 12px; margin: 16px 0; position: relative; }
+
+/* ==================== מוזיקה בכיסא (ספוטיפי) ==================== */
+/* הערת Premium בהגדרות */
+.music-premium-note {
+  display: flex; gap: 10px; align-items: flex-start;
+  background: rgba(29, 185, 84, .10); border: 1px solid rgba(29, 185, 84, .35);
+  border-radius: var(--radius-sm); padding: 11px 13px; font-size: 12.5px;
+  line-height: 1.55; color: var(--text);
+}
+.music-premium-note .mpn-ico { font-size: 18px; flex: none; }
+
+/* בורר מצב המוזיקה */
+.music-mode-list { display: flex; flex-direction: column; gap: 10px; }
+.music-mode-opt {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: start;
+  padding: 13px 14px; border-radius: var(--radius);
+  background: var(--surface); border: 1px solid var(--line); transition: .15s; cursor: pointer;
+}
+.music-mode-opt.selected { border-color: #1DB954; box-shadow: 0 0 0 3px rgba(29,185,84,.22); }
+.music-mode-opt:active { transform: scale(.99); }
+.music-mode-opt .mm-ico { font-size: 22px; flex: none; width: 34px; text-align: center; }
+.music-mode-opt .mm-body { flex: 1; min-width: 0; }
+.music-mode-opt .mm-title { font-weight: 700; font-size: 15px; display: block; }
+.music-mode-opt .mm-sub { font-size: 12px; color: var(--muted); display: block; margin-top: 2px; line-height: 1.5; }
+.music-mode-opt .mm-check { font-size: 18px; color: #1DB954; opacity: 0; flex: none; }
+.music-mode-opt.selected .mm-check { opacity: 1; }
+
+/* טעמים מהירים במודאל הלקוח */
+.music-taste-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.taste-chip {
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px;
+  padding: 8px 14px; font-size: 13.5px; font-weight: 600; color: var(--text);
+  cursor: pointer; transition: .15s;
+}
+.taste-chip:active { transform: scale(.97); border-color: #1DB954; }
+
+/* כפתור בסגנון ספוטיפי */
+.btn-spotify { background: #1DB954 !important; color: #04130a !important; border: none !important; font-weight: 800; width: 100%; }
+.btn-spotify:active { transform: scale(.99); }
+
+/* נגן מוטמע */
+.sp-embed { display: block; width: 100%; }
+
+/* כרטיס "עכשיו בכיסא" */
+.chair-card {
+  background: linear-gradient(160deg, rgba(29,185,84,.10), var(--surface));
+  border: 1px solid rgba(29,185,84,.30); border-radius: var(--radius);
+  padding: 14px; margin-bottom: 16px;
+}
+.chair-card.chair-live { border-color: rgba(29,185,84,.55); box-shadow: 0 0 0 3px rgba(29,185,84,.14); }
+.chair-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.chair-badge { font-weight: 800; font-size: 14.5px; color: var(--text); }
+.chair-when { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.chair-client { margin-top: 8px; font-weight: 700; font-size: 16px; color: var(--text); }
+.chair-client .chair-svc { font-weight: 500; font-size: 13.5px; color: var(--muted); }
+.chair-music-empty { margin-top: 12px; font-size: 13.5px; color: var(--muted); }
+.chair-taste { margin-top: 12px; font-size: 14px; color: var(--text); }
+.chair-premium { margin-top: 10px; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+.chair-premium b { color: #1DB954; }
+.play-inline {
+  background: none; border: none; padding: 0; margin: 0; cursor: pointer;
+  color: #1DB954; font-weight: 700; font-size: inherit; font-family: inherit;
+}

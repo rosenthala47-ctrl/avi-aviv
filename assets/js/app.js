@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "164";
+  const APP_VERSION = "165";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -139,6 +139,67 @@
       best = Math.min(best, Math.abs((bd - d) / 86400000));
     }
     return best <= (winDays || 3);
+  }
+
+  /* ---------- מוזיקה בכיסא (ספוטיפי) — כרגע "try" בלבד ----------
+     כל לקוח יכול לשלוח קישור לפלייליסט ספוטיפי, לבחור "טעם" מהיר, או לבקש שקט.
+     כשמגיע תורו, הספר רואה כרטיס "עכשיו בכיסא" עם הפלייליסט שלו וכפתור ניגון.
+     למספרות גדולות (כמה כיסאות במקביל) יש "מצב מוזיקת רקע" — פלייליסט אחד קבוע.
+     הערה חשובה: השמעה מלאה דרך הרמקול דורשת חשבון Spotify Premium של המספרה. */
+
+  // האם פיצ׳ר המוזיקה זמין בכלל במספרה הזו (כרגע רק try; קל להרחיב בהמשך)
+  function musicFeature() { return SHOP === "try"; }
+  // מצב המוזיקה שהספר בחר: "off" (ברירת מחדל) | "personal" | "background"
+  function musicMode(st) {
+    if (!musicFeature()) return "off";
+    const m = st && st.shop && st.shop.musicMode;
+    return (m === "personal" || m === "background") ? m : "off";
+  }
+  // טעמים מהירים ללקוח שאין לו פלייליסט מוכן — נשמרים כתגית + חיפוש בספוטיפי
+  const MUSIC_PRESETS = [
+    { id: "mizrahit", label: "מזרחית 🎤", q: "להיטים מזרחית" },
+    { id: "hiphop", label: "היפ-הופ 🎧", q: "hip hop" },
+    { id: "chill", label: "רגוע 😌", q: "chill vibes" },
+    { id: "nineties", label: "שנות ה-90 📼", q: "90s hits" },
+  ];
+  function musicPreset(id) { return MUSIC_PRESETS.find((p) => p.id === id) || null; }
+  // קישור חיפוש בספוטיפי (לפלייליסטים) לפי טקסט טעם
+  function spotifySearchUrl(q) {
+    return "https://open.spotify.com/search/" + encodeURIComponent(q || "") + "/playlists";
+  }
+  /* פיענוח קישור ספוטיפי לכל צורותיו: קישור אתר (עם/בלי קידומת שפה intl-xx
+     ובלי פרמטרי ?si=), או מזהה URI (spotify:playlist:ID). מחזיר סוג+מזהה או null.
+     קישורי spotify.link המקוצרים אינם נפתחים בצד הלקוח (דורש הפניה) — לכן לא נתמכים
+     כאן; הלקוח פשוט יעתיק את הקישור המלא מ"שתף → העתק קישור". */
+  function parseSpotify(raw) {
+    if (!raw || typeof raw !== "string") return null;
+    const s = raw.trim();
+    let m = /^spotify:(playlist|album|track|artist):([A-Za-z0-9]+)/.exec(s);
+    if (m) return spotifyObj(m[1], m[2]);
+    m = /open\.spotify\.com\/(?:intl-[a-z]{2}\/)?(playlist|album|track|artist)\/([A-Za-z0-9]+)/i.exec(s);
+    if (m) return spotifyObj(m[1].toLowerCase(), m[2]);
+    return null;
+  }
+  function spotifyObj(type, id) {
+    return {
+      type: type, id: id,
+      url: "https://open.spotify.com/" + type + "/" + id,
+      embed: "https://open.spotify.com/embed/" + type + "/" + id + "?utm_source=barbertor",
+    };
+  }
+  function spotifyTypeLabel(type) {
+    return ({ playlist: "פלייליסט", album: "אלבום", track: "שיר", artist: "אמן" })[type] || "פלייליסט";
+  }
+  // העדפת המוזיקה של הלקוח מתוך תור (צומת פרטי במספרה מאובטחת, אחרת בתוך התור)
+  function bkMusic(b) { const p = bkPriv(b); return (p && p.music) || (b && b.music) || null; }
+  // תקציר קריא של העדפת מוזיקה (לתצוגה ברשימות/כרטיס הלקוח)
+  function musicSummary(mu) {
+    if (!mu) return "";
+    if (mu.silence) return "🔇 מעדיף/ה שקט";
+    if (mu.url) return "🎧 פלייליסט ספוטיפי";
+    const p = mu.taste && musicPreset(mu.taste);
+    if (p) return "🎵 טעם: " + p.label;
+    return "";
   }
 
   /* דף מנהל מסודר: רשימת שורות אחידה עם ניווט פנימי + סרגל לשוניות מצומצם.
@@ -634,7 +695,7 @@
     try {
       rememberGoogleIntent("client");
       const user = await UG.Auth.signInWithGoogle();
-      if (user) { clearGoogleIntent(); applyGoogleClientIdentity(user); render(); setTimeout(() => promptBirthday(), 900); }
+      if (user) { clearGoogleIntent(); applyGoogleClientIdentity(user); render(); setTimeout(() => promptBirthday(), 900); setTimeout(() => promptMusic(), 2200); }
     } catch (e) { clearGoogleIntent(); toast(UG.Auth.humanError(e), "", "⚠️"); }
   }
 
@@ -655,6 +716,7 @@
     toast("ברוכים הבאים! 🙂", "good", "✓");
     render();
     setTimeout(() => promptBirthday(), 900);   // אחרי זיהוי — בקשת תאריך לידה
+    setTimeout(() => promptMusic(), 2200);     // ואז — בקשת פלייליסט (אם מצב אישי)
   }
 
   // מסך זיהוי הלקוח — לפני שמאפשרים להזמין
@@ -1132,6 +1194,68 @@
     toast("נשמר ✓ — נדע לברך אותך 🎂", "good", "🎂");
   }
 
+  /* ---------- בקשת פלייליסט מהלקוח (מוזיקה בכיסא) ----------
+     מוצג פעם אחת לכל פתיחה, ללקוח מזוהה, רק במספרה שהפעילה מצב "אישי לכל לקוח".
+     מי שבחר (פלייליסט / טעם / שקט) — לא נשאל שוב. מי שדילג — יישאל שוב בכניסה
+     הבאה. אם מודאל אחר פתוח (יום הולדת / התראות) — ננסה שוב מעט מאוחר יותר. */
+  let musicPromptShown = false;
+  function promptMusic(attempt) {
+    if (musicPromptShown) return;
+    if (view.route !== "client" || view.ownerPreview) return;
+    if (!clientIdentified()) return;
+    const st = Store.get();
+    if (!st || musicMode(st) !== "personal") return;   // רק במצב אישי מבקשים מהלקוח
+    if (identity.music) return;                          // כבר בחר — לא שואלים שוב
+    if ($("#modalBack") && $("#modalBack").classList.contains("open")) {
+      if ((attempt || 0) < 6) setTimeout(() => promptMusic((attempt || 0) + 1), 1600);
+      return;
+    }
+    musicPromptShown = true;
+    openMusicModal();
+  }
+  function openMusicModal() {
+    openModal(`
+      <div class="m-title">🎧 איזו מוזיקה תרצה בכיסא?</div>
+      <div class="m-sub">כשיגיע תורך, המספרה תוכל לנגן בדיוק את מה שאתה אוהב.</div>
+      <div class="field" style="margin-top:14px">
+        <label>קישור לפלייליסט ספוטיפי <span class="opt">(לא חובה)</span></label>
+        <input class="input" id="mu-input" dir="ltr" placeholder="https://open.spotify.com/playlist/..." autocapitalize="off" autocomplete="off" spellcheck="false">
+        <div class="hint" style="margin-top:5px">בספוטיפי: שתף → העתק קישור, והדביקו כאן.</div>
+      </div>
+      <div class="hint" style="margin:10px 0 6px">או בחרו טעם מהיר:</div>
+      <div class="music-taste-row">
+        ${MUSIC_PRESETS.map((p) => `<button type="button" class="taste-chip" data-act="music-taste" data-taste="${p.id}">${esc(p.label)}</button>`).join("")}
+      </div>
+      <button class="btn btn-primary" data-act="save-music-link" style="margin-top:14px">שמירת הפלייליסט</button>
+      <button class="btn btn-ghost" data-act="music-silence" style="margin-top:8px">🔇 מעדיף/ה שקט</button>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:6px">אולי אחר כך</button>
+    `);
+    setTimeout(() => { const el = $("#mu-input"); if (el) el.focus(); }, 120);
+  }
+  // שמירת בחירת המוזיקה של הלקוח (מהמודאל או מטופס האישור)
+  function setMusicChoice(mu, msg) {
+    identity.music = mu;
+    saveIdentity();
+    closeModal();
+    toast(msg, "good", "🎧");
+  }
+  function saveMusicLink() {
+    const el = $("#mu-input");
+    const raw = (el && el.value.trim()) || "";
+    if (!raw) { toast("הדביקו קישור, בחרו טעם, או ״אולי אחר כך״", "", "🎧"); if (el) el.focus(); return; }
+    const sp = parseSpotify(raw);
+    if (!sp) { toast("הקישור אינו קישור ספוטיפי תקין — העתיקו מ״שתף → העתק קישור״", "", "⚠️"); if (el) el.focus(); return; }
+    setMusicChoice(sp, "הפלייליסט שלך יחכה לך בכיסא 🎧");
+  }
+  function saveMusicTaste(id) {
+    const p = musicPreset(id);
+    if (!p) return;
+    setMusicChoice({ taste: id }, "נשמר ✓ — נדאג למוזיקה שאוהב 🎵");
+  }
+  function saveMusicSilence() {
+    setMusicChoice({ silence: true }, "סומן שאת/ה מעדיף/ה שקט 🔇");
+  }
+
   // ההתראות נחסמו בדפדפן — אי אפשר לבקש שוב, אז מסבירים איך לפתוח ידנית
   function notifHelp() {
     const ios = /iPad|iPhone|iPod/.test(navigator.userAgent);
@@ -1318,6 +1442,30 @@
   function stopTrialTicker() {
     if (!trialTicker) return;
     clearInterval(trialTicker); trialTicker = null;
+  }
+
+  /* טיימר "עכשיו בכיסא" — בודק כל 30 שנ׳ אם הלקוח שבכיסא התחלף (חלף הזמן),
+     ורק אז מרנדר מחדש. כך הנגן המוטמע לא נטען מחדש כל הזמן — רק כשבאמת מתחלף
+     לקוח. פועל אצל הספר, במצב מוזיקה "אישי", כשהכרטיס מוצג על המסך. */
+  let chairTicker = null;
+  function startChairTicker() {
+    if (chairTicker) return;
+    if (view.route !== "owner") return;
+    if (!(view.ownerTab === "cal" || view.ownerTab === "bookings")) return;
+    const st = Store.get();
+    if (!st || musicMode(st) !== "personal") return;   // רק במצב אישי הכרטיס מתחלף לפי זמן
+    chairTicker = setInterval(() => {
+      const cur = Store.get();
+      if (view.route !== "owner" || !cur || musicMode(cur) !== "personal"
+          || !(view.ownerTab === "cal" || view.ownerTab === "bookings")) { stopChairTicker(); return; }
+      const shownEl = document.querySelector("[data-chair]");
+      const shown = shownEl ? shownEl.getAttribute("data-chair") : "";
+      if (currentChairId(cur) !== shown) render();   // התחלף לקוח בכיסא → לרענן
+    }, 30000);
+  }
+  function stopChairTicker() {
+    if (!chairTicker) return;
+    clearInterval(chairTicker); chairTicker = null;
   }
 
   // באנר עדין במסך הניהול — ספירת ימי ניסיון / התראה על מנוי שמסתיים
@@ -2219,6 +2367,10 @@
       <div class="field"><label>תאריך לידה <span class="opt">(לא חובה)</span></label>
         <input class="input" id="cf-dob" type="date" max="${u.dateKey(new Date())}" value="${esc(identity.dob || "")}">
         <div class="hint" style="margin-top:5px">כדי שהמספרה תדע מתי יום ההולדת שלך ותוכל לברך 🎂</div></div>` : ""}
+      ${(musicMode(st) === "personal" && !identity.music) ? `
+      <div class="field"><label>פלייליסט ספוטיפי <span class="opt">(לא חובה)</span></label>
+        <input class="input" id="cf-music" dir="ltr" placeholder="https://open.spotify.com/playlist/..." autocapitalize="off" autocomplete="off" spellcheck="false">
+        <div class="hint" style="margin-top:5px">וכשיגיע תורך — המוזיקה שאתה אוהב תחכה לך בכיסא 🎧</div></div>` : ""}
       <button class="btn btn-primary" data-act="do-book">${isResched ? "אישור המועד החדש" : "אישור וקביעת התור"}</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
     `);
@@ -2242,11 +2394,20 @@
     const dobEl = $("#cf-dob");
     let dob = (dobEl && dobEl.value) || identity.dob || "";
     if (dob && dob > u.dateKey(new Date())) { toast("תאריך לידה לא יכול להיות בעתיד", "", "🎂"); return null; }
+    // פלייליסט ספוטיפי (אופציונלי) — נבדק רק אם הוזן, כדי לא לחסום קביעת תור.
+    let music = identity.music || null;
+    const musicEl = $("#cf-music");
+    if (musicEl && musicEl.value.trim()) {
+      const sp = parseSpotify(musicEl.value.trim());
+      if (!sp) { toast("קישור הספוטיפי אינו תקין — אפשר להשאיר ריק", "", "⚠️"); musicEl.focus(); return null; }
+      music = sp;
+    }
     identity.firstName = first; identity.lastName = last; identity.name = name; identity.phone = phone;
     identity.email = email;
     if (dob) identity.dob = dob;
+    if (music) identity.music = music;
     saveIdentity();
-    return { first, last, phone, name, email, dob };
+    return { first, last, phone, name, email, dob, music };
   }
 
   /* קישור "הוסף ליומן Google" — נבנה מהתאריך והשעה של התור (אזור זמן ישראל) */
@@ -2308,6 +2469,7 @@
         serviceId: view.selService, date: bookedDate, start: bookedStart,
         userId: identity.userId, userName: contact.name, phone: contact.phone, email: contact.email,
         dob: contact.dob || identity.dob || "",
+        music: contact.music || identity.music || null,
         staff: staff,
         excludeBookingId: reschedId || undefined,   // אל תתנגש עם התור המקורי בעת שינוי מועד
       });
@@ -2759,6 +2921,10 @@
     if (!locked && tidyOwner() && SETTINGS_CHILDREN.includes(view.ownerTab)) {
       body = `<button class="btn btn-ghost btn-sm home-back" data-otab="settings">‹ חזרה להגדרות</button>` + body;
     }
+    // כרטיס "עכשיו בכיסא" — בראש היומן ומסך התורים (רק כשמצב המוזיקה פעיל)
+    if (!locked && (view.ownerTab === "cal" || view.ownerTab === "bookings")) {
+      body = nowChairCard(st) + body;
+    }
 
     const upcomingCount = st.bookings.filter((b) =>
       b.status !== "cancelled" && u.dateTime(b.date, b.start).getTime() > now).length;
@@ -3169,6 +3335,93 @@
     $("#modal").__icon = () => chosen;
   }
 
+  /* ---------- כרטיס "עכשיו בכיסא" (מוזיקה לספר) ----------
+     מוצג בראש היומן ומסך התורים כשמצב המוזיקה "אישי". מזהה את התור שמתקיים כעת
+     (או הבא בתור להיום) ומציג את הפלייליסט של אותו לקוח עם כפתור ניגון. */
+  function currentChairBooking(st) {
+    const todayKey = u.dateKey(new Date());
+    const nowMin = (function () { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); })();
+    const today = (st.bookings || [])
+      .filter((b) => b.status !== "cancelled" && b.date === todayKey && b.start && b.end)
+      .map((b) => ({ b, s: u.toMin(b.start), e: u.toMin(b.end) }))
+      .sort((a, z) => a.s - z.s);
+    // תור שמתקיים ממש עכשיו
+    const cur = today.find((x) => x.s <= nowMin && nowMin < x.e);
+    if (cur) return { b: cur.b, kind: "now", mins: 0 };
+    // אחרת — הבא בתור להיום (אם יש)
+    const next = today.find((x) => x.s > nowMin);
+    if (next) return { b: next.b, kind: "next", mins: next.s - nowMin };
+    return null;
+  }
+  // מזהה התור שאמור להופיע כעת בכרטיס — לשימוש הטיימר (להחליף רק כשהלקוח משתנה)
+  function currentChairId(st) { const c = currentChairBooking(st); return c ? c.b.id : ""; }
+
+  // גוש תצוגת המוזיקה בתוך הכרטיס — נגן מוטמע/טעם/שקט + כפתור ניגון בספוטיפי
+  function chairMusicBlock(mu) {
+    if (!mu) return `<div class="chair-music-empty">הלקוח/ה עדיין לא בחר/ה מוזיקה</div>`;
+    if (mu.silence) return `<div class="chair-music-empty">🔇 הלקוח/ה מעדיף/ה שקט — אין צורך במוזיקה</div>`;
+    if (mu.url) {
+      return `
+        ${spotifyEmbedHtml(mu, "compact")}
+        <button class="btn btn-spotify" data-act="play-music" data-url="${esc(mu.url)}" style="margin-top:10px">▶️ נגן בספוטיפי</button>`;
+    }
+    const p = mu.taste && musicPreset(mu.taste);
+    if (p) {
+      const url = spotifySearchUrl(p.q);
+      return `
+        <div class="chair-taste">🎵 טעם מוזיקלי: <b>${esc(p.label)}</b></div>
+        <button class="btn btn-spotify" data-act="play-music" data-url="${esc(url)}" style="margin-top:10px">▶️ חפש בספוטיפי</button>`;
+    }
+    return `<div class="chair-music-empty">הלקוח/ה עדיין לא בחר/ה מוזיקה</div>`;
+  }
+
+  function nowChairCard(st) {
+    if (!musicFeature()) return "";
+    const mode = musicMode(st);
+    if (mode === "off") return "";
+    const premiumNote = `<div class="chair-premium">💎 לניגון מלא דרך הרמקול צריך <b>Spotify Premium</b> בחשבון המספרה</div>`;
+
+    if (mode === "background") {
+      const bg = (st.shop && st.shop.bgMusic) || null;
+      if (!bg || !bg.url) {
+        return `
+        <div class="chair-card chair-bg">
+          <div class="chair-head"><span class="chair-badge">🎶 מוזיקת רקע</span></div>
+          <div class="chair-music-empty">לא הוגדר פלייליסט רקע.</div>
+          <button class="btn btn-sm" data-act="goto-music-settings" style="margin-top:10px">הגדרת פלייליסט רקע ›</button>
+        </div>`;
+      }
+      return `
+        <div class="chair-card chair-bg">
+          <div class="chair-head"><span class="chair-badge">🎶 מוזיקת רקע</span></div>
+          ${spotifyEmbedHtml(bg, "compact")}
+          <button class="btn btn-spotify" data-act="play-music" data-url="${esc(bg.url)}" style="margin-top:10px">▶️ נגן בספוטיפי</button>
+          ${premiumNote}
+        </div>`;
+    }
+
+    // מצב אישי
+    const c = currentChairBooking(st);
+    if (!c) return "";   // אין תור פעיל/קרוב היום — לא מציגים כרטיס
+    const b = c.b;
+    const mu = bkMusic(b);
+    const badge = c.kind === "now" ? "🎧 עכשיו בכיסא" : "🎧 הבא בתור";
+    const when = c.kind === "now"
+      ? `${esc(b.start)}–${esc(b.end)}`
+      : (c.mins <= 0 ? "מתחיל עכשיו" : c.mins < 60 ? `בעוד ${c.mins} דק׳ · ${esc(b.start)}` : `${esc(b.start)}`);
+    const showPremium = mu && (mu.url || (mu.taste && musicPreset(mu.taste)));
+    return `
+      <div class="chair-card${c.kind === "now" ? " chair-live" : ""}" data-chair="${esc(b.id)}">
+        <div class="chair-head">
+          <span class="chair-badge">${badge}</span>
+          <span class="chair-when">${when}</span>
+        </div>
+        <div class="chair-client">${esc(bkName(b) || "לקוח")} · <span class="chair-svc">${esc(b.serviceName || "")}</span></div>
+        ${chairMusicBlock(mu)}
+        ${showPremium ? premiumNote : ""}
+      </div>`;
+  }
+
   function ownerBookings(st) {
     const now = Date.now();
     const list = st.bookings
@@ -3181,6 +3434,10 @@
     // תאריך לידה לפי לקוח — נאסף מכל התורים שלו, כך שיוצג גם על תור שלא נשא אותו
     const dobByKey = {};
     st.bookings.forEach((b) => { const d = bkDob(b); if (d) dobByKey[clientKey(b)] = d; });
+    // העדפת מוזיקה לפי לקוח (רק במצב "אישי") — כדי להציג גם בשורת התור
+    const musicByKey = {};
+    const showMusicRow = musicMode(st) === "personal";
+    if (showMusicRow) st.bookings.forEach((b) => { const m = bkMusic(b); if (m) musicByKey[clientKey(b)] = m; });
 
     const addBtn = `<button class="btn btn-primary" data-act="add-booking" style="margin-bottom:14px">＋ הוספת תור ידני</button>`;
     if (!list.length) return addBtn + emptyState("🎟️", "אין תורים עדיין", "כשלקוח יקבע תור הוא יופיע כאן — או הוסיפו תור ידני");
@@ -3221,6 +3478,14 @@
             const near = !isPast && bi.days <= 30;
             const rel = bi.days === 0 ? "היום! 🎉" : bi.days === 1 ? "מחר" : "בעוד " + bi.days + " ימים";
             return `<div class="bk-sub bday-line${(!isPast && bi.days <= 14) ? " bday-hot" : ""}">🎂 יום הולדת: ${esc(bi.ddmm)}${near ? " · " + esc(rel) : ""}</div>`;
+          })()}
+          ${(() => {
+            if (!showMusicRow) return "";
+            const mu = bkMusic(b) || musicByKey[clientKey(b)];
+            const sum = musicSummary(mu);
+            if (!sum) return "";
+            const link = mu && (mu.url || (mu.taste && musicPreset(mu.taste) && spotifySearchUrl(musicPreset(mu.taste).q)));
+            return `<div class="bk-sub">${esc(sum)}${(link && !isPast) ? ` · <button type="button" class="play-inline" data-act="play-music" data-url="${esc(link)}">נגן ▶️</button>` : ""}</div>`;
           })()}
           ${b.priorNoShow ? `<div class="noshow-warn">⚠️ הלקוח לא הגיע בעבר${b.priorNoShow > 1 ? ` (${b.priorNoShow} פעמים)` : ""}</div>` : ""}
           ${b.spam ? `<div class="spam-warn">🛡️ ${b.spam.reason === "multi" ? "ללקוח " + b.spam.count + " תורים פעילים — כדאי לוודא שזה לגיטימי" : b.spam.reason === "burst" ? b.spam.count + " הזמנות ברצף קצר מאותו לקוח" : "הוזמנו " + b.spam.count + " תורים בזמן קצר"}</div>` : ""}
@@ -4034,6 +4299,63 @@
     `;
   }
 
+  /* ---------- כרטיס הגדרות המוזיקה (בהגדרות → עמוד הלקוח, try בלבד) ----------
+     מסביר את הפיצ׳ר, מדגיש את דרישת ה-Premium, ומאפשר לבחור מצב:
+     כבוי / אישי לכל לקוח / מוזיקת רקע קבועה (למספרות גדולות). */
+  function ownerMusicSection(st) {
+    const mode = musicMode(st);
+    const bg = (st.shop && st.shop.bgMusic) || null;
+    const modeBtn = (id, ico, title, sub) => `
+      <button type="button" class="music-mode-opt ${mode === id ? "selected" : ""}" data-act="music-mode" data-mode="${id}">
+        <span class="mm-ico">${ico}</span>
+        <span class="mm-body"><span class="mm-title">${esc(title)}</span><span class="mm-sub">${esc(sub)}</span></span>
+        <span class="mm-check">✓</span>
+      </button>`;
+    // כרטיס פלייליסט הרקע — רק במצב "רקע"
+    const bgCard = mode !== "background" ? "" : `
+      <div class="section-title" style="margin-top:18px">🎶 פלייליסט הרקע של המספרה</div>
+      <div class="card">
+        <p class="hint" style="margin-top:0">הדביקו קישור לפלייליסט ספוטיפי אחד — הוא יופיע לכם בכרטיס העליון עם כפתור ניגון, וירוץ ברקע לכל הלקוחות. (בספוטיפי: שתף → העתק קישור)</p>
+        <div class="field" style="margin-top:6px">
+          <input class="input" id="set-bgmusic" dir="ltr" placeholder="https://open.spotify.com/playlist/..." value="${esc(bg && bg.url || "")}" autocapitalize="off" autocomplete="off" spellcheck="false">
+        </div>
+        ${bg && bg.url ? spotifyEmbedHtml(bg, "compact") : ""}
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn btn-primary btn-sm" data-act="save-bg-music">שמירת פלייליסט הרקע</button>
+          ${bg && bg.url ? `<button class="btn btn-danger btn-sm" data-act="clear-bg-music">הסרה</button>` : ""}
+        </div>
+      </div>`;
+    return `
+      <div class="section-title">🎧 מוזיקה בכיסא</div>
+      <div class="card">
+        <p class="hint" style="margin-top:0;margin-bottom:12px">תנו לכל לקוח לשלוח את הפלייליסט שלו — וכשמגיע תורו, המוזיקה שאוהב מחכה לו בכיסא. חוויה קטנה שעושה הבדל גדול.</p>
+        <div class="music-premium-note">
+          <span class="mpn-ico">💎</span>
+          <div>
+            <b>שימו לב:</b> הפיצ׳ר עובד רק למספרות שיש להן חשבון <b>Spotify Premium</b>.
+            כדי לנגן פלייליסט מלא דרך הרמקול צריך Premium (בלי Premium אפשר עדיין לראות ולפתוח את הפלייליסט, אך ההשמעה מוגבלת — פרסומות ודגימות).
+          </div>
+        </div>
+        <div class="music-mode-list" style="margin-top:14px">
+          ${modeBtn("off", "🚫", "כבוי", "בלי מוזיקה במערכת")}
+          ${modeBtn("personal", "🎧", "אישי לכל לקוח", "כל לקוח שולח פלייליסט — מוצג כשמגיע תורו. מתאים למספרה עם כיסא אחד")}
+          ${modeBtn("background", "🎶", "מוזיקת רקע קבועה", "פלייליסט אחד שרץ ברקע — למספרות גדולות שעובדות עם כמה לקוחות במקביל")}
+        </div>
+      </div>
+      ${bgCard}`;
+  }
+
+  /* נגן ספוטיפי מוטמע (iframe). mode="compact" לגובה נמוך יותר בכרטיסים.
+     הנגן מציג עטיפה, שם ופלייליסט; השמעה מלאה דורשת התחברות ל-Spotify Premium. */
+  function spotifyEmbedHtml(mu, mode) {
+    if (!mu || !mu.embed) return "";
+    const h = mode === "compact" ? 152 : 232;
+    return `<iframe class="sp-embed" src="${esc(mu.embed)}" width="100%" height="${h}"
+      style="border:0;border-radius:12px;margin-top:12px" loading="lazy"
+      allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+      allowfullscreen></iframe>`;
+  }
+
   /* ---------- עורך רשימת הספרים (בהגדרות) ---------- */
   let staffEdit = [];
   function staffEditorBody() {
@@ -4480,7 +4802,10 @@
           { id: "showHours", type: "toggle", key: "showHours", ico: "🕒", color: "#8b6f47", label: "שעות פעילות", sub: "הצגת שעות הפעילות בעמוד הלקוח", on: cShow(st, "showHours") },
           { id: "showShare", type: "toggle", key: "showShare", ico: "📣", color: "#ef4444", label: "כפתור שיתוף", sub: "הצגת כרטיס השיתוף בעמוד הלקוח", on: cShow(st, "showShare") },
           { id: "gallery", ico: "📷", color: "#6366f1", label: "ניהול הגלריה", val: Store.getGallery().length + " תמונות", card: cGallery },
-        ],
+        ].concat(musicFeature() ? [{ id: "music", ico: "🎧", color: "#1DB954",
+          label: "מוזיקה בכיסא", sub: "פלייליסט אישי / מוזיקת רקע (Spotify)",
+          val: ({ off: "כבוי", personal: "אישי", background: "רקע" })[musicMode(st)],
+          card: ownerMusicSection(st) }] : []),
         alerts: [
           { id: "notif", ico: "🔔", color: "#f97316", label: "התראות", val: Notify.permission() === "granted" ? "פעילות" : "כבויות", card: cNotif },
           { id: "security", ico: "🔒", color: "#22c55e", label: "אבטחת החשבון", val: (st.shop && st.shop.ownerUid) ? "מאובטח" : "לא מאובטח", card: cSecurity },
@@ -4845,6 +5170,7 @@
       updateTabbarArrows();
     }
     startTrialTicker();
+    startChairTicker();
   }
 
   /* ---------- חצים בסרגל הבעלים — כדי שהספר ידע שיש עוד לשוניות ---------- */
@@ -5627,6 +5953,11 @@
 
         case "enable-notif": handleEnableNotif(); break;
         case "save-birthday": saveBirthday(); break;
+        case "save-music-link": saveMusicLink(); break;
+        case "music-taste": saveMusicTaste(t.dataset.taste); break;
+        case "music-silence": saveMusicSilence(); break;
+        // כפתור ניגון בכרטיס הספר — פותח את הפלייליסט/החיפוש בספוטיפי
+        case "play-music": if (t.dataset.url) openExternal(t.dataset.url); break;
         case "dismiss-spam": spamDismissed = Date.now(); render(); break;
         case "notif-help": notifHelp(); break;
         case "export-report": exportReportCsv(); break;
@@ -6023,6 +6354,37 @@
           await Store.setDay(day, patch);
           haptic(12); render(); break;
         }
+
+        // ---------- מוזיקה בכיסא (ספוטיפי) ----------
+        // בחירת מצב: כבוי / אישי לכל לקוח / מוזיקת רקע
+        case "music-mode": {
+          const mode = t.dataset.mode;
+          if (["off", "personal", "background"].includes(mode)) {
+            await Store.saveShop({ musicMode: mode });
+            haptic(12);
+            toast(mode === "off" ? "המוזיקה כובתה" : mode === "personal" ? "מצב: אישי לכל לקוח 🎧" : "מצב: מוזיקת רקע 🎶", "good", "🎧");
+            render();
+          }
+          break;
+        }
+        // שמירת פלייליסט הרקע של המספרה (מצב "רקע")
+        case "save-bg-music": {
+          const el = $("#set-bgmusic");
+          const raw = (el && el.value.trim()) || "";
+          if (!raw) { toast("הדביקו קישור לפלייליסט ספוטיפי", "", "🎧"); if (el) el.focus(); return; }
+          const sp = parseSpotify(raw);
+          if (!sp) { toast("הקישור אינו קישור ספוטיפי תקין — העתיקו מ״שתף → העתק קישור״", "", "⚠️"); if (el) el.focus(); return; }
+          await Store.saveShop({ bgMusic: sp });
+          toast("פלייליסט הרקע נשמר ✓ 🎶", "good", "🎧"); render(); break;
+        }
+        case "clear-bg-music":
+          await Store.saveShop({ bgMusic: null });
+          toast("פלייליסט הרקע הוסר", "", "🎧"); render(); break;
+        // קפיצה מכרטיס "מוזיקת רקע" ישירות להגדרת הפלייליסט
+        case "goto-music-settings":
+          view.ownerTab = "settings"; view.settingsPage = "client"; view.settingsItem = "music";
+          try { localStorage.setItem("ug_otab__" + SHOP, "settings"); } catch (e2) {}
+          render(); break;
 
         // עורך רשימת הספרים
         case "edit-staff": openStaffEditor(); break;
@@ -6562,6 +6924,7 @@
     if (!privacyAccepted() && !gateShowing) setTimeout(() => promptPrivacy(), 600);
     else setTimeout(() => promptNotif(), 1200);   // הזמנה לאישור התראות — בכל כניסה עד שיאשר
     setTimeout(() => promptBirthday(), 2400);      // בקשת תאריך לידה — אחרי בקשת ההתראות
+    setTimeout(() => promptMusic(), 3800);         // בקשת פלייליסט — אחרי תאריך הלידה
     Store.subscribe(onStoreChange);
     // מספרה מאובטחת שמנוהלת בלי חשבון הבעלים — שמירה תיחסם ע״י חוקי האבטחה.
     // במקום כישלון שקט, מציעים לספר להתחבר עם החשבון (יש גם "שכחתי סיסמה").
