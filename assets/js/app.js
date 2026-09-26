@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "166";
+  const APP_VERSION = "167";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -155,12 +155,13 @@
     const m = st && st.shop && st.shop.musicMode;
     return (m === "personal" || m === "background") ? m : "off";
   }
-  // טעמים מהירים ללקוח שאין לו פלייליסט מוכן — נשמרים כתגית + חיפוש בספוטיפי
+  /* צ׳יפים לבחירה מהירה של הלקוח (הקשה אחת). לכל צ׳יפ פלייליסט ספוטיפי אמיתי
+     שבעל המספרה בחר — כך כשהלקוח בוחר סגנון, אצל הספר מוצג מיד נגן מוכן ולחיצה
+     אחת מנגנת אותו (בלי לחפש). הקישורים סופקו ע״י בעל המספרה. */
   const MUSIC_PRESETS = [
-    { id: "mizrahit", label: "מזרחית 🎤", q: "להיטים מזרחית" },
-    { id: "hiphop", label: "היפ-הופ 🎧", q: "hip hop" },
-    { id: "chill", label: "רגוע 😌", q: "chill vibes" },
-    { id: "nineties", label: "שנות ה-90 📼", q: "90s hits" },
+    { id: "mizrahit", label: "מזרחית 🎤", url: "https://open.spotify.com/playlist/5yD2Py0dPdlAjLRPrrx4Rh" },
+    { id: "mizrahit_heavy", label: "מזרחית כבד 🔥", url: "https://open.spotify.com/playlist/0HGJ7OwXOwVVRK4GV4ik9g" },
+    { id: "mediterranean", label: "ים תיכוני 🌊", url: "https://open.spotify.com/playlist/37i9dQZF1DWUCy47lptxiG" },
   ];
   function musicPreset(id) { return MUSIC_PRESETS.find((p) => p.id === id) || null; }
   // קישור חיפוש בספוטיפי (לפלייליסטים) לפי טקסט טעם
@@ -196,18 +197,18 @@
   function musicSummary(mu) {
     if (!mu) return "";
     if (mu.silence) return "🔇 מעדיף/ה שקט";
-    if (mu.url) return "🎧 פלייליסט ספוטיפי";
+    if (mu.url) return "🎧 " + (mu.label || "פלייליסט ספוטיפי");   // צ׳יפ שמור עם תווית
     if (mu.query) return "🎵 " + mu.query;
     const p = mu.taste && musicPreset(mu.taste);   // תאימות לאחור (בחירת "טעם" ישנה)
     if (p) return "🎵 " + p.label;
     return "";
   }
-  // הטקסט לחיפוש בספוטיפי מתוך העדפת הלקוח (חופשי או "טעם" ישן) — לכפתור הניגון
+  // הטקסט לחיפוש בספוטיפי מתוך העדפת הלקוח (חופשי או "טעם" ישן ללא קישור)
   function musicSearchQuery(mu) {
     if (!mu) return "";
     if (mu.query) return mu.query;
     const p = mu.taste && musicPreset(mu.taste);
-    return p ? p.q : "";
+    return p ? (p.q || p.label || "") : "";   // תאימות לאחור (טעם ישן)
   }
   // התווית שמוצגת לספר ("מבקש/ת: ...") — טקסט חופשי או שם ה"טעם"
   function musicWishLabel(mu) {
@@ -1271,7 +1272,11 @@
   function saveMusicTaste(id) {
     const p = musicPreset(id);
     if (!p) return;
-    setMusicChoice({ taste: id }, "נשמר ✓ — נדאג למוזיקה שאוהב 🎵");
+    // הצ׳יפ מפנה לפלייליסט אמיתי → נשמר בדיוק כמו קישור שהלקוח מדביק (עם נגן
+    // מוטמע אצל הספר), בתוספת התווית שנבחרה לתצוגה נעימה ברשימות.
+    const sp = parseSpotify(p.url);
+    if (!sp) { setMusicChoice({ query: p.label }, "נשמר ✓ 🎵"); return; }
+    setMusicChoice(Object.assign(sp, { preset: id, label: p.label }), "נשמר ✓ — " + p.label + " יחכה לך בכיסא 🎵");
   }
   function saveMusicSilence() {
     setMusicChoice({ silence: true }, "סומן שאת/ה מעדיף/ה שקט 🔇");
