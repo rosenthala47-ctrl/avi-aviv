@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "169";
+  const APP_VERSION = "170";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -872,6 +872,7 @@
       ${notifBanner()}
       ${arrivalBanner(st)}
       ${reviewBanner(st)}
+      ${clientMusicCard(st)}
       ${aboutCard(st)}
       ${cShow(st, "showGallery") ? homeGallery() : ""}
       ${cShow(st, "showHours") ? hoursCard(st) : ""}
