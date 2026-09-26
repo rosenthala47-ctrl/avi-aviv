@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "168";
+  const APP_VERSION = "169";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1233,22 +1233,30 @@
     musicPromptShown = true;
     openMusicModal();
   }
+  /* פתיחת מודאל בחירת המוזיקה. מי שכבר בחר בעבר (identity.music קיים) — הצ׳יפ
+     שנבחר מסומן, השדה החופשי מתמלא מראש, וכותרת/כפתור משתנים ל"עדכון" —
+     כדי שגם מי שכבר ענה יוכל לראות מההתחלה סגנונות חדשים שנוספו ולהחליף בחירה. */
   function openMusicModal() {
+    const cur = identity.music || null;
+    const isEdit = !!cur;
+    const curPresetId = cur && cur.preset;
+    const prefillText = cur && !cur.silence && !curPresetId ? (cur.query || cur.url || "") : "";
     openModal(`
-      <div class="m-title">🎧 איזו מוזיקה תרצה בכיסא?</div>
+      <div class="m-title">🎧 ${isEdit ? "עדכון המוזיקה שלך בכיסא" : "איזו מוזיקה תרצה בכיסא?"}</div>
       <div class="m-sub">כשיגיע תורך, המספרה תנגן בדיוק את מה שאתה אוהב. בלי לצאת מהאפליקציה.</div>
+      ${isEdit ? `<div class="hint" style="margin-top:8px">הבחירה הנוכחית שלך: <b>${esc(musicSummary(cur) || "—")}</b></div>` : ""}
       <div class="hint" style="margin:14px 0 8px">בחירה מהירה — הקשה אחת:</div>
       <div class="music-taste-row">
-        ${MUSIC_PRESETS.map((p) => `<button type="button" class="taste-chip" data-act="music-taste" data-taste="${p.id}">${esc(p.label)}</button>`).join("")}
+        ${MUSIC_PRESETS.map((p) => `<button type="button" class="taste-chip${p.id === curPresetId ? " selected" : ""}" data-act="music-taste" data-taste="${p.id}">${esc(p.label)}</button>`).join("")}
       </div>
       <div class="field" style="margin-top:16px">
         <label>או כתבו מה בא לכם לשמוע</label>
-        <input class="input" id="mu-input" placeholder="אמן, סגנון או שיר — למשל: עומר אדם" autocapitalize="off" autocomplete="off" spellcheck="false">
+        <input class="input" id="mu-input" placeholder="אמן, סגנון או שיר — למשל: עומר אדם" value="${esc(prefillText)}" autocapitalize="off" autocomplete="off" spellcheck="false">
         <div class="hint" style="margin-top:5px">יש לכם פלייליסט מוכן בספוטיפי? אפשר גם להדביק כאן את הקישור שלו.</div>
       </div>
-      <button class="btn btn-primary" data-act="save-music-text" style="margin-top:12px">שמירה</button>
+      <button class="btn btn-primary" data-act="save-music-text" style="margin-top:12px">${isEdit ? "עדכון" : "שמירה"}</button>
       <button class="btn btn-ghost" data-act="music-silence" style="margin-top:8px">🔇 מעדיף/ה שקט</button>
-      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:6px">אולי אחר כך</button>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:6px">${isEdit ? "סגירה" : "אולי אחר כך"}</button>
     `);
   }
   // שמירת בחירת המוזיקה של הלקוח (מהמודאל או מטופס האישור)
@@ -2246,6 +2254,24 @@
       </div>`;
   }
 
+  /* כרטיס "מוזיקה בכיסא שלי" במסך "שלי" — מציג את הבחירה הנוכחית (אם יש) עם
+     כפתור "שינוי", כדי שגם לקוח שכבר בחר בעבר יוכל לראות סגנונות חדשים שנוספו
+     ולעדכן את בחירתו, לא רק בפעם הראשונה שנשאל. */
+  function clientMusicCard(st) {
+    if (musicMode(st) !== "personal" || !clientIdentified()) return "";
+    const mu = identity.music || null;
+    const sum = musicSummary(mu);
+    return `
+      <div class="card music-mine-card">
+        <div class="mmc-ico">🎧</div>
+        <div class="mmc-body">
+          <b>מוזיקה בכיסא שלי</b>
+          <div class="hint">${sum ? esc(sum) : "עדיין לא בחרת — נבחר בשבילך משהו נחמד"}</div>
+        </div>
+        <button class="btn btn-sm" data-act="edit-music">${sum ? "שינוי" : "בחירה"}</button>
+      </div>`;
+  }
+
   function clientMine(st) {
     const now = Date.now();
     const mine = st.bookings
@@ -2261,7 +2287,7 @@
       .sort((a, z) => a.ts - z.ts);
 
     if (!mine.length && !myWaits.length) {
-      return alertBanner(st) + reviewBanner(st) +
+      return alertBanner(st) + reviewBanner(st) + clientMusicCard(st) +
         emptyState("🎟️", "אין לך תורים", condensedClient() ? "לחצו ״בית״ ואז ״הזמנת תור״ כדי לקבוע את התור הראשון" : "עברו ל״קביעת תור״ כדי לקבוע את התור הראשון");
     }
     const card = (x, isPast) => {
@@ -2295,7 +2321,7 @@
         ${actions}
       </div>`;
     };
-    let html = alertBanner(st) + reviewBanner(st);
+    let html = alertBanner(st) + reviewBanner(st) + clientMusicCard(st);
     // "קבע שוב כמו פעם קודמת" — קיצור מהיר על בסיס התור האחרון (לקוחות חוזרים)
     const lastBk = past.length ? past[0].b : null;
     if (lastBk) {
@@ -5993,6 +6019,7 @@
         case "enable-notif": handleEnableNotif(); break;
         case "save-birthday": saveBirthday(); break;
         case "save-music-text": saveMusicText(); break;
+        case "edit-music": openMusicModal(); break;
         case "music-taste": saveMusicTaste(t.dataset.taste); break;
         case "music-silence": saveMusicSilence(); break;
         // כפתור ניגון בכרטיס הספר — פותח את הפלייליסט/החיפוש בספוטיפי

@@ -1348,6 +1348,7 @@ a.nav-btn { flex: 1; color: var(--text); text-decoration: none; }
   cursor: pointer; transition: .15s;
 }
 .taste-chip:active { transform: scale(.97); border-color: #1DB954; }
+.taste-chip.selected { border-color: #1DB954; background: rgba(29,185,84,.14); box-shadow: 0 0 0 2px rgba(29,185,84,.20); }
 
 /* כפתור בסגנון ספוטיפי */
 .btn-spotify { background: #1DB954 !important; color: #04130a !important; border: none !important; font-weight: 800; width: 100%; }
@@ -1383,3 +1384,9 @@ a.nav-btn { flex: 1; color: var(--text); text-decoration: none; }
   border-radius: var(--radius-sm); padding: 11px 13px; font-size: 12.5px;
   line-height: 1.55; color: var(--text);
 }
+
+/* כרטיס "מוזיקה בכיסא שלי" במסך "שלי" של הלקוח */
+.music-mine-card { display: flex; align-items: center; gap: 13px; padding: 14px 16px; }
+.mmc-ico { font-size: 26px; flex: none; }
+.mmc-body { flex: 1; min-width: 0; }
+.mmc-body b { font-size: 15px; }
