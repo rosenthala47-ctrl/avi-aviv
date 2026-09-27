@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "171";
+  const APP_VERSION = "172";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -171,8 +171,12 @@
   ];
   function musicPreset(id) { return MUSIC_PRESETS.find((p) => p.id === id) || null; }
   // קישור חיפוש בספוטיפי (לפלייליסטים) לפי טקסט טעם
+  /* קישור חיפוש בספוטיפי לפי טקסט הבקשה של הלקוח.
+     חשוב: בלי סיומת סינון (כמו "/playlists") בסוף הכתובת. בדפדפן הסיומת עובדת,
+     אבל אפליקציית ספוטיפי בנייד לוקחת את הקטע האחרון בכתובת בתור מילת החיפוש —
+     ואז היא חיפשה "playlists" במקום את השם שהלקוח ביקש. */
   function spotifySearchUrl(q) {
-    return "https://open.spotify.com/search/" + encodeURIComponent(q || "") + "/playlists";
+    return "https://open.spotify.com/search/" + encodeURIComponent(q || "");
   }
   /* פיענוח קישור ספוטיפי לכל צורותיו: קישור אתר (עם/בלי קידומת שפה intl-xx
      ובלי פרמטרי ?si=), או מזהה URI (spotify:playlist:ID). מחזיר סוג+מזהה או null.
