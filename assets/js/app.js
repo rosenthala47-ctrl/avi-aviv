@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "175";
+  const APP_VERSION = "176";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -190,7 +190,37 @@
     { name: "ישי ריבו", url: "https://open.spotify.com/artist/3VTm1513t2LL1mSKzzyQuj", aka: ["ishay ribo"] },
     { name: "פאר טסי", url: "https://open.spotify.com/artist/24HI9hevLjIQtj7xp2CeHs", aka: ["peer tasi"] },
     { name: "נדב חנציס", url: "https://open.spotify.com/artist/4ZXLucEFePscKcgUlD0Sf9", aka: [] },
+    { name: "עדן בן זקן", url: "https://open.spotify.com/artist/2eUKkTNZsIuZzV95DM0cbt", aka: ["eden ben zaken"] },
+    { name: "נתן גושן", url: "https://open.spotify.com/artist/5CXvT1JutlWVLJN8YEOf1h", aka: ["nathan goshen", "natan goshen"] },
+    { name: "ששון איפרם שאולוב", url: "https://open.spotify.com/artist/1Wq2STGiL7ZaIHAm5jMakc", aka: ["ששון שאולוב", "sasson ifram shaulov"] },
+    { name: "מרגי", url: "https://open.spotify.com/artist/6grXi1oBW9ayoP4FTt4r2Z", aka: ["margi"] },
+    { name: "יסמין מועלם", url: "https://open.spotify.com/artist/3cDi1D2FHMVgljfdB1QVgr", aka: ["jasmin moallem"] },
+    { name: "מור", url: "https://open.spotify.com/artist/0oI0Dm98K3jmtSbfTLiChX", aka: [] },
+    { name: "אליעד נחום", url: "https://open.spotify.com/artist/3F78m0H4Y4a1Dvd79TKVvw", aka: ["eliad nachum"] },
+    { name: "בניה ברבי", url: "https://open.spotify.com/artist/0WjQnf1rQ0tY84gGgjrQQ9", aka: ["benaia barabi"] },
+    { name: "דודו אהרון", url: "https://open.spotify.com/artist/0MGUXM1urhmX05MHj5oVsM", aka: ["dudu aharon"] },
+    { name: "אמיר דדון", url: "https://open.spotify.com/artist/398u4UqbG8yzv4H08Mc1Eq", aka: ["amir dadon"] },
+    { name: "רביד פלוטניק", url: "https://open.spotify.com/artist/2JQK9mzxqKz16lSgICHDTx", aka: ["נצ'י נצ'", "ravid plotnik"] },
+    { name: "טונה", url: "https://open.spotify.com/artist/17pbOSPIn3lmY0vHhOlKGL", aka: ["tuna"] },
+    { name: "ישי לוי", url: "https://open.spotify.com/artist/453AwzpC0rSLstVxT0LZpy", aka: ["ishay levi"] },
+    { name: "זוהר ארגוב", url: "https://open.spotify.com/artist/3RUaBohZGA9vusdMDJBD1V", aka: ["zohar argov"] },
+    { name: "שלמה ארצי", url: "https://open.spotify.com/artist/2W0dQPsEPd0tz7cj95gUse", aka: ["shlomo artzi"] },
+    { name: "עידן רייכל", url: "https://open.spotify.com/artist/5EBnQEKoaiAk37Q7cfGrE1", aka: ["idan raichel"] },
+    { name: "עידן עמדי", url: "https://open.spotify.com/artist/6Kwkb16geAot0de45IW9Ox", aka: ["idan amedi"] },
+    { name: "נועם בתן", url: "https://open.spotify.com/artist/0RzO7EUuiJ1urqHiJecPdn", aka: ["noam bettan"] },
   ];
+  // מילות מילוי שלקוחות כותבים לפני/אחרי שם ("שירים של טונה", "מור בבקשה")
+  const MUSIC_FILLERS_BEFORE = ["שירים של", "השירים של", "שירי", "מוזיקה של", "פלייליסט של", "להיטים של", "הלהיטים של", "הזמר", "הזמרת", "הראפר", "songs by", "songs of", "music by"];
+  const MUSIC_FILLERS_AFTER = ["בבקשה", "פליז", "please"];
+  function stripMusicFillers(n) {
+    let s = " " + n + " ", changed = true;
+    while (changed) {
+      changed = false;
+      for (const f of MUSIC_FILLERS_BEFORE) { const k = " " + normName(f) + " "; if (s.startsWith(k)) { s = " " + s.slice(k.length); changed = true; } }
+      for (const f of MUSIC_FILLERS_AFTER) { const k = " " + normName(f) + " "; if (s.endsWith(k)) { s = s.slice(0, s.length - k.length) + " "; changed = true; } }
+    }
+    return s.trim();
+  }
   // נרמול להשוואת שמות: אותיות קטנות, בלי ניקוד וסימנים, אותיות סופיות כרגילות
   // ("עומר אדמ" = "עומר אדם"), רווחים בודדים
   function normName(s) {
@@ -201,16 +231,22 @@
       .trim().replace(/\s+/g, " ");
   }
   /* מציאת זמר מהרשימה בתוך מה שהלקוח כתב. מתאים לשם מלא בלבד (לא "עומר" לבד),
-     גם בתוך משפט ("שירים של עומר אדם", "עומר אדם בבקשה"). כמה זמרים → הראשון בטקסט. */
+     גם בתוך משפט ("שירים של עומר אדם", "עומר אדם בבקשה"). כמה זמרים → הראשון בטקסט.
+     שם של מילה אחת ("טונה", "מור", "מרגי") מתאים רק כשזה כל מה שנכתב (אחרי מילות
+     מילוי) — אחרת "סלט טונה" או "מור כהן" היו מתאימים בטעות. */
   function musicArtistMatch(text) {
-    const t = " " + normName(text) + " ";
-    if (t.trim().length < 3) return null;
+    const n = normName(text);
+    if (n.length < 3) return null;
+    const t = " " + n + " ";
+    const bare = stripMusicFillers(n);
     let best = null, bestPos = Infinity;
     for (const a of MUSIC_ARTISTS) {
-      for (const n of [a.name].concat(a.aka || [])) {
-        const k = normName(n);
+      for (const nm of [a.name].concat(a.aka || [])) {
+        const k = normName(nm);
         if (k.length < 3) continue;
-        const pos = t.indexOf(" " + k + " ");
+        let pos = -1;
+        if (k.indexOf(" ") === -1) { if (bare === k) pos = 0; }   // מילה אחת — רק התאמה מלאה
+        else pos = t.indexOf(" " + k + " ");
         if (pos !== -1 && pos < bestPos) { best = a; bestPos = pos; }
       }
     }
