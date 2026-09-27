@@ -101,6 +101,14 @@ tools/bump-version.sh 106
   או סוגר; נזכר פר-מכשיר ב-`localStorage` (`ug_music_news_seen__<shop>`), בלי כתיבה למספרה.
 - עוגנים בקוד: `MUSIC_PRESETS`, `parseSpotify`, `musicMode`, `musicFeature`,
   `openMusicModal`, `saveMusicTaste/Text`, `nowChairCard`, `clientMusicCard`.
+- **המרת בקשת טקסט לנגן (v174):** בקשה כמו "עדן בן זקן" נשמרת בתור כ-`music.query`.
+  הקרון (`.github/scripts/music-resolve.js`, שלב מבודד בסוף `send-push.js`) מחפש
+  בספוטיפי וכותב לתור `url/embed/type/id/label` (אמן/שיר/פלייליסט) — בצומת הגלוי או
+  בכספת, לפי המקום שבו המוזיקה נמצאת. אין התאמה בטוחה → `resolveTried` ונשאר כפתור
+  חיפוש. בלי `SPOTIFY_CLIENT_ID/SECRET` השלב מדלג בשקט. מגבלת זמן: 8 שנ׳ לבקשה,
+  עצירה בתקלה הראשונה, 25 שנ׳ לכל השלב — כדי לא לעכב את התזכורות של הריצה הבאה.
+  גם קישור מקוצר (`spotify.link`) נשמר כ-`music.link` והקרון ממיר אותו לקישור מלא.
+  בדיקה: `music-resolve.js` מייצא פונקציות טהורות — אפשר לבדוק מול db ו-fetch מדומים.
 
 הערה: ספוטיפי חוסם oEmbed מכתובות דאטה-סנטר, ולכן בבדיקות הנגן המוטמע לא נטען
 (ריבוע אפור) — זה תקין; באתר החי בדפדפן הלקוח הוא נטען.
@@ -124,7 +132,8 @@ Playwright עם `executablePath: '/opt/pw-browsers/chromium'` ו-`--no-sandbox`.
 ## סודות
 
 `FIREBASE_SERVICE_ACCOUNT` נמצא ב-GitHub Secrets בלבד — לעולם לא במאגר
-ולא בצ׳אט. ערכי `config.js` (apiKey וכו׳) אינם סודיים; הם מוגנים בכללי
+ולא בצ׳אט. כך גם `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` (לחיפוש זמרים
+בקרון) — המשתמש מדביק אותם ישירות ב-GitHub של `ori-grushko`, לא שולח אותם בצ׳אט. ערכי `config.js` (apiKey וכו׳) אינם סודיים; הם מוגנים בכללי
 `database.rules.json`.
 
 גיבויים מכילים שמות וטלפונים של לקוחות — הם עולים כ-artifact פרטי, לא

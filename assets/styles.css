@@ -1397,3 +1397,13 @@ a.nav-btn { flex: 1; color: var(--text); text-decoration: none; }
   line-height: 1.55; color: var(--muted);
 }
 .music-next-note b { color: var(--text); }
+/* מוזיקה בכיסא: זיהוי קישור חי + שורת "הדבקת קישור" + "לא זה?" אצל הספר */
+.mu-detect { font-size: 12px; margin-top: 6px; min-height: 0; line-height: 1.5; }
+.mu-detect .mu-ok { color: #1DB954; font-weight: 700; }
+.mu-detect .mu-warn { color: #f59e0b; font-weight: 600; }
+.mu-link-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 12px;
+  background: var(--surface-2); border: 1px dashed var(--line); border-radius: var(--radius-sm); }
+.mu-link-row .mu-link-txt { flex: 1; min-width: 0; font-size: 12px; line-height: 1.55; color: var(--muted); }
+.mu-link-row .mu-link-txt b { color: var(--text); }
+.mu-link-row .mu-paste { width: auto; flex: none; white-space: nowrap; }
+.chair-alt { display: block; margin: 8px auto 0; font-size: 12.5px; font-weight: 600; }

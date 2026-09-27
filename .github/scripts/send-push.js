@@ -13,6 +13,11 @@ process.env.TZ = "Asia/Jerusalem";
 
 const admin = require("firebase-admin");
 const crypto = require("crypto");
+// מוזיקה בכיסא — ראו music-resolve.js. נטען בתוך try: תקלה במודול הזה לעולם
+// לא תפיל את הקרון ותעצור את התזכורות.
+let resolveMusicQueries = null;
+try { ({ resolveMusicQueries } = require("./music-resolve")); }
+catch (e) { console.warn("מודול המוזיקה לא נטען — ממשיכים בלעדיו:", (e && e.message) || e); }
 
 /* ניקוי חד-פעמי של סיסמאות ניהול גלויות: ממיר shop.ownerPass (טקסט גלוי) ל-hash
    מלוחלח (shop.ownerPassHash) ומוחק את הגלויה. הלקוח מחשב את אותו hash בדיוק
@@ -507,6 +512,17 @@ function apptTs(date, start) {
     const strict = await migrateStrictBookings(db, shopsVal);
     if (strict) console.log(`תורים מחמירים: הופעל ל-${strict} מספרות.`);
   } catch (e) { console.warn("הפעלת תורים מחמירים נכשלה:", (e && e.message) || e); }
+
+  // מוזיקה בכיסא: בקשת טקסט של לקוח ("עדן בן זקן") → נגן ספוטיפי אמיתי בתור.
+  // מבודד לחלוטין ורץ אחרי כל ההתראות — כישלון או עיכוב של ספוטיפי לא פוגע בהן.
+  // בלי SPOTIFY_CLIENT_ID/SECRET ב-GitHub Secrets — מדלג בשקט (הספר רואה כפתור חיפוש).
+  if (resolveMusicQueries) try {
+    const mr = await resolveMusicQueries(db, shopsVal, privVal, { shopFilter, now, log: (m) => console.log(m) });
+    if (mr.resolved || mr.links || mr.notFound) {
+      console.log(`מוזיקה: ${mr.resolved} בקשות הומרו לנגן, ${mr.links} קישורים מקוצרים הומרו, ${mr.notFound} ללא התאמה (קריאות לספוטיפי: ${mr.apiCalls}).`);
+    }
+    if (!process.env.SPOTIFY_CLIENT_ID && mr.skipped) console.log(`מוזיקה: ${mr.skipped} בקשות ממתינות — חסרים SPOTIFY_CLIENT_ID/SECRET ב-GitHub Secrets.`);
+  } catch (e) { console.warn("המרת בקשות מוזיקה נכשלה:", (e && e.message) || e); }
 
   if (firstRun) console.log("ריצה ראשונה — סימון מצב קיים בלבד, ללא שליחה.");
   else console.log(`הושלם${shopFilter ? ` (סינון: ${shopFilter} בלבד)` : ""}. מספרות=${shopFilter ? 1 : shopIds.length}, alerts חדשים=${totalNewA}, bookings חדשים=${totalNewB}, פושים שנשלחו=${sent}`);

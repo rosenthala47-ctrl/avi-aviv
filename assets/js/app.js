@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "173";
+  const APP_VERSION = "174";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -207,12 +207,24 @@
   function musicSummary(mu) {
     if (!mu) return "";
     if (mu.silence) return "🔇 מעדיף/ה שקט";
-    if (mu.url) return "🎧 " + (mu.label || "פלייליסט ספוטיפי");   // צ׳יפ שמור עם תווית
+    // יש נגן: מה שהלקוח כתב (אם הקרון המיר בקשת טקסט), אחרת תווית הצ׳יפ / הקישור
+    if (mu.url) return "🎧 " + (mu.query || mu.label || spotifyTypeLabel(mu.type) + " מספוטיפי");
+    if (mu.link) return "🔗 קישור לספוטיפי";
     if (mu.query) return "🎵 " + mu.query;
     const p = mu.taste && musicPreset(mu.taste);   // תאימות לאחור (בחירת "טעם" ישנה)
     if (p) return "🎵 " + p.label;
     return "";
   }
+  // הקישור שכפתור "נגן" פותח: נגן אמיתי → קישור מקוצר → חיפוש לפי הטקסט
+  function musicPlayUrl(mu) {
+    if (!mu) return "";
+    if (mu.url) return mu.url;
+    if (mu.link) return mu.link;
+    const q = musicSearchQuery(mu);
+    return q ? spotifySearchUrl(q) : "";
+  }
+  // קישור מקוצר של ספוטיפי (spotify.link / spoti.fi) — נפתח ישר באפליקציית ספוטיפי
+  const SPOTIFY_SHORT_RE = /^https?:\/\/(spotify\.link|spoti\.fi)\/\S+$/i;
   // הטקסט לחיפוש בספוטיפי מתוך העדפת הלקוח (חופשי או "טעם" ישן ללא קישור)
   function musicSearchQuery(mu) {
     if (!mu) return "";
@@ -1247,7 +1259,7 @@
     const cur = identity.music || null;
     const isEdit = !!cur;
     const curPresetId = cur && cur.preset;
-    const prefillText = cur && !cur.silence && !curPresetId ? (cur.query || cur.url || "") : "";
+    const prefillText = cur && !cur.silence && !curPresetId ? (cur.query || cur.link || cur.url || "") : "";
     openModal(`
       <div class="m-title">🎧 ${isEdit ? "עדכון המוזיקה שלך בכיסא" : "איזו מוזיקה תרצה בכיסא?"}</div>
       <div class="m-sub">כשיגיע תורך, המספרה תנגן בדיוק את מה שאתה אוהב. בלי לצאת מהאפליקציה.</div>
@@ -1258,8 +1270,12 @@
       </div>
       <div class="field" style="margin-top:16px">
         <label>או כתבו מה בא לכם לשמוע</label>
-        <input class="input" id="mu-input" placeholder="אמן, סגנון או שיר — למשל: עומר אדם" value="${esc(prefillText)}" autocapitalize="off" autocomplete="off" spellcheck="false">
-        <div class="hint" style="margin-top:5px">יש לכם פלייליסט מוכן בספוטיפי? אפשר גם להדביק כאן את הקישור שלו.</div>
+        <input class="input" id="mu-input" placeholder="שם של זמר או שיר — למשל: עדן בן זקן" value="${esc(prefillText)}" autocapitalize="off" autocomplete="off" spellcheck="false">
+        <div class="mu-detect" id="mu-input-detect">${musicDetectHtml(prefillText)}</div>
+        <div class="mu-link-row">
+          <div class="mu-link-txt">🔗 <b>יש לכם שיר או פלייליסט מסוים?</b> בספוטיפי: שתף ← העתק קישור, והדביקו כאן — הספר ינגן בדיוק אותו.</div>
+          <button type="button" class="btn btn-sm mu-paste" data-act="music-paste" data-target="mu-input">📋 הדבקה</button>
+        </div>
       </div>
       ${isEdit ? `<div class="music-next-note">ℹ️ שינוי יחול על <b>התור הבא</b> שתקבעו. תור שכבר נקבע שומר את הבחירה שהייתה בזמן ההזמנה.</div>` : ""}
       <button class="btn btn-primary" data-act="save-music-text" style="margin-top:12px">${isEdit ? "עדכון" : "שמירה"}</button>
@@ -1281,13 +1297,57 @@
     const s = (raw || "").trim();
     if (!s) return null;
     const sp = parseSpotify(s);
-    return sp || { query: s };
+    if (sp) return sp;
+    // קישור מקוצר (spotify.link) — נשמר כקישור; אצל הספר נפתח ישר באפליקציית
+    // ספוטיפי, והקרון ממיר אותו לקישור המלא כדי שיהיה גם נגן
+    if (SPOTIFY_SHORT_RE.test(s)) return { link: s };
+    return { query: s };
+  }
+  // הודעה אחרי שמירה — לפי מה שנשמר (שיר / פלייליסט / אלבום / אמן / קישור / טקסט)
+  function musicSavedMsg(mu) {
+    if (mu.url) {
+      const w = ({ track: "השיר", album: "האלבום", artist: "האמן", playlist: "הפלייליסט" })[mu.type] || "הפלייליסט";
+      return w + " שלך יחכה לך בכיסא 🎧";
+    }
+    if (mu.link) return "הקישור נשמר ✓ — יחכה לך בכיסא 🎧";
+    return "נשמר ✓ — נדאג למוזיקה שאוהב 🎵";
   }
   function saveMusicText() {
     const el = $("#mu-input");
     const mu = musicFromText(el && el.value);
     if (!mu) { toast("כתבו מה בא לכם לשמוע, בחרו סגנון, או ״אולי אחר כך״", "", "🎧"); if (el) el.focus(); return; }
-    setMusicChoice(mu, mu.url ? "הפלייליסט שלך יחכה לך בכיסא 🎧" : "נשמר ✓ — נדאג למוזיקה שאוהב 🎵");
+    setMusicChoice(mu, musicSavedMsg(mu));
+  }
+  /* זיהוי חי של מה שהלקוח הדביק/כתב: קישור ספוטיפי תקין → "זוהה קישור לשיר";
+     קישור מקוצר → "זוהה קישור"; קישור שאינו של ספוטיפי → אזהרה עדינה. טקסט רגיל
+     (שם של זמר) — בלי הודעה. */
+  function musicDetectHtml(raw) {
+    const s = (raw || "").trim();
+    if (!s) return "";
+    const sp = parseSpotify(s);
+    if (sp) return `<span class="mu-ok">✓ זוהה קישור ל${esc(spotifyTypeLabel(sp.type))} בספוטיפי — הספר ינגן בדיוק אותו</span>`;
+    if (SPOTIFY_SHORT_RE.test(s)) return `<span class="mu-ok">✓ זוהה קישור לספוטיפי — הספר יקבל כפתור שפותח בדיוק אותו</span>`;
+    if (/^(https?:\/\/|www\.)/i.test(s)) return `<span class="mu-warn">⚠️ זה לא קישור של ספוטיפי. העתיקו את הקישור מתוך ספוטיפי (שתף ← העתק קישור)</span>`;
+    return "";
+  }
+  function updateMusicDetect(input) {
+    const out = input && $("#" + input.id + "-detect");
+    if (out) out.innerHTML = musicDetectHtml(input.value);
+  }
+  // כפתור "הדבקה" — קורא את הקישור מהלוח ישר לשדה (בלי לחיצה ארוכה)
+  async function musicPaste(targetId) {
+    const input = $("#" + (targetId || "mu-input"));
+    if (!input) return;
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.readText) throw new Error("no-clipboard");
+      const txt = String((await navigator.clipboard.readText()) || "").trim();
+      if (!txt) { toast("הלוח ריק — העתיקו קודם את הקישור בספוטיפי", "", "📋"); input.focus(); return; }
+      input.value = txt;
+      updateMusicDetect(input);
+    } catch (e) {
+      toast("לא הצלחנו לקרוא מהלוח — לחצו לחיצה ארוכה בשדה ובחרו ״הדבק״", "", "📋");
+      input.focus();
+    }
   }
   function saveMusicTaste(id) {
     const p = musicPreset(id);
@@ -2456,8 +2516,9 @@
         <div class="hint" style="margin-top:5px">כדי שהמספרה תדע מתי יום ההולדת שלך ותוכל לברך 🎂</div></div>` : ""}
       ${(musicMode(st) === "personal" && !identity.music) ? `
       <div class="field"><label>מוזיקה בכיסא <span class="opt">(לא חובה)</span></label>
-        <input class="input" id="cf-music" placeholder="אמן, סגנון או שיר — למשל: עומר אדם" autocapitalize="off" autocomplete="off" spellcheck="false">
-        <div class="hint" style="margin-top:5px">כתבו מה בא לכם לשמוע — וכשיגיע תורכם, המוזיקה שאתם אוהבים תחכה לכם בכיסא 🎧</div></div>` : ""}
+        <input class="input" id="cf-music" placeholder="שם של זמר או שיר — או קישור מספוטיפי" autocapitalize="off" autocomplete="off" spellcheck="false">
+        <div class="mu-detect" id="cf-music-detect"></div>
+        <div class="hint" style="margin-top:5px">כתבו שם של זמר, או הדביקו קישור לשיר / לפלייליסט מספוטיפי — וכשיגיע תורכם, המוזיקה תחכה לכם בכיסא 🎧</div></div>` : ""}
       <button class="btn btn-primary" data-act="do-book">${isResched ? "אישור המועד החדש" : "אישור וקביעת התור"}</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
     `);
@@ -3451,9 +3512,21 @@
     if (!mu) return `<div class="chair-music-empty">הלקוח/ה עדיין לא בחר/ה מוזיקה</div>`;
     if (mu.silence) return `<div class="chair-music-empty">🔇 הלקוח/ה מעדיף/ה שקט — אין צורך במוזיקה</div>`;
     if (mu.url) {
+      // בקשת טקסט שהקרון המיר לנגן ("עדן בן זקן" → האמן): מציגים גם מה הלקוח ביקש,
+      // וקישור "לא זה?" לחיפוש — למקרה שספוטיפי מצא זמר אחר עם שם דומה
+      const wish = mu.query ? `<div class="chair-taste">🎵 מבקש/ת: <b>${esc(mu.query)}</b></div>` : "";
+      const alt = mu.query ? `<button type="button" class="play-inline chair-alt" data-act="play-music" data-url="${esc(spotifySearchUrl(mu.query))}">לא זה? חיפוש בספוטיפי ›</button>` : "";
       return `
+        ${wish}
         ${spotifyEmbedHtml(mu, "compact")}
-        <button class="btn btn-spotify" data-act="play-music" data-url="${esc(mu.url)}" style="margin-top:10px">▶️ נגן בספוטיפי</button>`;
+        <button class="btn btn-spotify" data-act="play-music" data-url="${esc(mu.url)}" style="margin-top:10px">▶️ נגן בספוטיפי</button>
+        ${alt}`;
+    }
+    if (mu.link) {
+      // קישור מקוצר שעוד לא הומר — נפתח ישר באפליקציית ספוטיפי על השיר/הפלייליסט
+      return `
+        <div class="chair-taste">🔗 הלקוח שלח קישור מספוטיפי</div>
+        <button class="btn btn-spotify" data-act="play-music" data-url="${esc(mu.link)}" style="margin-top:10px">▶️ פתח בספוטיפי</button>`;
     }
     const q = musicSearchQuery(mu);
     if (q) {
@@ -3498,7 +3571,7 @@
     const when = c.kind === "now"
       ? `${esc(b.start)}–${esc(b.end)}`
       : (c.mins <= 0 ? "מתחיל עכשיו" : c.mins < 60 ? `בעוד ${c.mins} דק׳ · ${esc(b.start)}` : `${esc(b.start)}`);
-    const showPremium = mu && (mu.url || musicSearchQuery(mu));
+    const showPremium = mu && (mu.url || mu.link || musicSearchQuery(mu));
     return `
       <div class="chair-card${c.kind === "now" ? " chair-live" : ""}" data-chair="${esc(b.id)}">
         <div class="chair-head">
@@ -3573,8 +3646,7 @@
             const mu = bkMusic(b) || musicByKey[clientKey(b)];
             const sum = musicSummary(mu);
             if (!sum) return "";
-            const q = musicSearchQuery(mu);
-            const link = mu && (mu.url || (q && spotifySearchUrl(q)));
+            const link = musicPlayUrl(mu);
             return `<div class="bk-sub">${esc(sum)}${(link && !isPast) ? ` · <button type="button" class="play-inline" data-act="play-music" data-url="${esc(link)}">נגן ▶️</button>` : ""}</div>`;
           })()}
           ${b.priorNoShow ? `<div class="noshow-warn">⚠️ הלקוח לא הגיע בעבר${b.priorNoShow > 1 ? ` (${b.priorNoShow} פעמים)` : ""}</div>` : ""}
@@ -6055,6 +6127,7 @@
         case "save-birthday": saveBirthday(); break;
         case "save-music-text": saveMusicText(); break;
         case "edit-music": openMusicModal(); break;
+        case "music-paste": await musicPaste(t.dataset.target); break;
         case "music-taste": saveMusicTaste(t.dataset.taste); break;
         case "music-silence": saveMusicSilence(); break;
         // כפתור ניגון בכרטיס הספר — פותח את הפלייליסט/החיפוש בספוטיפי
@@ -6628,6 +6701,8 @@
         const prevEl = $("#prev-" + scope + "-" + key);
         if (prevEl && meta) prevEl.innerHTML = esc(meta.previewPrefix) + "<b>" + esc(socialHandle(e.target.value, key) || "השם-שלך") + "</b>";
       }
+      // מוזיקה בכיסא: זיהוי חי של קישור ספוטיפי שהודבק (בחירת מוזיקה / טופס התור)
+      if (e.target && (e.target.id === "mu-input" || e.target.id === "cf-music")) updateMusicDetect(e.target);
     });
   }
 
