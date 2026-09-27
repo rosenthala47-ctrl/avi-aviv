@@ -1390,3 +1390,10 @@ a.nav-btn { flex: 1; color: var(--text); text-decoration: none; }
 .mmc-ico { font-size: 26px; flex: none; }
 .mmc-body { flex: 1; min-width: 0; }
 .mmc-body b { font-size: 15px; }
+/* הבהרה במודאל עדכון המוזיקה: השינוי חל על התור הבא */
+.music-next-note {
+  margin-top: 14px; background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); padding: 10px 12px; font-size: 12px;
+  line-height: 1.55; color: var(--muted);
+}
+.music-next-note b { color: var(--text); }

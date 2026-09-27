@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "172";
+  const APP_VERSION = "173";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1261,6 +1261,7 @@
         <input class="input" id="mu-input" placeholder="אמן, סגנון או שיר — למשל: עומר אדם" value="${esc(prefillText)}" autocapitalize="off" autocomplete="off" spellcheck="false">
         <div class="hint" style="margin-top:5px">יש לכם פלייליסט מוכן בספוטיפי? אפשר גם להדביק כאן את הקישור שלו.</div>
       </div>
+      ${isEdit ? `<div class="music-next-note">ℹ️ שינוי יחול על <b>התור הבא</b> שתקבעו. תור שכבר נקבע שומר את הבחירה שהייתה בזמן ההזמנה.</div>` : ""}
       <button class="btn btn-primary" data-act="save-music-text" style="margin-top:12px">${isEdit ? "עדכון" : "שמירה"}</button>
       <button class="btn btn-ghost" data-act="music-silence" style="margin-top:8px">🔇 מעדיף/ה שקט</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:6px">${isEdit ? "סגירה" : "אולי אחר כך"}</button>
