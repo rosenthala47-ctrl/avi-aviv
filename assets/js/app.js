@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "176";
+  const APP_VERSION = "177";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -195,7 +195,8 @@
     { name: "ששון איפרם שאולוב", url: "https://open.spotify.com/artist/1Wq2STGiL7ZaIHAm5jMakc", aka: ["ששון שאולוב", "sasson ifram shaulov"] },
     { name: "מרגי", url: "https://open.spotify.com/artist/6grXi1oBW9ayoP4FTt4r2Z", aka: ["margi"] },
     { name: "יסמין מועלם", url: "https://open.spotify.com/artist/3cDi1D2FHMVgljfdB1QVgr", aka: ["jasmin moallem"] },
-    { name: "מור", url: "https://open.spotify.com/artist/0oI0Dm98K3jmtSbfTLiChX", aka: [] },
+    // "מור" לבד לא מזוהה (שם פרטי נפוץ) — הלקוח משלים ל"מור רביעי" מתוך ההצעות
+    { name: "מור רביעי", url: "https://open.spotify.com/artist/0oI0Dm98K3jmtSbfTLiChX", aka: [] },
     { name: "אליעד נחום", url: "https://open.spotify.com/artist/3F78m0H4Y4a1Dvd79TKVvw", aka: ["eliad nachum"] },
     { name: "בניה ברבי", url: "https://open.spotify.com/artist/0WjQnf1rQ0tY84gGgjrQQ9", aka: ["benaia barabi"] },
     { name: "דודו אהרון", url: "https://open.spotify.com/artist/0MGUXM1urhmX05MHj5oVsM", aka: ["dudu aharon"] },
