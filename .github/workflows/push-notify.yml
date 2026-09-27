@@ -41,4 +41,8 @@ jobs:
           # הכנה ל-SMS (ראו sendSms ב-send-push.js): ריק כרגע — עד שתוגדר secret
           # בשם SMS_API_KEY (Settings → Secrets → Actions), הקוד רק מדפיס דמה
           SMS_API_KEY: ${{ secrets.SMS_API_KEY }}
+          # מוזיקה בכיסא: חיפוש זמרים בספוטיפי (music-resolve.js). ריקים עד שתוגדרנה
+          # secrets בשם SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET — עד אז השלב מדלג בשקט.
+          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+          SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
         run: node send-push.js
