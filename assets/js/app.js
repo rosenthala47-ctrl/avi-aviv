@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "170";
+  const APP_VERSION = "171";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -141,14 +141,16 @@
     return best <= (winDays || 3);
   }
 
-  /* ---------- מוזיקה בכיסא (ספוטיפי) — כרגע "try" בלבד ----------
+  /* ---------- מוזיקה בכיסא (ספוטיפי) — כל המספרות, כבוי כברירת מחדל ----------
      כל לקוח יכול לשלוח קישור לפלייליסט ספוטיפי, לבחור "טעם" מהיר, או לבקש שקט.
      כשמגיע תורו, הספר רואה כרטיס "עכשיו בכיסא" עם הפלייליסט שלו וכפתור ניגון.
      למספרות גדולות (כמה כיסאות במקביל) יש "מצב מוזיקת רקע" — פלייליסט אחד קבוע.
-     הערה חשובה: השמעה מלאה דרך הרמקול דורשת חשבון Spotify Premium של המספרה. */
+     הערה חשובה: השמעה מלאה דרך הרמקול דורשת חשבון Spotify Premium של המספרה.
+     נבדק על "try" ומספטמבר 2026 זמין לכל המספרות. הפיצ׳ר כבוי עד שהספר עצמו
+     מפעיל אותו בהגדרות — שום דבר לא משתנה אצל הלקוחות בלי אישור הספר. */
 
-  // האם פיצ׳ר המוזיקה זמין בכלל במספרה הזו (כרגע רק try; קל להרחיב בהמשך)
-  function musicFeature() { return SHOP === "try"; }
+  // האם פיצ׳ר המוזיקה זמין בכלל במספרה הזו (כל המספרות; המצב עצמו כבוי כברירת מחדל)
+  function musicFeature() { return true; }
   // מצב המוזיקה שהספר בחר: "off" (ברירת מחדל) | "personal" | "background"
   function musicMode(st) {
     if (!musicFeature()) return "off";
@@ -1313,6 +1315,29 @@
   }
 
   /* באנר למנהל — כל ספר יתבקש להפעיל התראות כדי לקבל הודעה על כל תור חדש */
+  /* באנר "חדש!" לספר על פיצ׳ר המוזיקה בכיסא — כדי שכל ספר יידע שהוא קיים
+     (ההגדרה עצמה נמצאת עמוק: הגדרות ← עמוד הלקוח ← מוזיקה בכיסא). מוצג רק כשהמוזיקה
+     עדיין כבויה, עד שהספר לוחץ "לפרטים" או "לא עכשיו". נזכר פר-מכשיר. */
+  const MUSIC_NEWS_KEY = "ug_music_news_seen__" + SHOP;
+  function musicNewsSeen() { try { return localStorage.getItem(MUSIC_NEWS_KEY) === "1"; } catch (e) { return true; } }
+  function markMusicNewsSeen() { try { localStorage.setItem(MUSIC_NEWS_KEY, "1"); } catch (e) {} }
+  function musicNewsBanner(st) {
+    if (!musicFeature() || musicMode(st) !== "off") return "";   // כבר הופעל — אין צורך להודיע
+    if (musicNewsSeen()) return "";
+    return `
+    <div class="banner good music-news">
+      <span class="bn-ico">🎧</span>
+      <div class="bn-body">
+        <div class="bn-title">חדש: מוזיקה בכיסא</div>
+        <div class="bn-sub">כל לקוח בוחר את המוזיקה שהוא אוהב, וכשמגיע תורו — אתם מנגנים אותה בלחיצה. יש גם מצב "מוזיקת רקע" למספרות גדולות. דורש Spotify Premium. כבוי עד שתפעילו.</div>
+      </div>
+      <div class="bn-actions">
+        <button class="btn btn-primary btn-sm" data-act="music-news-open">לפרטים</button>
+        <button class="btn btn-ghost btn-sm" data-act="music-news-dismiss">לא עכשיו</button>
+      </div>
+    </div>`;
+  }
+
   function ownerNotifBanner() {
     if (!Notify.supported()) return "";
     if (Notify.permission() === "granted") return "";
@@ -2525,7 +2550,10 @@
         serviceId: view.selService, date: bookedDate, start: bookedStart,
         userId: identity.userId, userName: contact.name, phone: contact.phone, email: contact.email,
         dob: contact.dob || identity.dob || "",
-        music: contact.music || identity.music || null,
+        // המוזיקה מצורפת לתור רק במספרה שהספר שלה הפעיל "אישי לכל לקוח". הזהות
+        // משותפת לכל המספרות — בלי הבדיקה, בחירה ממספרה אחרת הייתה נכנסת גם למספרה
+        // שלא אישרה את הפיצ׳ר.
+        music: musicMode(Store.get()) === "personal" ? (contact.music || identity.music || null) : null,
         staff: staff,
         excludeBookingId: reschedId || undefined,   // אל תתנגש עם התור המקורי בעת שינוי מועד
       });
@@ -2986,7 +3014,8 @@
       b.status !== "cancelled" && u.dateTime(b.date, b.start).getTime() > now).length;
 
     const banners = locked ? "" :
-      subBanner() + spamBanner() + (view.ownerTab !== "settings" ? ownerNotifBanner() : "");
+      subBanner() + spamBanner() + (view.ownerTab !== "settings" ? ownerNotifBanner() : "") +
+      ((view.ownerTab === "cal" || view.ownerTab === "bookings") ? musicNewsBanner(st) : "");
 
     const settingsPageLabel = {
       business: "פרטי העסק", booking: "תורים ותזכורות", brand: "מיתוג ועיצוב",
@@ -4355,7 +4384,7 @@
     `;
   }
 
-  /* ---------- כרטיס הגדרות המוזיקה (בהגדרות → עמוד הלקוח, try בלבד) ----------
+  /* ---------- כרטיס הגדרות המוזיקה (בהגדרות → עמוד הלקוח) ----------
      מסביר את הפיצ׳ר, מדגיש את דרישת ה-Premium, ומאפשר לבחור מצב:
      כבוי / אישי לכל לקוח / מוזיקת רקע קבועה (למספרות גדולות). */
   function ownerMusicSection(st) {
@@ -6447,6 +6476,16 @@
         case "clear-bg-music":
           await Store.saveShop({ bgMusic: null });
           toast("פלייליסט הרקע הוסר", "", "🎧"); render(); break;
+        // באנר "חדש: מוזיקה בכיסא" — "לפרטים" פותח את ההגדרה; "לא עכשיו" סוגר לתמיד
+        case "music-news-dismiss":
+          markMusicNewsSeen();
+          toast("אפשר להפעיל בכל זמן: הגדרות ← עמוד הלקוח ← מוזיקה בכיסא", "", "🎧");
+          render(); break;
+        case "music-news-open":
+          markMusicNewsSeen();
+          view.ownerTab = "settings"; view.settingsPage = "client"; view.settingsItem = "music";
+          try { localStorage.setItem("ug_otab__" + SHOP, "settings"); } catch (e2) {}
+          render(); break;
         // קפיצה מכרטיס "מוזיקת רקע" ישירות להגדרת הפלייליסט
         case "goto-music-settings":
           view.ownerTab = "settings"; view.settingsPage = "client"; view.settingsItem = "music";
