@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "174";
+  const APP_VERSION = "175";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -170,6 +170,61 @@
     { id: "nineties", label: "שנות ה-90 📼", url: "https://open.spotify.com/playlist/4SFLOyaKwD2ZQhhx1N2uko" },
   ];
   function musicPreset(id) { return MUSIC_PRESETS.find((p) => p.id === id) || null; }
+
+  /* זמרים מוכרים — קישור לדף הזמר בספוטיפי (נגן מוטמע של הלהיטים שלו). כשלקוח כותב
+     שם של זמר מהרשימה, אצל הספר מוצג מיד נגן ולחיצה אחת — בלי חיפוש ובלי מפתחות.
+     עובד גם על תורים שכבר קיימים (ההתאמה נעשית גם בזמן התצוגה אצל הספר), ולכן
+     הוספת זמר חדש כאן חלה מיד על כל התורים. הקישורים סופקו ע״י בעל המערכת.
+     aka = כינויים/איות נוסף (אנגלית, שגיאות נפוצות) — רק כאלה שאינם דו-משמעיים. */
+  const MUSIC_ARTISTS = [
+    { name: "אושר כהן", url: "https://open.spotify.com/artist/2LUB7PhWK2j2obgSTeD3GN", aka: ["osher cohen"] },
+    { name: "אגם בוחבוט", url: "https://open.spotify.com/artist/3JPKPnzWJGjccn8SnjwA5i", aka: ["agam buhbut"] },
+    { name: "עומר אדם", url: "https://open.spotify.com/artist/1IAEef07H0fd9aA8aUHUlL", aka: ["omer adam"] },
+    { name: "אייל גולן", url: "https://open.spotify.com/artist/54jZWpivOTllo1afYNSx5U", aka: ["איל גולן", "eyal golan"] },
+    { name: "נועה קירל", url: "https://open.spotify.com/artist/1wak0ZG1LUrZPYx8RDTQoD", aka: ["noa kirel"] },
+    { name: "סטטיק ובן אל", url: "https://open.spotify.com/artist/0xHa28taiElkcQf9o3z76g", aka: ["סטטיק ובן אל תבורי", "סטטיק ובנאל", "סטטיק בן אל", "סטטיק", "static and ben el", "static & ben el"] },
+    { name: "עדן חסון", url: "https://open.spotify.com/artist/6uQl3gu1AIXyvqCAxnc2q4", aka: ["eden hason"] },
+    { name: "משה פרץ", url: "https://open.spotify.com/artist/2kOE3Jm5tMqLh65EiDkHJi", aka: ["moshe peretz"] },
+    { name: "שרית חדד", url: "https://open.spotify.com/artist/39jFFncu6W0phhYK16Dp9g", aka: ["sarit hadad"] },
+    { name: "איתי לוי", url: "https://open.spotify.com/artist/6VdxGMRiiFQhI8F0FkuQZg", aka: ["itay levi"] },
+    { name: "ישי ריבו", url: "https://open.spotify.com/artist/3VTm1513t2LL1mSKzzyQuj", aka: ["ishay ribo"] },
+    { name: "פאר טסי", url: "https://open.spotify.com/artist/24HI9hevLjIQtj7xp2CeHs", aka: ["peer tasi"] },
+    { name: "נדב חנציס", url: "https://open.spotify.com/artist/4ZXLucEFePscKcgUlD0Sf9", aka: [] },
+  ];
+  // נרמול להשוואת שמות: אותיות קטנות, בלי ניקוד וסימנים, אותיות סופיות כרגילות
+  // ("עומר אדמ" = "עומר אדם"), רווחים בודדים
+  function normName(s) {
+    return String(s || "").toLowerCase()
+      .replace(/[֑-ׇ]/g, "")
+      .replace(/[ךםןףץ]/g, (c) => ({ "ך": "כ", "ם": "מ", "ן": "נ", "ף": "פ", "ץ": "צ" })[c])
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim().replace(/\s+/g, " ");
+  }
+  /* מציאת זמר מהרשימה בתוך מה שהלקוח כתב. מתאים לשם מלא בלבד (לא "עומר" לבד),
+     גם בתוך משפט ("שירים של עומר אדם", "עומר אדם בבקשה"). כמה זמרים → הראשון בטקסט. */
+  function musicArtistMatch(text) {
+    const t = " " + normName(text) + " ";
+    if (t.trim().length < 3) return null;
+    let best = null, bestPos = Infinity;
+    for (const a of MUSIC_ARTISTS) {
+      for (const n of [a.name].concat(a.aka || [])) {
+        const k = normName(n);
+        if (k.length < 3) continue;
+        const pos = t.indexOf(" " + k + " ");
+        if (pos !== -1 && pos < bestPos) { best = a; bestPos = pos; }
+      }
+    }
+    return best;
+  }
+  /* בקשת טקסט של זמר מוכר → קישור אמיתי + נגן (שומר את מה שהלקוח כתב ב-query).
+     כל דבר אחר (קישור, צ׳יפ, שקט, זמר לא מוכר) — חוזר כמו שהוא. */
+  function enrichMusic(mu) {
+    if (!mu || mu.url || mu.link || mu.silence || !mu.query) return mu;
+    const a = musicArtistMatch(mu.query);
+    const sp = a && parseSpotify(a.url);
+    return sp ? Object.assign({}, mu, sp, { label: a.name, artist: a.name }) : mu;
+  }
+
   // קישור חיפוש בספוטיפי (לפלייליסטים) לפי טקסט טעם
   /* קישור חיפוש בספוטיפי לפי טקסט הבקשה של הלקוח.
      חשוב: בלי סיומת סינון (כמו "/playlists") בסוף הכתובת. בדפדפן הסיומת עובדת,
@@ -201,8 +256,9 @@
   function spotifyTypeLabel(type) {
     return ({ playlist: "פלייליסט", album: "אלבום", track: "שיר", artist: "אמן" })[type] || "פלייליסט";
   }
-  // העדפת המוזיקה של הלקוח מתוך תור (צומת פרטי במספרה מאובטחת, אחרת בתוך התור)
-  function bkMusic(b) { const p = bkPriv(b); return (p && p.music) || (b && b.music) || null; }
+  // העדפת המוזיקה של הלקוח מתוך תור (צומת פרטי במספרה מאובטחת, אחרת בתוך התור).
+  // מועשרת בזמן התצוגה: בקשה ישנה כמו "אושר כהן" מקבלת נגן אם הזמר ברשימה.
+  function bkMusic(b) { const p = bkPriv(b); return enrichMusic((p && p.music) || (b && b.music) || null); }
   // תקציר קריא של העדפת מוזיקה (לתצוגה ברשימות/כרטיס הלקוח)
   function musicSummary(mu) {
     if (!mu) return "";
@@ -1270,7 +1326,8 @@
       </div>
       <div class="field" style="margin-top:16px">
         <label>או כתבו מה בא לכם לשמוע</label>
-        <input class="input" id="mu-input" placeholder="שם של זמר או שיר — למשל: עדן בן זקן" value="${esc(prefillText)}" autocapitalize="off" autocomplete="off" spellcheck="false">
+        <input class="input" id="mu-input" list="mu-artists" placeholder="שם של זמר או שיר — למשל: עומר אדם" value="${esc(prefillText)}" autocapitalize="off" autocomplete="off" spellcheck="false">
+        ${musicArtistsDatalist()}
         <div class="mu-detect" id="mu-input-detect">${musicDetectHtml(prefillText)}</div>
         <div class="mu-link-row">
           <div class="mu-link-txt">🔗 <b>יש לכם שיר או פלייליסט מסוים?</b> בספוטיפי: שתף ← העתק קישור, והדביקו כאן — הספר ינגן בדיוק אותו.</div>
@@ -1301,12 +1358,14 @@
     // קישור מקוצר (spotify.link) — נשמר כקישור; אצל הספר נפתח ישר באפליקציית
     // ספוטיפי, והקרון ממיר אותו לקישור המלא כדי שיהיה גם נגן
     if (SPOTIFY_SHORT_RE.test(s)) return { link: s };
-    return { query: s };
+    return enrichMusic({ query: s });   // זמר מהרשימה → נשמר מיד עם נגן
   }
-  // הודעה אחרי שמירה — לפי מה שנשמר (שיר / פלייליסט / אלבום / אמן / קישור / טקסט)
+  // הודעה אחרי שמירה — לפי מה שנשמר (זמר מוכר / שיר / פלייליסט / אלבום / קישור / טקסט)
   function musicSavedMsg(mu) {
+    if (mu.artist) return "✓ " + mu.artist + " יחכה לך בכיסא 🎧";
     if (mu.url) {
-      const w = ({ track: "השיר", album: "האלבום", artist: "האמן", playlist: "הפלייליסט" })[mu.type] || "הפלייליסט";
+      if (mu.type === "artist") return "השירים של הזמר יחכו לך בכיסא 🎧";
+      const w = ({ track: "השיר", album: "האלבום", playlist: "הפלייליסט" })[mu.type] || "הפלייליסט";
       return w + " שלך יחכה לך בכיסא 🎧";
     }
     if (mu.link) return "הקישור נשמר ✓ — יחכה לך בכיסא 🎧";
@@ -1328,7 +1387,14 @@
     if (sp) return `<span class="mu-ok">✓ זוהה קישור ל${esc(spotifyTypeLabel(sp.type))} בספוטיפי — הספר ינגן בדיוק אותו</span>`;
     if (SPOTIFY_SHORT_RE.test(s)) return `<span class="mu-ok">✓ זוהה קישור לספוטיפי — הספר יקבל כפתור שפותח בדיוק אותו</span>`;
     if (/^(https?:\/\/|www\.)/i.test(s)) return `<span class="mu-warn">⚠️ זה לא קישור של ספוטיפי. העתיקו את הקישור מתוך ספוטיפי (שתף ← העתק קישור)</span>`;
+    const a = musicArtistMatch(s);
+    if (a) return `<span class="mu-ok">✓ נמצא: ${esc(a.name)} — הספר ינגן את השירים שלו בלחיצה אחת</span>`;
     return "";
+  }
+  // הצעות השלמה לשדה המוזיקה — הלקוח רואה את הזמרים המוכרים ובוחר (כתיב נכון = נגן)
+  function musicArtistsDatalist() {
+    const names = MUSIC_ARTISTS.map((a) => a.name).sort((x, y) => x.localeCompare(y, "he"));
+    return `<datalist id="mu-artists">${names.map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist>`;
   }
   function updateMusicDetect(input) {
     const out = input && $("#" + input.id + "-detect");
@@ -2516,7 +2582,8 @@
         <div class="hint" style="margin-top:5px">כדי שהמספרה תדע מתי יום ההולדת שלך ותוכל לברך 🎂</div></div>` : ""}
       ${(musicMode(st) === "personal" && !identity.music) ? `
       <div class="field"><label>מוזיקה בכיסא <span class="opt">(לא חובה)</span></label>
-        <input class="input" id="cf-music" placeholder="שם של זמר או שיר — או קישור מספוטיפי" autocapitalize="off" autocomplete="off" spellcheck="false">
+        <input class="input" id="cf-music" list="mu-artists" placeholder="שם של זמר או שיר — או קישור מספוטיפי" autocapitalize="off" autocomplete="off" spellcheck="false">
+        ${musicArtistsDatalist()}
         <div class="mu-detect" id="cf-music-detect"></div>
         <div class="hint" style="margin-top:5px">כתבו שם של זמר, או הדביקו קישור לשיר / לפלייליסט מספוטיפי — וכשיגיע תורכם, המוזיקה תחכה לכם בכיסא 🎧</div></div>` : ""}
       <button class="btn btn-primary" data-act="do-book">${isResched ? "אישור המועד החדש" : "אישור וקביעת התור"}</button>
@@ -2619,7 +2686,8 @@
         // המוזיקה מצורפת לתור רק במספרה שהספר שלה הפעיל "אישי לכל לקוח". הזהות
         // משותפת לכל המספרות — בלי הבדיקה, בחירה ממספרה אחרת הייתה נכנסת גם למספרה
         // שלא אישרה את הפיצ׳ר.
-        music: musicMode(Store.get()) === "personal" ? (contact.music || identity.music || null) : null,
+        // enrichMusic: גם בחירה ישנה ("אושר כהן" שנשמרה לפני הרשימה) נשמרת בתור עם נגן
+        music: musicMode(Store.get()) === "personal" ? enrichMusic(contact.music || identity.music || null) : null,
         staff: staff,
         excludeBookingId: reschedId || undefined,   // אל תתנגש עם התור המקורי בעת שינוי מועד
       });
@@ -3515,7 +3583,8 @@
       // בקשת טקסט שהקרון המיר לנגן ("עדן בן זקן" → האמן): מציגים גם מה הלקוח ביקש,
       // וקישור "לא זה?" לחיפוש — למקרה שספוטיפי מצא זמר אחר עם שם דומה
       const wish = mu.query ? `<div class="chair-taste">🎵 מבקש/ת: <b>${esc(mu.query)}</b></div>` : "";
-      const alt = mu.query ? `<button type="button" class="play-inline chair-alt" data-act="play-music" data-url="${esc(spotifySearchUrl(mu.query))}">לא זה? חיפוש בספוטיפי ›</button>` : "";
+      // זמר מהרשימה (mu.artist) — ההתאמה ודאית, אין צורך ב"לא זה?"
+      const alt = (mu.query && !mu.artist) ? `<button type="button" class="play-inline chair-alt" data-act="play-music" data-url="${esc(spotifySearchUrl(mu.query))}">לא זה? חיפוש בספוטיפי ›</button>` : "";
       return `
         ${wish}
         ${spotifyEmbedHtml(mu, "compact")}
