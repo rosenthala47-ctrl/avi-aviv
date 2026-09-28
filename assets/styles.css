@@ -260,17 +260,29 @@
 
 /* ‎.btn.home-book-cta‎ — ספציפיות גבוהה מ-‎.btn‎ (שמוגדר בהמשך) כדי לא להידרס */
 .btn.home-book-cta {
-  width: 100%; margin-top: 15px; padding: 18px;
-  font-size: 18.5px; font-weight: 800; letter-spacing: .2px;
+  width: 100%; margin-top: 15px; padding: 17px 18px;
+  font-size: 18px; font-weight: 800; letter-spacing: .3px;
   color: var(--sky-ink); border: none; border-radius: 16px;
   background: linear-gradient(145deg, var(--sky), var(--sky-strong));
-  box-shadow: var(--shadow-sky);
-  animation: hbcPulse 2.6s ease-in-out infinite;
+  box-shadow: var(--shadow-sky), inset 0 1px 0 rgba(255,255,255,.28);
+  position: relative; overflow: hidden;
+  animation: hbcPulse 3.6s ease-in-out infinite;
 }
 .btn.home-book-cta .hbc-emoji { font-size: 21px; }
+/* ברק עדין שחולף על הכפתור מדי כמה שניות — מראה מוקפד ומזמין בלי להיות אגרסיבי */
+.btn.home-book-cta::after {
+  content: ""; position: absolute; top: 0; left: -70%; width: 45%; height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,.4), transparent);
+  transform: skewX(-18deg); pointer-events: none;
+  animation: hbcShine 5s ease-in-out infinite;
+}
 .btn.home-book-cta:active { transform: scale(.98); animation: none; }
-@keyframes hbcPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.018); } }
-@media (prefers-reduced-motion: reduce) { .home-book-cta { animation: none; } }
+@keyframes hbcPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.012); } }
+@keyframes hbcShine { 0%, 55% { left: -70%; } 100% { left: 140%; } }
+@media (prefers-reduced-motion: reduce) {
+  .home-book-cta { animation: none; }
+  .btn.home-book-cta::after { display: none; }
+}
 
 .home-back { width: auto; margin-bottom: 8px; }
 .cli-show-row { margin-top: 10px; }
@@ -1351,8 +1363,15 @@ a.nav-btn { flex: 1; color: var(--text); text-decoration: none; }
 .taste-chip.selected { border-color: #1DB954; background: rgba(29,185,84,.14); box-shadow: 0 0 0 2px rgba(29,185,84,.20); }
 
 /* כפתור בסגנון ספוטיפי */
-.btn-spotify { background: #1DB954 !important; color: #04130a !important; border: none !important; font-weight: 800; width: 100%; }
-.btn-spotify:active { transform: scale(.99); }
+.btn-spotify {
+  background: linear-gradient(145deg, #1ED760, #1DB954) !important;
+  color: #04130a !important; border: none !important;
+  font-weight: 800; width: 100%;
+  padding: 16px !important; font-size: 16.5px; letter-spacing: .2px;
+  border-radius: 15px;
+  box-shadow: 0 8px 22px -6px rgba(29,185,84,.55);
+}
+.btn-spotify:active { transform: scale(.98); box-shadow: 0 4px 12px -4px rgba(29,185,84,.5); }
 
 /* נגן מוטמע */
 .sp-embed { display: block; width: 100%; }
