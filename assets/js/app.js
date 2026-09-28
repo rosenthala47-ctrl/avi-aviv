@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "180";
+  const APP_VERSION = "181";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -760,6 +760,36 @@
       arr.push(u.dateKey(dd));
     }
     return arr;
+  }
+
+  /* טווח פתיחת היומן — כמה ימים קדימה מהיום אפשר לקבוע תור. הספר שולט בזה
+     דרך ההגדרות (shop.bookingDays). ברירת מחדל 14 (שבועיים) — בדיוק כמו שהיה,
+     כך שאצל מספרות קיימות שום דבר לא משתנה. החלון "מתגלגל": כיוון ש-nextDays
+     מתחיל תמיד מהיום, כל יום שעובר פותח יום חדש בקצה, ותמיד פתוח בדיוק N ימים. */
+  const HORIZON_OPTS = [
+    { d: 3, t: "3 ימים" }, { d: 7, t: "שבוע" }, { d: 14, t: "שבועיים" },
+    { d: 21, t: "3 שבועות" }, { d: 30, t: "חודש" }, { d: 60, t: "חודשיים" }, { d: 90, t: "3 חודשים" },
+  ];
+  function bookHorizon(st) {
+    const n = st && st.shop && Number(st.shop.bookingDays);
+    return (n && n >= 1 && n <= 120) ? Math.floor(n) : 14;
+  }
+  function horizonLabel(n) {
+    const o = HORIZON_OPTS.find((x) => x.d === Number(n));
+    return o ? o.t : (Number(n) || 14) + " ימים";
+  }
+  /* כמה ימים להציג לספר (יומן והוספת תור): לפחות הטווח הפתוח, לפחות 14 לנוחות
+     ניהול, וגם כל יום שכבר יש בו תור עתידי — כדי לא להסתיר תורים שנקבעו רחוק
+     (למשל דרך "שעה אחרת" או כשהטווח היה גדול יותר). מוגבל ל-400 ליתר ביטחון. */
+  function ownerSpan(st) {
+    let span = Math.max(bookHorizon(st), 14);
+    const today = u.dateKey(new Date());
+    ((st && st.bookings) || []).forEach((b) => {
+      if (!b || b.status === "cancelled" || !b.date || b.date < today) return;
+      const off = Math.round((u.parseKey(b.date).getTime() - u.parseKey(today).getTime()) / 86400000) + 1;
+      if (off > span) span = off;
+    });
+    return Math.min(span, 400);
   }
 
   /* =======================================================================
@@ -2084,12 +2114,12 @@
 
     const service = services.find((s) => s.id === view.selService);
 
-    // בורר ימים (14 יום)
+    // בורר ימים — לפי הטווח שהספר קבע (ברירת מחדל שבועיים), חלון מתגלגל מהיום
     const closed = new Set(st.closedDates || []);
     // יום פתוח = יש בו שעות פנויות (רגילות או שנפתחו ידנית) ואינו יום חופשה
     const hasHours = (k) => st.schedule[u.parseKey(k).getDay()].active || openedFor(st, k).length > 0;
     const isOpen = (k) => hasHours(k) && !closed.has(k);
-    const days = nextDays(14);
+    const days = nextDays(bookHorizon(st));
     if (!view.selDate || !days.includes(view.selDate)) {
       view.selDate = days.find(isOpen) || days[0];
     }
@@ -3252,7 +3282,7 @@
   // תצוגת יומן יומית — כל שעות היום (06:00–24:00) עם מתג לכל שעה.
   // הספר יכול לפתוח כל שעה שירצה, גם מחוץ לשעות הפעילות הקבועות.
   function ownerCal(st) {
-    const days = nextDays(14);
+    const days = nextDays(ownerSpan(st));
     if (!view.oDate || !days.includes(view.oDate)) {
       view.oDate = days.find((k) => st.schedule[u.parseKey(k).getDay()].active) || days[0];
     }
@@ -3814,7 +3844,7 @@
     const st = Store.get();
     const a = addBk;
     const closed = new Set(st.closedDates || []);
-    const days = nextDays(14);
+    const days = nextDays(ownerSpan(st));
     // ב«שעה אחרת» מותר גם תאריך רחוק מהיומן — אין להחזיר אותו לטווח הצ׳יפים
     if (!a.custom && !days.includes(a.date)) a.date = days[0];
 
@@ -5060,6 +5090,10 @@
           { id: "staff", ico: "🧑‍🔧", color: "#6366f1", label: "ספרים במספרה", val: (st.shop.staff || []).length ? (st.shop.staff || []).length + " ספרים" : "—", card: cStaff },
         ],
         booking: [
+          { id: "horizon", ico: "📅", color: "#0ea5e9", label: "טווח פתיחת היומן", val: horizonLabel(bookHorizon(st)),
+            card: editCard("📅 טווח פתיחת היומן",
+              `<select class="input" id="set-horizon">${HORIZON_OPTS.map((o) => `<option value="${o.d}" ${bookHorizon(st) === o.d ? "selected" : ""}>${o.t}</option>`).join("")}</select>`,
+              "עד כמה זמן קדימה הלקוחות יכולים לקבוע תור. החלון „מתגלגל”: כל יום שעובר נפתח יום חדש בקצה, כך שתמיד פתוח בדיוק הטווח הזה מהיום. שינוי לא מבטל תורים שכבר נקבעו.") },
           { id: "step", ico: "⏱️", color: "#f59e0b", label: "מרווח בין תורים", val: (st.shop.slotStep || 45) + " דקות",
             card: editCard("⏱️ מרווח בין תורים", `<select class="input" id="set-step">${[30, 45, 60].map((n) => `<option value="${n}" ${st.shop.slotStep === n ? "selected" : ""}>${n} דקות</option>`).join("")}</select>`, "כל כמה זמן מתחיל תור חדש ביומן.") },
           { id: "remind", ico: "⏰", color: "#ef4444", label: "תזכורת לפני התור", val: (st.shop.reminderMinutes || 60) + " דקות לפני",
@@ -5155,7 +5189,7 @@
         <div class="section-title">⚙️ הגדרות המספרה</div>
         <div class="card set-list">
           ${pageRow("business", "📇", "#0ea5e9", "פרטי העסק", "שם, תיאור, רשתות, כתובת וטלפון")}
-          ${pageRow("booking", "⏰", "#f59e0b", "תורים ותזכורות", "מרווח, תזכורות וסגירת הרשמה")}
+          ${pageRow("booking", "⏰", "#f59e0b", "תורים ותזכורות", "טווח היומן, מרווח, תזכורות וסגירת הרשמה")}
           ${pageRow("brand", "🎨", "#ec4899", "מיתוג ועיצוב", "לוגו, תמונת נושא וסגנון")}
           ${pageRow("client", "👁️", "#14b8a6", "עמוד הלקוח", "מה מוצג ללקוחות + גלריה")}
         </div>
@@ -6945,6 +6979,7 @@
     put("#set-about", "about", (el) => el.value.trim());
     put("#set-addr", "address", (el) => el.value.trim());
     put("#set-phone", "phone", (el) => el.value.trim());
+    put("#set-horizon", "bookingDays", (el) => Number(el.value));
     put("#set-step", "slotStep", (el) => Number(el.value));
     put("#set-remind", "reminderMinutes", (el) => Number(el.value));
     put("#set-remind-day", "remindDayBefore", (el) => !!el.checked);
