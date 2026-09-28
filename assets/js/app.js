@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "177";
+  const APP_VERSION = "178";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -3624,8 +3624,8 @@
       const alt = (mu.query && !mu.artist) ? `<button type="button" class="play-inline chair-alt" data-act="play-music" data-url="${esc(spotifySearchUrl(mu.query))}">לא זה? חיפוש בספוטיפי ›</button>` : "";
       return `
         ${wish}
+        <button class="btn btn-spotify" data-act="play-music" data-url="${esc(mu.url)}" style="margin-top:10px">▶️ נגן את הכל בספוטיפי</button>
         ${spotifyEmbedHtml(mu, "compact")}
-        <button class="btn btn-spotify" data-act="play-music" data-url="${esc(mu.url)}" style="margin-top:10px">▶️ נגן בספוטיפי</button>
         ${alt}`;
     }
     if (mu.link) {
@@ -3647,7 +3647,7 @@
     if (!musicFeature()) return "";
     const mode = musicMode(st);
     if (mode === "off") return "";
-    const premiumNote = `<div class="chair-premium">💎 לניגון מלא דרך הרמקול צריך <b>Spotify Premium</b> בחשבון המספרה</div>`;
+    const premiumNote = `<div class="chair-premium">💎 <b>השירים המלאים</b> מתנגנים באפליקציית ספוטיפי — לחיצה על הכפתור הירוק פותחת אותה ומנגנת הכול ברצף (צריך <b>Spotify Premium</b> במספרה). הנגן שכאן בתוך האפליקציה הוא תצוגה מקדימה בלבד.</div>`;
 
     if (mode === "background") {
       const bg = (st.shop && st.shop.bgMusic) || null;
@@ -3662,8 +3662,8 @@
       return `
         <div class="chair-card chair-bg">
           <div class="chair-head"><span class="chair-badge">🎶 מוזיקת רקע</span></div>
+          <button class="btn btn-spotify" data-act="play-music" data-url="${esc(bg.url)}" style="margin-top:10px">▶️ נגן את הכל בספוטיפי</button>
           ${spotifyEmbedHtml(bg, "compact")}
-          <button class="btn btn-spotify" data-act="play-music" data-url="${esc(bg.url)}" style="margin-top:10px">▶️ נגן בספוטיפי</button>
           ${premiumNote}
         </div>`;
     }
@@ -4624,14 +4624,17 @@
   }
 
   /* נגן ספוטיפי מוטמע (iframe). mode="compact" לגובה נמוך יותר בכרטיסים.
-     הנגן מציג עטיפה, שם ופלייליסט; השמעה מלאה דורשת התחברות ל-Spotify Premium. */
+     הנגן המוטמע מנגן רק תצוגה מקדימה של ~30 שניות לכל שיר — זו מגבלה של ספוטיפי,
+     אי אפשר לעקוף אותה מבחוץ. השמעת השירים המלאים ברצף נעשית באפליקציית ספוטיפי
+     עצמה (הכפתור הירוק), עם Spotify Premium של המספרה. התווית מבהירה זאת לספר. */
   function spotifyEmbedHtml(mu, mode) {
     if (!mu || !mu.embed) return "";
     const h = mode === "compact" ? 152 : 232;
     return `<iframe class="sp-embed" src="${esc(mu.embed)}" width="100%" height="${h}"
       style="border:0;border-radius:12px;margin-top:12px" loading="lazy"
       allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-      allowfullscreen></iframe>`;
+      allowfullscreen></iframe>
+      <div class="sp-preview-note">תצוגה מקדימה · 30 שניות לכל שיר</div>`;
   }
 
   /* ---------- עורך רשימת הספרים (בהגדרות) ---------- */

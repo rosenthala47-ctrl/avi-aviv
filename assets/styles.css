@@ -1356,6 +1356,8 @@ a.nav-btn { flex: 1; color: var(--text); text-decoration: none; }
 
 /* נגן מוטמע */
 .sp-embed { display: block; width: 100%; }
+/* תווית שמבהירה שהנגן המוטמע הוא תצוגה מקדימה בלבד (מגבלת ספוטיפי) */
+.sp-preview-note { margin-top: 5px; font-size: 11px; color: var(--muted); text-align: center; }
 
 /* כרטיס "עכשיו בכיסא" */
 .chair-card {
