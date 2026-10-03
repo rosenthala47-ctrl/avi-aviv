@@ -1,0 +1,43 @@
+name: backup
+
+# גיבוי אוטומטי של כל המספרות מ-Realtime Database.
+# רץ כל יום ב-01:30 UTC (03:30/04:30 בישראל — שעה שקטה), וגם ידנית מלשונית Actions.
+# התוצאה נשמרת כ-artifact פרטי למשך 90 יום. להורדה: Actions → הריצה → Artifacts.
+on:
+  schedule:
+    - cron: "30 1 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deps
+        working-directory: .github/scripts
+        run: npm install --no-audit --no-fund
+
+      - name: Dump database
+        working-directory: .github/scripts
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          OUT_DIR: ${{ github.workspace }}/backup-out
+        run: node backup.js
+
+      # שם ייחודי לכל ריצה, אחרת העלאות חוזרות מתנגשות באותו artifact
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: barbertor-backup-${{ github.run_number }}
+          path: backup-out/
+          retention-days: 90
+          if-no-files-found: error
