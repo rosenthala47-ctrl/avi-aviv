@@ -662,6 +662,16 @@ select.input {
 .slot.taken.inlist { border-color: var(--sky); box-shadow: 0 0 0 2px var(--sky-glow); }
 .slot.taken.inlist .slot-tag { color: var(--sky-2); }
 .slot .slot-tag { display: none; }
+/* התור של הלקוח עצמו ברשת השעות — "התור שלך" בירוק; הקשה פותחת את פרטי התור.
+   המחלקה taken נשארת כדי שהריבוע ייחשב לא-פנוי, וכאן דורסים את הפסים והתווית האדומה.
+   ירוק כהה יותר במצב בהיר — המנטה הבהיר של --good לא קריא על רקע לבן. */
+.slot.taken.mine {
+  --mine: #34d399; --mine-bg: rgba(52, 211, 153, .13); --mine-glow: rgba(52, 211, 153, .22);
+  background: var(--mine-bg); border-color: var(--mine); color: var(--text);
+  box-shadow: 0 0 0 2px var(--mine-glow);
+}
+.slot.taken.mine .slot-tag { color: var(--mine); font-size: 11.5px; font-weight: 800; margin-top: 2px; }
+:root[data-theme="light"] .slot.taken.mine { --mine: #16783a; --mine-bg: #e6f6ec; --mine-glow: rgba(22, 120, 58, .16); }
 
 /* ==== שורת תור (רשימה) ==== */
 .booking {

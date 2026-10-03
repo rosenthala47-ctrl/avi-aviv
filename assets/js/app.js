@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "181";
+  const APP_VERSION = "182";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -713,6 +713,22 @@
       byStart.set(start, mk(start, u.toMin(start), false, true));
     });
     return [...byStart.values()].sort((a, z) => u.toMin(a.start) - u.toMin(z.start));
+  }
+
+  /* התורים הפעילים של הלקוח הנוכחי ביום נתון, ממופים לריבועי הרשת: מפתח = שעת ההתחלה
+     של הריבוע, ערך = התור. בדרך כלל זו בדיוק שעת התור. אם התור לא יושב על הרשת (למשל
+     הספר שינה את מרווח התורים אחרי שנקבע), הוא מסומן על הריבוע שמכיל את שעת ההתחלה
+     שלו — כך שהלקוח תמיד רואה איפה התור שלו. slots חייב להיות ממוין לפי שעה. */
+  function ownBookingSlots(st, dateKey, slots) {
+    const map = new Map();
+    if (!identity.userId) return map;   // בלי זהות לא משווים — undefined === undefined היה מתאים לכל תור
+    st.bookings.forEach((b) => {
+      if (b.userId !== identity.userId || b.status === "cancelled" || b.date !== dateKey) return;
+      const bs = u.toMin(b.start);
+      const s = slots.find((x) => x.start === b.start) || slots.filter((x) => u.toMin(x.start) <= bs).pop();
+      if (s && !map.has(s.start)) map.set(s.start, b);
+    });
+    return map;
   }
 
   /* רשת יום מלאה לתצוגת הבעלים (00:00–24:00) — כדי לפתוח כל שעה ביממה,
@@ -2144,18 +2160,29 @@
     // למשך התור (חופפות לתור אחר או חורגות משעת הסגירה), מסמנים תפוסות.
     let slotsHtml;
     const dur = (service && service.durationMin) || (st.shop.slotStep || 45);
-    const allSlots = gridSlots(view.selDate, dur).filter((s) => !s.past && !s.blocked && !s.hidden && (s.booking || s.fits));
+    const rawSlots = gridSlots(view.selDate, dur);
+    // התורים של הלקוח עצמו ביום הזה — מסומנים "התור שלך" על הריבוע של השעה שקבע.
+    // ריבוע כזה מוצג גם אם הספר חסם אותו אחרי שהתור נקבע (התור עדיין תקף).
+    const mineBySlot = ownBookingSlots(st, view.selDate, rawSlots);
+    const allSlots = rawSlots.filter((s) => !s.past && (mineBySlot.has(s.start) || (!s.blocked && !s.hidden && (s.booking || s.fits))));
     // אם המשבצת שנבחרה כבר לא מתאימה לשירות הנוכחי (החלפת שירות לארוך יותר) — לנקות
     if (view.selSlot && !allSlots.some((s) => s.start === view.selSlot && !s.booking)) view.selSlot = null;
     const hasFree = allSlots.some((s) => !s.booking);
+    const hasMine = allSlots.some((s) => mineBySlot.has(s.start));
     if (closed.has(view.selDate)) {
       slotsHtml = emptyState("🌴", "המספרה בחופשה ביום זה", "בחרו יום אחר מהיומן");
     } else if (!hasHours(view.selDate)) {
       slotsHtml = emptyState("🚫", "סגור ביום זה", "בחרו יום אחר מהיומן");
-    } else if (!allSlots.length || !hasFree) {
+    } else if (!allSlots.length || (!hasFree && !hasMine)) {
+      // יום מלא — אבל אם יש בו תור של הלקוח עצמו מציגים את הרשת, כדי שיראה את התור שלו
       slotsHtml = emptyState("⌛", "אין תורים פנויים", "כל התורים ליום זה תפוסים או שהיום הסתיים");
     } else {
       slotsHtml = `<div class="slots-grid">` + allSlots.map((s) => {
+        const mine = mineBySlot.get(s.start);
+        if (mine) {
+          // "taken" כדי שייחשב ריבוע לא-פנוי בכל מקום; "mine" צובע בירוק. הקשה → פרטי התור
+          return `<button class="slot taken mine" data-act="my-booking" data-id="${esc(mine.id)}">${esc(mine.start)}<span class="slot-tag">התור שלך</span></button>`;
+        }
         if (s.booking) {
           const inList = (st.waitlist || []).some((w) =>
             w.userId === identity.userId && w.date === view.selDate && w.start === s.start);
@@ -2585,6 +2612,40 @@
       </div>` + past.map((x) => card(x, true)).join("");
     }
     return html;
+  }
+
+  /* פרטי התור — נפתח מהקשה על הריבוע הירוק "התור שלך" ברשימת השעות.
+     מציג את מה שהלקוח צריך לדעת, ואותן פעולות כמו בכרטיס ב"התורים שלי". */
+  function openMyBooking(id) {
+    const st = Store.get();
+    const b = st.bookings.find((x) => x.id === id && x.userId === identity.userId && x.status !== "cancelled");
+    if (!b) {   // התור בוטל בינתיים (ממכשיר אחר או ע״י הספר) — מרעננים את הרשת
+      toast("התור הזה כבר לא קיים", "", "ℹ️"); render(); return;
+    }
+    const confirmed = b.status === "confirmed";
+    const rel = u.relativeDay(b.date);
+    const mins = Number(b.durationMin) || (u.toMin(b.end) - u.toMin(b.start));
+    const row = (k, v) => `<div class="summary-row"><span class="sr-k">${k}</span><span class="sr-v">${v}</span></div>`;
+    openModal(`
+      <div class="m-title">התור שלך ✂️</div>
+      <div class="m-sub">${esc(st.shop.name)}</div>
+      ${row("שירות", esc(b.serviceName))}
+      ${row("תאריך", esc(u.longDate(b.date)) + ((rel === "היום" || rel === "מחר") ? " · " + esc(rel) : ""))}
+      ${row("שעה", `<span dir="ltr">${esc(b.start)}–${esc(b.end)}</span>`)}
+      ${mins > 0 ? row("משך", u.fmtDuration(mins)) : ""}
+      ${b.staff ? row("ספר", esc(b.staff)) : ""}
+      <div class="summary-row"><span class="sr-k">מחיר</span><span class="sr-v big">${u.fmtPrice(b.price)}</span></div>
+      <div class="summary-row"><span class="sr-k">סטטוס</span><span class="sr-v">${confirmed
+        ? `<span class="status-tag status-confirmed">✓ אושר</span>`
+        : `<span class="status-tag status-booked">ממתין</span>`}</span></div>
+      <div class="btn-row btn-row-wrap" style="margin-top:18px">
+        ${confirmed ? "" : `<button class="btn btn-sm btn-primary" data-act="confirm-arrival" data-id="${esc(b.id)}">✓ אשר הגעה</button>`}
+        <button class="btn btn-sm" data-act="reschedule" data-id="${esc(b.id)}">🔄 שינוי מועד</button>
+        <button class="btn btn-sm" data-act="add-cal" data-id="${esc(b.id)}">📅 ליומן</button>
+        <button class="btn btn-sm btn-danger" data-act="cancel-booking" data-id="${esc(b.id)}">ביטול התור</button>
+      </div>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:10px">סגירה</button>
+    `);
   }
 
   function confirmCancelBooking(id) {
@@ -3705,7 +3766,7 @@
     const mu = bkMusic(b);
     const badge = c.kind === "now" ? "🎧 עכשיו בכיסא" : "🎧 הבא בתור";
     const when = c.kind === "now"
-      ? `${esc(b.start)}–${esc(b.end)}`
+      ? `<span dir="ltr">${esc(b.start)}–${esc(b.end)}</span>`   // dir=ltr — אחרת בעברית (RTL) הטווח מוצג הפוך
       : (c.mins <= 0 ? "מתחיל עכשיו" : c.mins < 60 ? `בעוד ${c.mins} דק׳ · ${esc(b.start)}` : `${esc(b.start)}`);
     const showPremium = mu && (mu.url || mu.link || musicSearchQuery(mu));
     return `
@@ -6219,8 +6280,12 @@
         case "open-confirm": openConfirm(); break;
         case "do-book": doBook(); break;
 
+        // הקשה על הריבוע הירוק "התור שלך" ברשימת השעות → פרטי התור
+        case "my-booking": openMyBooking(t.dataset.id); break;
+
         case "confirm-arrival":
           await Store.setBookingStatus(t.dataset.id, "confirmed");
+          closeModal();   // כשנלחץ מתוך פרטי התור
           toast("הגעתך אושרה ✓", "good", "📍"); render(); break;
 
         case "owner-cancel":
@@ -6238,6 +6303,7 @@
         case "reschedule": {
           const bk = Store.get().bookings.find((x) => x.id === t.dataset.id);
           if (!bk) break;
+          closeModal();   // כשנלחץ מתוך פרטי התור
           view.rescheduleId = bk.id;
           view.selService = bk.serviceId;
           view.selSlot = null;
