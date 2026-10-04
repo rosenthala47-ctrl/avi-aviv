@@ -218,6 +218,15 @@ function relDay(dateKey) {
   if (diff === 1) return "מחר";
   return "יום " + DOW[target.getDay()];
 }
+/* "בעוד ..." בעברית קריאה. התזכורת עשויה לצאת כמה שעות מראש (ראו expectedGapMs),
+   ולכן הטקסט חייב לומר את הזמן שנותר באמת, ולא מספר דקות מקובע. */
+function fmtLead(ms) {
+  const m = Math.round(ms / 60000);
+  if (m < 90) return `בעוד ${Math.max(1, m)} דק׳`;
+  const h = Math.round(m / 60);
+  return h === 2 ? "בעוד כשעתיים" : `בעוד כ-${h} שעות`;
+}
+
 function apptTs(date, start) {
   const [y, m, d] = date.split("-").map(Number);
   const [hh, mm] = start.split(":").map(Number);
@@ -293,17 +302,29 @@ function apptTs(date, start) {
   const perShop = (stateVal && stateVal.shops) || {};
 
   const now = Date.now();
-  /* GitHub Actions לא תמיד מפעיל cron של "כל 5 דקות" בזמן — נצפו פערים של
-     עד כמה שעות בין הרצה להרצה (עומס בפלטפורמה). בלי תיקון, תור שחלון
-     התזכורת שלו (למשל "60 דקות לפני") נופל בדיוק בתוך פער כזה — מפספס את
-     ההתראה לצמיתות, כי בהרצה הבאה ה"לפני" כבר הפך ל"אחרי" ולא נשלח כלום.
-     הפתרון: מרחיבים את חלון התזכורת אחורה בדיוק לפי הפער מהריצה הקודמת,
-     כך שתור שהיה אמור לקבל תזכורת במהלך הפער עדיין נתפס בריצה שאחריו.
-     תקרה של 6 שעות מונעת "גל" תזכורות מאוחרות מדי אחרי השבתה ממושכת. */
+  /* GitHub Actions לא מכבד את התזמון "כל 5 דקות". במדידה על המאגר החי (אוקטובר 2026)
+     הפערים בין הרצה להרצה היו 2–7 שעות, חציון כ-5 שעות, ואף ריצה לא יצאה בזמן.
+     לכן אסור להניח שתהיה ריצה בתוך חלון "60 דקות לפני התור".
+
+     catchupMs = חלון תפיסה אחורה. נשאר בשימוש רק לתזכורת "יום לפני" (חלון של
+     8 שעות, רחב דיו כדי לספוג פער). אסור להשתמש בו לתזכורת שלפני התור: הוא זה
+     שגרם לשליחת "תזכורת" אחרי שהתור כבר עבר — תור ב-15:45 קיבל התראה ב-16:36
+     עם הטקסט "בעוד 1 דק׳" (כי mins היה מקוצץ ב-Math.max(1, ...)). */
   const gapMs = Math.max(0, now - ((stateVal && stateVal.updatedAt) || now));
   const catchupMs = Math.min(gapMs + 2 * 60000, 6 * 3600000);
+  /* כמה זמן סביר שיעבור עד הריצה הבאה — נמדד מהפערים שנצפו בפועל (12 האחרונים)
+     ולא מהתזמון המוצהר. משמש כדי לדעת אם הריצה הנוכחית היא ההזדמנות האחרונה
+     לשלוח תזכורת לפני התור. מתכוונן מעצמו: אם GitHub ישתפר והפערים יתקצרו,
+     התזכורות יחזרו להישלח קרוב למועד שהספר הגדיר. */
+  const prevGaps = (stateVal && Array.isArray(stateVal.gaps) ? stateVal.gaps : [])
+    .filter((g) => typeof g === "number" && g > 0);
+  const gapsHist = (firstRun ? prevGaps : prevGaps.concat(gapMs)).slice(-12);
+  const saneGaps = gapsHist.filter((g) => g <= 12 * 3600000);   // מתעלמים מהשבתה ממושכת
+  const expectedGapMs = Math.min(
+    Math.max((saneGaps.length ? Math.max(...saneGaps) : 2 * 3600000) * 1.25, 30 * 60000),
+    8 * 3600000);
   if (!firstRun && gapMs > 15 * 60000) {
-    console.warn(`הריצה הקודמת הייתה לפני ${Math.round(gapMs / 60000)} דקות (במקום 5) — כנראה עיכוב בתזמון של GitHub Actions. משתמשים בחלון תפיסה מורחב (${Math.round(catchupMs / 60000)} דקות) כדי לא לפספס תזכורות.`);
+    console.warn(`הריצה הקודמת הייתה לפני ${Math.round(gapMs / 60000)} דקות (במקום 5) — עיכוב בתזמון של GitHub Actions. תזכורות יישלחו עד ${Math.round(expectedGapMs / 60000)} דקות לפני התור, כדי שלא יפספסו.`);
   }
   const shopsVal = (await db.ref("shops").once("value")).val() || {};
   const shopIds = Object.keys(shopsVal);
@@ -364,13 +385,17 @@ function apptTs(date, start) {
     const newBc = broadcasts.filter((b) => b && b.id && b.text && !doneBc.has(b.id));
     // תזכורות לפני התור — נשלחות כשנותר פחות מ-reminderMinutes עד המועד
     const reminderMin = Number((shop.shop && shop.shop.reminderMinutes) || 60);
-    // גבול תחתון מורחב אחורה לפי catchupMs — כדי לתפוס תור שחלון התזכורת שלו
-    // נפל בתוך פער בין הרצות (ראו הסבר ליד catchupMs למעלה). עדיין לא שולחים
-    // תזכורת לתור שכבר עבר מזמן ומחוץ לתקרת התפיסה.
+    /* שני כללים:
+       1. לעולם לא לשלוח אחרי שהתור התחיל (lead > 0). תזכורת כזו רק מבלבלת
+          ומביכה — זה היה הבאג: "תזכורת... בעוד 1 דק׳" 51 דקות אחרי התור.
+       2. מותר לשלוח מוקדם מהמוגדר, אם כנראה לא תהיה עוד ריצה לפני התור
+          (lead <= expectedGapMs). אחרת, בפערים של שעות, התזכורת לא תצא כלל.
+       הטקסט אומר את הזמן שנותר באמת (fmtLead), ולכן שליחה מוקדמת אינה מטעה. */
+    const remWindowMs = Math.max(reminderMin * 60000, expectedGapMs);
     const dueReminders = bookings.filter((b) => {
       if (!b || !b.id || !b.userId || b.status === "cancelled" || doneRem.has(b.id)) return false;
       const lead = apptTs(b.date, b.start) - now;
-      return lead > -catchupMs && lead <= reminderMin * 60000;
+      return lead > 0 && lead <= remWindowMs;
     });
     /* תזכורת "התור מחר" — נשלחת כשנותרו בין 18 ל-26 שעות עד התור.
        חלון בשעות (ולא "תאריך מחר") כדי שלא יהיה תלוי באזור הזמן של הראנר,
@@ -409,15 +434,18 @@ function apptTs(date, start) {
       }
       // תזכורת יום לפני — מגיעה כיממה מראש, כדי שיהיה זמן לבטל אם צריך
       for (const b of dueDayReminders) {
-        sent += await sendToUid(b.userId, "📅 התור שלך מחר",
-          `${b.serviceName} · ${relDay(b.date)} בשעה ${b.start}\n${shopName}`, "dayrem-" + b.id);
+        // הכותרת לפי היום בפועל — חלון התפיסה עלול להוציא אותה כשהתור כבר "היום",
+        // ואז "התור שלך מחר" מול "היום בשעה X" בגוף ההודעה היה סותר את עצמו
+        const rel = relDay(b.date);
+        sent += await sendToUid(b.userId, rel === "מחר" ? "📅 התור שלך מחר" : "📅 תזכורת לתור",
+          `${b.serviceName} · ${rel} בשעה ${b.start}\n${shopName}`, "dayrem-" + b.id);
         doneDayRem.add(b.id);
       }
       // תזכורת לפני התור — מסמנים כנשלח רק אחרי השליחה בפועל
       for (const b of dueReminders) {
-        const mins = Math.max(1, Math.round((apptTs(b.date, b.start) - now) / 60000));
+        const lead = apptTs(b.date, b.start) - now;   // תמיד חיובי — ראו הסינון למעלה
         sent += await sendToUid(b.userId, "⏰ תזכורת לתור",
-          `${b.serviceName} · ${relDay(b.date)} בשעה ${b.start} (בעוד ${mins} דק׳)\n${shopName}`, "rem-" + b.id);
+          `${b.serviceName} · ${relDay(b.date)} בשעה ${b.start} (${fmtLead(lead)})\n${shopName}`, "rem-" + b.id);
         doneRem.add(b.id);
         // SMS מקביל לתזכורת — כרגע רק על SMS_SHOPS (try), ובדמה עד שיוגדר ספק אמיתי
         if (SMS_SHOPS.includes(sid) && !doneSmsRem.has(b.id)) {
@@ -474,7 +502,8 @@ function apptTs(date, start) {
   let pruned = 0;
   Object.keys(perShop).forEach((k) => { if (!live.has(k)) { delete perShop[k]; pruned++; } });
 
-  await stateRef.set({ shops: perShop, updatedAt: now });
+  // gaps = היסטוריית הפערים בפועל בין ריצות, לחישוב expectedGapMs בריצה הבאה
+  await stateRef.set({ shops: perShop, updatedAt: now, gaps: gapsHist });
   if (pruned) console.log(`נוקו ${pruned} רשומות של מספרות שנמחקו.`);
 
   // ניקוי סיסמאות ניהול גלויות — מבודד לחלוטין: כישלון כאן לא פוגע בהתראות.
