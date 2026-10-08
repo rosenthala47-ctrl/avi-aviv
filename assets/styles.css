@@ -409,7 +409,7 @@ a { color: var(--sky); text-decoration: none; }
   transition: background .15s, transform .1s;
 }
 .icon-btn:active { transform: scale(.94); background: var(--surface-3); }
-/* כפתור החלפת שפה (EN / עב) — כרגע מופיע רק במספרת try */
+/* כפתור החלפת שפה (EN / עב) — ראו i18nAvailable: try, מסך פתיחת מספרה, ומספרה באנגלית */
 .icon-btn.lang-btn { font-size: 13px; font-weight: 800; letter-spacing: .3px; margin-inline-end: 8px; }
 /* אנגלית: המסך מוסתר עד שמנוע התרגום עבר עליו — בלי הבזק של עברית (נחשף אחרי עד 4 שנ׳ בכל מקרה) */
 .i18n-pending #root, .i18n-pending #modalBack, .i18n-pending #toasts { visibility: hidden; }
@@ -1142,6 +1142,9 @@ a.nav-btn { flex: 1; color: var(--text); text-decoration: none; }
   padding: calc(22px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom));
   max-width: 520px; margin-inline: auto; width: 100%;
 }
+/* כפתור השפה בשאלון — אין כאן כותרת עליונה, לכן הוא יושב בפינה של השאלון עצמו */
+.wiz-lang { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+.wiz-lang .lang-btn { margin-inline-end: 0; width: 44px; height: 34px; border-radius: 10px; }
 .wiz-greet { text-align: center; font-size: 13.5px; color: var(--sky-2); font-weight: 700; margin-bottom: 12px; }
 .wiz-dots { display: flex; gap: 6px; justify-content: center; margin-bottom: 26px; }
 .wiz-dots .wd { width: 26px; height: 4px; border-radius: 3px; background: var(--surface-3); transition: background .25s, transform .25s; }

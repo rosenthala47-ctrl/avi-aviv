@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "184";
+  const APP_VERSION = "185";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -35,11 +35,17 @@
   }
   const SHOP = resolveShopId();
 
-  /* ---------- שפה: אנגלית — כרגע רק במספרת try, עד אישור בעל המערכת ----------
-     בכל מספרה אחרת LANG תמיד "he", קבצי התרגום לא נטענים, ושום דבר לא משתנה.
-     גם ב-try ברירת המחדל עברית (לא לפי שפת הטלפון — הרבה טלפונים בארץ מוגדרים באנגלית).
-     אנגלית רק בבחירה מפורשת: כפתור EN בכותרת, או קישור עם ?lang=en (לשליחה לספר זר). */
-  function i18nAvailable() { return SHOP === "try"; }
+  /* ---------- שפה: אנגלית — ב-try, במסך פתיחת מספרה, ובמספרה שנפתחה באנגלית ----------
+     מספרה עברית קיימת לא מושפעת בכלל: LANG תמיד "he", קבצי התרגום לא נטענים, ושום
+     דבר לא משתנה (כולל בלי כפתור שפה). ברירת המחדל עברית גם ב-try ובמסך הפתיחה (לא
+     לפי שפת הטלפון — הרבה טלפונים בארץ מוגדרים באנגלית); אנגלית רק בבחירה מפורשת:
+     כפתור EN, או קישור עם ?lang=en (לשליחה לספר זר).
+     SHOPLANG = "en" אם המספרה הזו נפתחה באנגלית (shop.lang, נזכר במכשיר ב-syncShopLang) —
+     ואז אנגלית היא ברירת המחדל שלה, לספר וללקוחות שלו. */
+  const SHOPLANG = (function () {
+    try { return localStorage.getItem("ug_shop_lang__" + SHOP) === "en" ? "en" : ""; } catch (e) { return ""; }
+  })();
+  function i18nAvailable() { return SHOP === "try" || SHOP === "__new__" || SHOPLANG === "en"; }
   function resolveLang() {
     if (!i18nAvailable()) return "he";
     try {
@@ -48,7 +54,7 @@
       const s = localStorage.getItem("ug_lang");
       if (s === "en" || s === "he") return s;
     } catch (e) {}
-    return "he";
+    return SHOPLANG === "en" ? "en" : "he";
   }
   const LANG = resolveLang();
   function startEnglish() {
@@ -79,6 +85,23 @@
       const url = new URL(location.href);
       if (url.searchParams.has("lang")) { url.searchParams.delete("lang"); location.replace(url.toString()); return; }
     } catch (e) {}
+    location.reload();
+  }
+  /* מספרה שנפתחה באנגלית — זוכרים את זה במכשיר, כדי ש-i18nAvailable ידע על כך כבר
+     בשורה הראשונה של הטעינה הבאה (המצב עצמו מגיע מהענן רק אחרי שהמסך נבנה).
+     במפגש הראשון במכשיר צריך טעינה מחדש אחת. מספרה עברית: lang ריק בשני הצדדים →
+     יוצאים מיד, בלי לכתוב ובלי לרענן. */
+  function syncShopLang() {
+    const st = Store.get();
+    const want = ((st && st.shop && st.shop.lang) || "") === "en" ? "en" : "";
+    if (want === SHOPLANG) return;
+    const key = "ug_shop_lang__" + SHOP;
+    try { want ? localStorage.setItem(key, want) : localStorage.removeItem(key); } catch (e) { return; }
+    try {   // רענון אחד בלבד — הגנה מפני לופ אם השמירה לא נתפסה
+      const rk = "ug_shop_lang_sync__" + SHOP;
+      if (sessionStorage.getItem(rk)) return;
+      sessionStorage.setItem(rk, "1");
+    } catch (e) { return; }
     location.reload();
   }
   if (LANG === "en") startEnglish();
@@ -872,7 +895,8 @@
     opts = opts || {};
     const st = Store.get();
     const themeIco = currentTheme() === "light" ? "🌙" : "☀️";
-    // כפתור השפה — רק ב-try. במספרות אחרות מחרוזת ריקה בלי שורה נוספת: ה-HTML זהה לחלוטין לקודם
+    // כפתור השפה — רק היכן שהאנגלית פתוחה (ראו i18nAvailable). במספרה עברית מחרוזת
+    // ריקה בלי שורה נוספת: ה-HTML זהה לחלוטין לקודם
     const langBtn = i18nAvailable()
       ? `<button class="icon-btn lang-btn" data-act="toggle-lang" translate="no" title="${LANG === "en" ? "עברית" : "English"}">${LANG === "en" ? "עב" : "EN"}</button>`
       : "";
@@ -5842,7 +5866,7 @@
                 ${row("🔗", "כתובת אישית", d.handle, 3)}
                 ${row("📞", "טלפון", d.phone, 4)}
                 ${row("📍", "כתובת", addr, 4)}
-                ${row("✂️", "שירותים", svcCount ? svcCount + " שירותים" : "", 5)}
+                ${row("✂️", "שירותים", svcCount ? (svcCount === 1 ? "שירות אחד" : svcCount + " שירותים") : "", 5)}
                 ${row("🧑‍🔧", "ספרים", d.multiStaff ? (d.staff || []).filter(Boolean).join(", ") : "ספר יחיד", 6)}
                 ${row("📝", "תיאור", d.about, 7)}
                 ${row("🌐", "רשתות חברתיות", socLabels, 8)}
@@ -5892,6 +5916,13 @@
           `<span class="wd ${i + 1 < wiz.step ? "done" : ""}${i + 1 === wiz.step ? " on" : ""}"></span>`).join("")}</div>`
       : "";
 
+    // כפתור השפה — במסך פתיחת מספרה אין כותרת עליונה, לכן הוא יושב בראש השאלון.
+    // ככה ספר מחו"ל שמגיע לקישור הרגיל יכול לעבור לאנגלית בלחיצה אחת.
+    const langBtn = i18nAvailable()
+      ? `<div class="wiz-lang"><button class="icon-btn lang-btn" data-act="toggle-lang" translate="no"
+           title="${LANG === "en" ? "עברית" : "English"}">${LANG === "en" ? "עב" : "EN"}</button></div>`
+      : "";
+
     const isLast = wiz.step === WIZ_QUESTIONS;
     const nav = wiz.step === 0
       ? `<button class="btn btn-primary btn-lg" data-act="wiz-next">בוא נתחיל 🚀</button>
@@ -5903,7 +5934,7 @@
     return `
     <div class="screen active">
       <div class="wiz-wrap">
-        ${greet}${dots}
+        ${langBtn}${greet}${dots}
         <div class="wiz-body" id="wizBody">${wizStepHtml()}</div>
         <div class="wiz-nav">${nav}</div>
       </div>
@@ -6130,6 +6161,7 @@
       style: d.style, services: d.services, staff: d.multiStaff ? d.staff : [],
       about: d.about, instagram: d.instagram, tiktok: d.tiktok, facebook: d.facebook, youtube: d.youtube,
       logo: d.logo, heardFrom: d.heardFrom, schedule: d.schedule,
+      lang: LANG === "en" ? "en" : "",   // נפתחה באנגלית → המספרה נשארת באנגלית
     }, passHash);
     clearInterval(timer);
     if (!res.ok) {
@@ -6147,6 +6179,8 @@
     localStorage.setItem("ug_otab__" + d.handle, "publish");
     // המספרה שבבעלות המכשיר הזה — פתיחת האפליקציה תוביל ישר לניהול שלה (כניסת הספר)
     try { localStorage.setItem("ug_my_shop", d.handle); localStorage.setItem("ug_known_handle", d.handle); } catch (e) {}
+    // נפתחה באנגלית — לזכור מיד, כדי שהמספרה החדשה תיטען באנגלית בלי רענון נוסף
+    try { if (LANG === "en") localStorage.setItem("ug_shop_lang__" + d.handle, "en"); } catch (e) {}
     setTimeout(() => { location.hash = d.handle; location.reload(); }, 800);
   }
 
@@ -7359,6 +7393,7 @@
 
     await Store.init(SHOP);
     if (Store.notFound) { view.notFound = true; render(); return; }        // מספרה לא קיימת
+    syncShopLang();   // מספרה שנפתחה באנגלית — לזכור במכשיר (מספרה עברית: אין פעולה)
 
     // זכירת המספרה — כדי שפתיחת האפליקציה המותקנת (ללא כתובת) תחזיר לכאן
     try { if (SHOP !== "__new__") localStorage.setItem("ug_last_shop", SHOP); } catch (e) {}

@@ -736,6 +736,9 @@ UG.Store = (function () {
     // הלוגו נשמר בצומת המדיה הנפרד (shopMedia), לא בתוך המספרה — ראו saveMedia למטה.
     s.shop.heardFrom = (data && data.heardFrom) || "";   // מאיפה הספר הגיע אלינו
     s.shop.style = (data && data.style) || "sky";
+    // מספרה שנפתחה באנגלית — ואז אנגלית היא ברירת המחדל שלה, לספר וללקוחות.
+    // מספרה שנפתחה בעברית (המצב הרגיל): השדה לא נכתב בכלל.
+    if (data && data.lang === "en") s.shop.lang = "en";
     // שמות הספרים (אם המספרה בחרה כמה ספרים בשאלון)
     if (data && Array.isArray(data.staff)) {
       s.shop.staff = data.staff.map((n) => String(n || "").trim()).filter(Boolean);

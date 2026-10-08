@@ -1,5 +1,5 @@
 /* מילון עברית → אנגלית למנוע התרגום (i18n.js). נטען רק כשהשפה אנגלית (כרגע: try).
-   החלק הראשון (1221 טקסטים) נשלף אוטומטית מהקוד ותורגם (v184). החלק השני — ידני.
+   החלק הראשון (1220 טקסטים) נשלף אוטומטית מהקוד ותורגם (v184). החלק השני — ידני.
    ★ טקסט חדש בממשק? להוסיף שורה "עברית": "English" בחלק הידני שבסוף הקובץ.
      בדיקה: לפתוח ?lang=en#try, ובקונסול UG.I18N.missing() מחזיר מה עוד לא תורגם.
    מפתח עם {0},{1} = תבנית לטקסט שמשולבים בו ערכים (מתורגמים בעצמם); <0/> = תת-אלמנט
@@ -857,7 +857,6 @@ window.UG.I18N_DICT.en = Object.assign(
 "ספרו לנו איך היה…": "Tell us how it was…",
 "ספרו על המוצר — למה הוא טוב, למי הוא מתאים…": "Tell clients about the product — why it's good, who it's for…",
 "ספרו על המספרה — ותק, התמחות, אווירה…": "Tell clients about the barbershop — experience, specialty, vibe…",
-"ספרים": "barbers",
 "ספרים במספרה": "Barbers at the shop",
 "עבר": "Past",
 "עברו ל״קביעת תור״ כדי לקבוע את התור הראשון": "Go to \"Booking\" to book your first appointment",
@@ -1270,5 +1269,38 @@ window.UG.I18N_DICT.en = Object.assign(
   "{0} ביקורות": "{0} reviews",
   // "יום " + שם היום (שבאנגלית כבר מגיע מתורגם מ-util.js)
   "יום Sunday": "Sunday", "יום Monday": "Monday", "יום Tuesday": "Tuesday", "יום Wednesday": "Wednesday",
-  "יום Thursday": "Thursday", "יום Friday": "Friday", "יום Saturday": "Saturday"
+  "יום Thursday": "Thursday", "יום Friday": "Friday", "יום Saturday": "Saturday",
+
+  /* ── מסך פתיחת מספרה (v185): מסך הסיכום מרכיב טקסט ממספרים ── */
+  // מספר שאינו ספרה = לא התבנית הזו (מחזירים null, והמנוע ממשיך לחפש)
+  "{0} שירותים": function (n) { return /^\d+$/.test(n) ? (n === "1" ? "1 service" : n + " services") : null; },
+  "יום אחד קבוע": "1 fixed day",
+  "יום אחד משתנה": "1 variable day",
+  "יום אחד סגור": "1 day closed",
+  "{0} ימים קבועים": function (n) { return /^\d+$/.test(n) ? n + " fixed days" : null; },
+  "{0} ימים משתנים": function (n) { return /^\d+$/.test(n) ? n + " variable days" : null; },
+  "{0} ימים סגורים": function (n) { return /^\d+$/.test(n) ? n + " days closed" : null; },
+
+  /* ── מנוי: ספירת הניסיון (countdownHtml/tickTrial) ושמות המסלולים מ-config.js ──
+     config.js אינו קוד ממשק ולכן לא נשלף אוטומטית. רווח קשיח בסוף, אחרת הוא נבלע
+     לפני הטיימר הצמוד. */
+  "{0} ימים ו-": function (n) { return /^\d+$/.test(n) ? n + " days and " : null; },
+  "{0} יום ו-": function (n) { return /^\d+$/.test(n) ? n + " day and " : null; },
+  "חודשי": "Monthly",
+  "שנתי": "Yearly",
+  "לחודש": "per month",
+  "לחודשיים": "per 2 months",
+  "לשנה": "per year",
+  "חיסכון 29%": "Save 29%",
+  "במקום 420 ₪": "instead of 420 ₪",
+  "בחרו מסלול והפנייה תיפתח בוואטסאפ עם הודעה מוכנה. נפעיל את המנוי מיד לאחר התשלום.":
+    "Pick a plan and WhatsApp will open with a ready message. We'll activate your subscription right after payment.",
+  "המספרה שלי": "My barbershop",
+  "{0} ₪ לחודש": function (n) { return /^\d+$/.test(n) ? n + " ₪ per month" : null; },
+  "{0} ₪ לשנה": function (n) { return /^\d+$/.test(n) ? n + " ₪ per year" : null; },
+  // כרטיס "המספרה שלך מוכנה" — שם הספר משורשר לתוך המשפט
+  "{0}, המספרה שלך מוכנה!": "{0}, your barbershop is ready!",
+  // במסך הסיכום של השאלון "ספרים" הוא כותרת שורה — באות גדולה כמו שאר הכותרות
+  "ספרים": "Barbers",
+  "שירות אחד": "1 service"
 });
