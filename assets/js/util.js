@@ -7,6 +7,20 @@ UG.util = (function () {
 
   const pad = (n) => String(n).padStart(2, "0");
 
+  /* שפת התצוגה. "he" כברירת מחדל — ואז כל הפונקציות כאן עובדות בדיוק כמו תמיד.
+     setLang("en") נקרא רק כשהמספרה הורשתה לאנגלית (כרגע try בלבד) — מחליף את
+     שמות הימים/החודשים במקום (המערכים עצמם, כי app.js מחזיק אליהם הפניה דרך
+     u.DOW / u.MON) ומפעיל את הניסוח האנגלי של תאריכים ומשכי זמן. */
+  let LANG = "he";
+  function setLang(l) {
+    if (l !== "en" || LANG === "en") return;
+    LANG = "en";
+    DOW.splice(0, 7, "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday");
+    DOW_SHORT.splice(0, 7, "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat");
+    MON.splice(0, 12, "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec");
+  }
+  function lang() { return LANG; }
+
   // מפתח תאריך מקומי YYYY-MM-DD (ללא הסטת אזור זמן)
   function dateKey(d) {
     return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
@@ -24,6 +38,11 @@ UG.util = (function () {
     return pad(Math.floor(min / 60)) + ":" + pad(min % 60);
   }
   function fmtDuration(min) {
+    if (LANG === "en") {
+      if (min < 60) return min + " min";
+      const eh = Math.floor(min / 60), em = min % 60;
+      return em ? `${eh}:${pad(em)} hr` : `${eh} hr`;
+    }
     if (min < 60) return min + " דק׳";
     const h = Math.floor(min / 60), m = min % 60;
     return m ? `${h}:${pad(m)} שע׳` : `${h} שע׳`;
@@ -45,12 +64,14 @@ UG.util = (function () {
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const d = parseKey(key);
     const diff = Math.round((d - today) / 86400000);
+    if (LANG === "en") return diff === 0 ? "Today" : diff === 1 ? "Tomorrow" : DOW_SHORT[d.getDay()];
     if (diff === 0) return "היום";
     if (diff === 1) return "מחר";
     return "יום " + DOW_SHORT[d.getDay()];
   }
   function longDate(key) {
     const d = parseKey(key);
+    if (LANG === "en") return `${DOW[d.getDay()]}, ${MON[d.getMonth()]} ${d.getDate()}`;
     return `יום ${DOW[d.getDay()]}, ${d.getDate()} ב${MON[d.getMonth()]}`;
   }
 
@@ -85,6 +106,6 @@ UG.util = (function () {
   return {
     DOW, DOW_SHORT, MON, pad, dateKey, parseKey, toMin, toHHMM,
     fmtDuration, fmtPrice, dateTime, isSameDay, relativeDay, longDate, uid, escapeHtml,
-    normalizePhone, isValidPhone, fmtPhone,
+    normalizePhone, isValidPhone, fmtPhone, setLang, lang,
   };
 })();

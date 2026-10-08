@@ -409,6 +409,18 @@ a { color: var(--sky); text-decoration: none; }
   transition: background .15s, transform .1s;
 }
 .icon-btn:active { transform: scale(.94); background: var(--surface-3); }
+/* כפתור החלפת שפה (EN / עב) — כרגע מופיע רק במספרת try */
+.icon-btn.lang-btn { font-size: 13px; font-weight: 800; letter-spacing: .3px; margin-inline-end: 8px; }
+/* אנגלית: המסך מוסתר עד שמנוע התרגום עבר עליו — בלי הבזק של עברית (נחשף אחרי עד 4 שנ׳ בכל מקרה) */
+.i18n-pending #root, .i18n-pending #modalBack, .i18n-pending #toasts { visibility: hidden; }
+/* תיקוני משמאל-לימין (אנגלית). הפריסה עצמה כבר מבוססת על מאפיינים לוגיים (inline-start/end)
+   ומתהפכת לבד; כאן רק מה שמצויר בצורה קבועה. בעברית (dir=rtl) הכללים האלה לא חלים. */
+/* חצים: מחליפים את התו עצמו (ולא הופכים את הכפתור, כדי לא להפוך גם צל ומרכוז) */
+:root[dir="ltr"] .set-row .sr-chev, :root[dir="ltr"] .tab-arrow { font-size: 0; }
+:root[dir="ltr"] .set-row .sr-chev::after { content: "›"; font-size: 22px; }   /* "הלאה" — ימינה */
+:root[dir="ltr"] .tab-arrow-start::after { content: "‹"; font-size: 22px; }
+:root[dir="ltr"] .tab-arrow-end::after { content: "›"; font-size: 22px; }
+:root[dir="ltr"] .pw-eye { left: auto; right: 10px; }   /* כפתור "הצג סיסמה" בסוף השדה */
 .badge-count {
   position: absolute; top: -5px; inset-inline-start: -5px;
   min-width: 19px; height: 19px; padding: 0 5px; border-radius: 10px;

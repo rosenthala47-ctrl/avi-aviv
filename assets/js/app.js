@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "183";
+  const APP_VERSION = "184";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -34,6 +34,55 @@
     return "__new__";
   }
   const SHOP = resolveShopId();
+
+  /* ---------- שפה: אנגלית — כרגע רק במספרת try, עד אישור בעל המערכת ----------
+     בכל מספרה אחרת LANG תמיד "he", קבצי התרגום לא נטענים, ושום דבר לא משתנה.
+     גם ב-try ברירת המחדל עברית (לא לפי שפת הטלפון — הרבה טלפונים בארץ מוגדרים באנגלית).
+     אנגלית רק בבחירה מפורשת: כפתור EN בכותרת, או קישור עם ?lang=en (לשליחה לספר זר). */
+  function i18nAvailable() { return SHOP === "try"; }
+  function resolveLang() {
+    if (!i18nAvailable()) return "he";
+    try {
+      const q = new URLSearchParams(location.search).get("lang");
+      if (q === "en" || q === "he") { localStorage.setItem("ug_lang", q); return q; }
+      const s = localStorage.getItem("ug_lang");
+      if (s === "en" || s === "he") return s;
+    } catch (e) {}
+    return "he";
+  }
+  const LANG = resolveLang();
+  function startEnglish() {
+    u.setLang("en");                                   // תאריכים, ימים ומשכי זמן — באנגלית
+    const root = document.documentElement;
+    root.setAttribute("lang", "en");
+    root.setAttribute("dir", "ltr");
+    root.classList.add("i18n-pending");                // מסתיר את המסך עד שהתרגום מוכן — בלי הבזק עברית
+    const reveal = () => root.classList.remove("i18n-pending");
+    const failSafe = setTimeout(reveal, 4000);         // המילון לא נטען? מציגים בכל זאת
+    const load = (src) => new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = src + "?v=" + APP_VERSION; s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+    load("assets/js/i18n.js")
+      .then(() => load("assets/js/i18n-en.js"))
+      .then(() => { UG.I18N.start(UG.I18N_DICT && UG.I18N_DICT.en); })
+      .catch(() => { root.setAttribute("dir", "rtl"); root.setAttribute("lang", "he"); })
+      .then(() => { clearTimeout(failSafe); reveal(); });
+  }
+  function toggleLang() {
+    try { localStorage.setItem("ug_lang", LANG === "en" ? "he" : "en"); } catch (e) {}
+    // טעינה מחדש — נקי ובטוח יותר מהחלפה חיה של כל המסכים. אם בכתובת יש ?lang= מסירים
+    // אותו (אחרת הוא היה גובר על הבחירה החדשה). אחרת reload — מעבר לאותה כתובת עם #
+    // נחשב קפיצה בתוך הדף ולא היה טוען מחדש.
+    try {
+      const url = new URL(location.href);
+      if (url.searchParams.has("lang")) { url.searchParams.delete("lang"); location.replace(url.toString()); return; }
+    } catch (e) {}
+    location.reload();
+  }
+  if (LANG === "en") startEnglish();
+
   const AUTHKEY = "ug_owner_auth__" + SHOP;
   const ROUTEKEY = "ug_route__" + SHOP;
   // אם הגענו למספרה שבבעלות המכשיר דרך פתיחת האפליקציה (כתובת ריקה) — תמיד במצב ניהול,
@@ -823,6 +872,10 @@
     opts = opts || {};
     const st = Store.get();
     const themeIco = currentTheme() === "light" ? "🌙" : "☀️";
+    // כפתור השפה — רק ב-try. במספרות אחרות מחרוזת ריקה בלי שורה נוספת: ה-HTML זהה לחלוטין לקודם
+    const langBtn = i18nAvailable()
+      ? `<button class="icon-btn lang-btn" data-act="toggle-lang" translate="no" title="${LANG === "en" ? "עברית" : "English"}">${LANG === "en" ? "עב" : "EN"}</button>`
+      : "";
     return `
     <div class="topbar">
       <div class="brand">
@@ -835,7 +888,7 @@
         </div>
       </div>
       <div class="spacer"></div>
-      <button class="icon-btn" data-act="toggle-theme" title="מצב תצוגה">${themeIco}</button>
+      ${langBtn}<button class="icon-btn" data-act="toggle-theme" title="מצב תצוגה">${themeIco}</button>
     </div>`;
   }
 
@@ -2623,14 +2676,16 @@
       toast("התור הזה כבר לא קיים", "", "ℹ️"); render(); return;
     }
     const confirmed = b.status === "confirmed";
-    const rel = u.relativeDay(b.date);
+    // "היום"/"מחר" לפי הפרש הימים (ולא לפי הטקסט — שהוא "Today" באנגלית)
+    const dayDiff = Math.round((u.parseKey(b.date) - u.parseKey(u.dateKey(new Date()))) / 86400000);
+    const relTag = (dayDiff === 0 || dayDiff === 1) ? " · " + esc(u.relativeDay(b.date)) : "";
     const mins = Number(b.durationMin) || (u.toMin(b.end) - u.toMin(b.start));
     const row = (k, v) => `<div class="summary-row"><span class="sr-k">${k}</span><span class="sr-v">${v}</span></div>`;
     openModal(`
       <div class="m-title">התור שלך ✂️</div>
       <div class="m-sub">${esc(st.shop.name)}</div>
       ${row("שירות", esc(b.serviceName))}
-      ${row("תאריך", esc(u.longDate(b.date)) + ((rel === "היום" || rel === "מחר") ? " · " + esc(rel) : ""))}
+      ${row("תאריך", esc(u.longDate(b.date)) + relTag)}
       ${row("שעה", `<span dir="ltr">${esc(b.start)}–${esc(b.end)}</span>`)}
       ${mins > 0 ? row("משך", u.fmtDuration(mins)) : ""}
       ${b.staff ? row("ספר", esc(b.staff)) : ""}
@@ -6371,6 +6426,7 @@
           location.hash = "new"; location.reload();
           break;
         case "toggle-theme": toggleTheme(); break;
+        case "toggle-lang": toggleLang(); break;
         case "toggle-pw": {
           const field = t.closest(".pw-field"); const inp = field && field.querySelector("input");
           if (inp) { inp.type = inp.type === "password" ? "text" : "password"; t.textContent = inp.type === "password" ? "👁️" : "🙈"; }
