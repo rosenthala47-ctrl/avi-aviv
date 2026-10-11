@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "185";
+  const APP_VERSION = "186";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -184,9 +184,21 @@
   function bkEmail(b) { const p = bkPriv(b); return (p && p.email) || (b && b.email) || ""; }
   function bkDob(b) { const p = bkPriv(b); return (p && p.dob) || (b && b.dob) || ""; }
 
+  /* ---------- פיצ׳ר ימי ההולדת — כבוי במספרות שברשימה ----------
+     אורי (main) ביקש להוריד אותו אצלו בלבד (אוקטובר 2026). במספרה כבויה:
+     לא שואלים תאריך לידה (לא במודאל ולא בטופס קביעת התור), לא מצרפים אותו
+     לתורים חדשים, ולא מציגים לספר שום דבר (🎂 ביומן, שורת יום ההולדת ברשימת
+     התורים, "ימי הולדת קרובים" בלקוחות, והשורה בכרטיס הלקוח).
+     תאריכי לידה שכבר נשמרו **אינם נמחקים** — רק מוסתרים, כדי שאפשר יהיה
+     להחזיר את הפיצ׳ר מיד. להחזיר/לכבות: לערוך את הרשימה כאן בלבד. */
+  const BDAY_OFF = ["main"];
+  function bdayFeature() { return BDAY_OFF.indexOf(SHOP) === -1; }
+
   /* פרטי יום הולדת מתוך תאריך לידה "YYYY-MM-DD": כמה ימים עד יום ההולדת הבא,
-     תצוגת DD/MM ותווית ידידותית. משמש את הספר כדי לדעת מתי לברך. */
+     תצוגת DD/MM ותווית ידידותית. משמש את הספר כדי לדעת מתי לברך.
+     מספרה שהפיצ׳ר כבוי בה מקבלת null — וכך כל מקומות התצוגה נעלמים לבד. */
   function birthdayInfo(dob) {
+    if (!bdayFeature()) return null;
     if (!dob || typeof dob !== "string") return null;
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dob);
     if (!m) return null;
@@ -1416,6 +1428,7 @@
   let birthdayPromptShown = false;
   function promptBirthday(attempt) {
     if (birthdayPromptShown) return;
+    if (!bdayFeature()) return;                  // מספרה שכיבתה את הפיצ׳ר — לא שואלים
     if (view.route !== "client" || view.ownerPreview) return;
     if (!clientIdentified()) return;            // רק ללקוח שכבר הזדהה
     if (identity.dob) return;                    // כבר מסר — לא שואלים שוב
@@ -2783,7 +2796,7 @@
       ${(UG.Email && UG.Email.configured()) ? `
       <div class="field"><label>אימייל <span class="opt">(לא חובה — לקבלת אישור למייל)</span></label>
         <input class="input" id="cf-email" type="email" inputmode="email" autocomplete="email" placeholder="name@email.com" value="${esc(identity.email || "")}"></div>` : ""}
-      ${(!identity.dob) ? `
+      ${(bdayFeature() && !identity.dob) ? `
       <div class="field"><label>תאריך לידה <span class="opt">(לא חובה)</span></label>
         <input class="input" id="cf-dob" type="date" max="${u.dateKey(new Date())}" value="${esc(identity.dob || "")}">
         <div class="hint" style="margin-top:5px">כדי שהמספרה תדע מתי יום ההולדת שלך ותוכל לברך 🎂</div></div>` : ""}
@@ -2812,9 +2825,11 @@
     // מייל אינו חובה — נבדק רק אם הוזן, כדי שנשלח אישור לכתובת תקינה
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("כתובת אימייל לא תקינה", "", "📧"); return null; }
     const name = first + " " + last;
-    // תאריך לידה (אופציונלי, try בלבד) — נשמר בזהות המקומית כדי שלא נבקש שוב.
-    const dobEl = $("#cf-dob");
-    let dob = (dobEl && dobEl.value) || identity.dob || "";
+    /* תאריך לידה (אופציונלי) — נשמר בזהות המקומית כדי שלא נבקש שוב.
+       הזהות משותפת לכל המספרות, ולכן במספרה שכיבתה את הפיצ׳ר לא לוקחים אותו
+       בכלל — גם לא מתוך הזהות — כדי שלא ייכנס לתור שם. */
+    const dobEl = bdayFeature() ? $("#cf-dob") : null;
+    let dob = bdayFeature() ? ((dobEl && dobEl.value) || identity.dob || "") : "";
     if (dob && dob > u.dateKey(new Date())) { toast("תאריך לידה לא יכול להיות בעתיד", "", "🎂"); return null; }
     // מוזיקה בכיסא (אופציונלי) — טקסט חופשי (אמן/סגנון) או קישור ספוטיפי.
     // לא חוסם קביעת תור: מה שנכתב נשמר כבקשה, ואם זה קישור — כפלייליסט.
@@ -2889,7 +2904,8 @@
       res = await Store.createBooking({
         serviceId: view.selService, date: bookedDate, start: bookedStart,
         userId: identity.userId, userName: contact.name, phone: contact.phone, email: contact.email,
-        dob: contact.dob || identity.dob || "",
+        // כמו המוזיקה: רק במספרה שהפיצ׳ר פעיל בה (הזהות משותפת לכל המספרות)
+        dob: bdayFeature() ? (contact.dob || identity.dob || "") : "",
         // המוזיקה מצורפת לתור רק במספרה שהספר שלה הפעיל "אישי לכל לקוח". הזהות
         // משותפת לכל המספרות — בלי הבדיקה, בחירה ממספרה אחרת הייתה נכנסת גם למספרה
         // שלא אישרה את הפיצ׳ר.
