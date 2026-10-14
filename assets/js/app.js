@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "186";
+  const APP_VERSION = "187";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1969,8 +1969,32 @@
     return !!adminEmail() && em.toLowerCase() === adminEmail();
   }
 
+  /* ---------- "חזרה לניהול מנויים" ----------
+     כניסה למספרה מהפאנל מחליפה את ה-hash וטוענת את האפליקציה מחדש, ולכן הפאנל
+     נסגר — ועד עכשיו הדרך היחידה חזרה הייתה לסגור את האפליקציה ולהקליד שוב את
+     קוד-העל. מרגע שהקוד הוקלד פעם אחת, מסמנים זאת ב-sessionStorage ומציגים
+     כפתור צף שפותח את הפאנל במקום, בלי קוד ובלי טעינה מחדש.
+     sessionStorage ולא localStorage: הסימון נמחק כשסוגרים את האפליקציה, כך
+     שהקיצור לא נשאר פתוח לנצח במכשיר. הוא רק פותח את הפאנל — הפעלת מנוי
+     עדיין דורשת התחברות עם חשבון האדמין, ונאכפת בחוקי האבטחה. */
+  const ADMKEY = "ug_adm_session";
+  function admSession() { try { return sessionStorage.getItem(ADMKEY) === "1"; } catch (e) { return false; } }
+  function setAdmSession(on) {
+    try { if (on) sessionStorage.setItem(ADMKEY, "1"); else sessionStorage.removeItem(ADMKEY); } catch (e) {}
+    renderAdminBar();
+  }
+  function renderAdminBar() {
+    const el = document.getElementById("admbar"); if (!el) return;
+    const on = admSession();
+    el.className = on ? "adm-bar" : "";
+    el.innerHTML = on ? `
+      <button class="adm-home" data-act="adm-home">🛠️ ניהול מנויים</button>
+      <button class="adm-home adm-hide" data-act="adm-hide" aria-label="הסתרת הכפתור">✕</button>` : "";
+  }
+
   let adminShops = [];
   async function openAdminPanel() {
+    setAdmSession(true);   // מכאן והלאה יש כפתור חזרה — בלי להקליד שוב את הקוד
     openModal(`
       <div class="m-title">🛠️ ניהול מנויים</div>
       <div class="m-sub">הפעל או חדש מנוי למספרות ששילמו</div>
@@ -5601,6 +5625,7 @@
   }
   function renderNow() {
     try { clearTimeout(window.__ugBootFail); } catch (e) {}   // הצגה הצליחה — לבטל את רשת הביטחון
+    renderAdminBar();   // לפני כל יציאה מוקדמת — גם במסך "מספרה לא נמצאה"
     syncNav();   // הקלטת ניווט ל"אחורה" חכם (לפני הצגת המסך)
     if (view.onboarding) { document.title = "BarberTor — תורים לספרים"; $("#root").innerHTML = renderOnboarding(); return; }
     if (view.notFound) { document.title = "BarberTor"; $("#root").innerHTML = renderNotFound(); return; }
@@ -6739,7 +6764,13 @@
         // (בלי reload) לא עושה כלום — אין מאזין hashchange באפליקציה, אז ה-SPA
         // ממשיך להציג את אותה מספרה שהייתה טעונה. reload מכריח אתחול מחדש עם
         // המספרה החדשה — בדיוק כמו open-signup למעלה.
-        case "adm-visit": location.hash = t.dataset.sid; location.reload(); break;
+        case "adm-visit": setAdmSession(true); location.hash = t.dataset.sid; location.reload(); break;
+        // חזרה לפאנל מתוך מספרה שנכנסנו אליה — בלי קוד ובלי טעינה מחדש
+        case "adm-home": closeModal(); openAdminPanel(); break;
+        case "adm-hide":
+          setAdmSession(false);
+          toast("הכפתור הוסתר — להחזרה, הקלידו שוב את קוד המנהל", "", "🛠️");
+          break;
         case "adm-confirm-delete": admConfirmDelete(t.dataset.sid, t.dataset.name); break;
         case "adm-do-delete": admDoDelete(t.dataset.sid); break;
         case "adm-cancel-delete": openAdminPanel(); break;

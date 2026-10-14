@@ -1113,6 +1113,32 @@ select.input {
 
 /* ==== טוסט ==== */
 .toast-wrap { position: fixed; top: calc(14px + env(safe-area-inset-top)); inset-inline: 0; z-index: 200; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; padding: 0 14px; }
+
+/* כפתור צף "ניהול מנויים" — מוצג רק לבעל המערכת אחרי קוד-העל (ראו renderAdminBar).
+   יושב מעל סרגל הלשוניות התחתון, בצד ההתחלה, כדי לא להסתיר תוכן. */
+.adm-bar {
+  position: fixed; z-index: 95;   /* מעל סרגלי הניווט (30) והצעת ההתקנה (90), מתחת לחלונות (100) */
+  inset-inline-start: 12px;
+  bottom: calc(80px + env(safe-area-inset-bottom));
+  display: flex; align-items: center; gap: 6px;
+}
+/* כשחלון פתוח — להיעלם לגמרי, כדי לא לצוף מעל תוכן החלון */
+#modalBack.open ~ .adm-bar { display: none; }
+.adm-home {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 38px; padding: 0 15px; border-radius: 19px;
+  background: linear-gradient(145deg, var(--sky), var(--sky-strong));
+  color: var(--sky-ink); border: none;
+  font-size: 13.5px; font-weight: 800; white-space: nowrap; cursor: pointer;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .42);
+  transition: transform .1s;
+}
+.adm-home:active { transform: scale(.94); }
+.adm-home.adm-hide {
+  width: 34px; padding: 0; font-size: 14px;
+  background: var(--surface-2); color: var(--muted);
+  border: 1px solid var(--line);
+}
 .toast {
   max-width: var(--maxw); width: 100%;
   display: flex; align-items: center; gap: 11px; padding: 13px 16px; border-radius: 15px;
