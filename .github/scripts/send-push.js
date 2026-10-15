@@ -205,6 +205,63 @@ async function stampTrials(db, shopsVal, now) {
   return stamped;
 }
 
+/* ---------- דחיפה לספר שעדיין לא שלח את הקישור ללקוחות ----------
+   כמעט כל ספר שלא המשיך אחרי הניסיון פשוט לא שלח את הקישור ללקוחות שלו: אפס
+   הזמנות, אפס ערך, והוא נעלם. באפליקציה יש על זה באנר, אבל ספר שאיבד עניין לא
+   פותח אותה — לכן תזכורת לטלפון.
+   כללים שמונעים הצפה:
+   - רק מספרה **בתוך תקופת הניסיון** (אחריה זה כבר לא רלוונטי ורק מעצבן).
+   - רק מספרה עם אפס הזמנות של לקוחות. תור שהספר הוסיף ידנית ("owner:") אינו
+     נחשב; תור שבוטל כן — סימן שהקישור הגיע.
+   - ארבעה שלבים בלבד לאורך כל הניסיון, והודעה אחת לכל שלב לכל מספרה לעולם
+     (נשמר ב-system/nudgeState).
+   - תקרה של MAX_NUDGE מספרות לריצה, כדי שהפעלה ראשונה לא תשלח גל אחד גדול.
+   הכול best-effort ומבודד: כישלון כאן לא פוגע בתזכורות לתורים. */
+const NUDGE_STAGES = [
+  { day: 2, title: "💈 היומן שלך מוכן", body: "נשאר שלב אחד: לשלוח את הקישור ללקוחות שלך, כדי שיתחילו לקבוע תורים." },
+  { day: 5, title: "📣 עדיין לא הזמינו אצלך תור", body: "הלקוחות שלך לא יודעים שאפשר. שליחת הקישור לוקחת חצי דקה." },
+  { day: 9, title: "📣 היומן שלך עדיין ריק", body: "פוסט אחד בסטטוס וואטסאפ מגיע לכל הלקוחות שלך בבת אחת — יש תמונה מוכנה באפליקציה." },
+  { day: 14, title: "⏳ חצי מתקופת הניסיון עברה", body: "ועדיין לא שלחת את הקישור ללקוחות. בלי זה לא תדע אם המערכת מתאימה לך." },
+];
+const MAX_NUDGE = 20;
+// אורך תקופת הניסיון — חייב להתאים ל-subscription.trialDays ב-config.js
+const TRIAL_DAYS = 30;
+async function nudgeSilentShops(db, shopsVal, now, sendToUid, trialDays) {
+  const ref = db.ref("system/nudgeState");
+  const prev = (await ref.once("value")).val() || {};
+  const subsVal = (await db.ref("subs").once("value")).val() || {};
+  const next = Object.assign({}, prev);
+  let sent = 0, touched = 0;
+  for (const sid of Object.keys(shopsVal || {})) {
+    if (touched >= MAX_NUDGE) break;
+    const shop = shopsVal[sid];
+    if (!shop || shop.type === "photo" || sid === "try") continue;
+    const sub = subsVal[sid] || {};
+    if (sub.grandfathered || (Number(sub.paidUntil) || 0) > now) continue;   // משלם/פטור — לא רלוונטי
+    const start = Number(sub.trialStart) || Number(shop.shop && shop.shop.createdAt) || 0;
+    if (!start) continue;
+    const days = Math.floor((now - start) / 86400000);
+    if (days < NUDGE_STAGES[0].day || days >= trialDays) continue;           // לפני השלב הראשון, או שהניסיון נגמר
+    const hasClients = asArr(shop.bookings)
+      .some((b) => b && b.userId && String(b.userId).indexOf("owner:") !== 0);
+    if (hasClients) { if (next[sid] != null) delete next[sid]; continue; }   // הצליח — מנקים את הזיכרון
+    // השלב הגבוה ביותר שכבר הגיע זמנו
+    let stage = 0;
+    for (const s of NUDGE_STAGES) if (days >= s.day) stage = s.day;
+    if (!stage || (Number(prev[sid]) || 0) >= stage) continue;               // כבר נשלח לשלב הזה
+    const msg = NUDGE_STAGES.filter((s) => s.day === stage)[0];
+    touched++;
+    try {
+      sent += await sendToUid("owner_" + sid, msg.title, msg.body, "nudge-" + sid + "-" + stage);
+      next[sid] = stage;   // מסמנים גם אם אין לספר טוקן — לא לנסות שוב ושוב את אותו שלב
+    } catch (e) { /* best-effort */ }
+  }
+  // ניקוי מספרות שנמחקו
+  Object.keys(next).forEach((k) => { if (!shopsVal[k]) delete next[k]; });
+  await ref.set(next);
+  return sent;
+}
+
 const DB_URL = process.env.DATABASE_URL ||
   "https://barbertor-default-rtdb.europe-west1.firebasedatabase.app";
 
@@ -535,6 +592,12 @@ function apptTs(date, start) {
     const stampedTrials = await stampTrials(db, shopsVal, now);
     if (stampedTrials) console.log(`קיבוע ניסיון: ${stampedTrials} מספרות סומנו (trialStart/grandfathered).`);
   } catch (e) { console.warn("קיבוע ניסיון נכשל:", (e && e.message) || e); }
+
+  // תזכורת לספר שעדיין לא שלח את הקישור ללקוחות. מבודד — כישלון לא פוגע בהתראות.
+  try {
+    const nudged = await nudgeSilentShops(db, shopsVal, now, sendToUid, TRIAL_DAYS);
+    if (nudged) console.log(`תזכורת "שלח ללקוחות": נשלחה ל-${nudged} מכשירים.`);
+  } catch (e) { console.warn('תזכורת "שלח ללקוחות" נכשלה:', (e && e.message) || e); }
 
   // הפעלת "תורים מחמירים" (כרגע "try" בלבד) — מניעת מחיקת תורים המונית. מבודד.
   try {

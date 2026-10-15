@@ -554,6 +554,32 @@ UG.Store = (function () {
       // ממתינים לאישור תשלום קודם, ואז לפי תאריך יצירה
       (z.pending ? 1 : 0) - (a.pending ? 1 : 0) || (z.createdAt || 0) - (a.createdAt || 0));
   }
+  /* פעילות לכל מספרה — כמה הזמנות של לקוחות היו בה ומתי האחרונה. קריאה נפרדת
+     לכל מספרה (רק צומת התורים, לא המספרה כולה), ולכן הפאנל מציג קודם את הרשימה
+     ומשלים את המספרים כשהם מגיעים. תור שהספר הוסיף ידנית ("owner:") אינו נספר —
+     הוא לא מוכיח שהלקוחות קיבלו את הקישור. */
+  async function adminShopActivity(ids) {
+    await connect();
+    if (!_conn || _conn.kind !== "rtdb") return {};
+    const db = _conn.db;
+    const out = {};
+    await Promise.all((ids || []).slice(0, 300).map(async (id) => {
+      try {
+        const v = (await db.ref("shops/" + id + "/bookings").once("value")).val();
+        const arr = Array.isArray(v) ? v : (v && typeof v === "object" ? Object.keys(v).map((k) => v[k]) : []);
+        let clients = 0, lastTs = 0;
+        arr.forEach((b) => {
+          if (!b || !b.userId || String(b.userId).indexOf("owner:") === 0) return;
+          clients++;
+          const ts = Number(b.createdAt) || 0;
+          if (ts > lastTs) lastTs = ts;
+        });
+        out[id] = { clients: clients, lastTs: lastTs };
+      } catch (e) { /* מספרה שלא ניתן לקרוא — פשוט בלי נתון */ }
+    }));
+    return out;
+  }
+
   async function adminSetPaid(sid, paidUntil, note) {
     await connect();
     if (!_conn || _conn.kind !== "rtdb") return false;
@@ -1372,7 +1398,7 @@ UG.Store = (function () {
     subscribeGallery, getGallery, addPhoto, removePhoto,
     subscribeMedia, getMedia, setShopMedia, getBookingPriv, getContacts, subscribeContacts,
     createShop, shopExists, peekShop, passcodeTaken, registerPasscodeIfFree, setOwnerPassHash,
-    getSub, markPaymentPending, adminListShops, adminSetPaid, adminDeleteShop,
+    getSub, markPaymentPending, adminListShops, adminShopActivity, adminSetPaid, adminDeleteShop,
     exportData, importData, deleteShop, purgeClient, onWriteError,
     get mode() { return backend ? backend.mode : "local"; },
     get shopId() { return shopId; },

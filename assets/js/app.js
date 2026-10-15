@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "187";
+  const APP_VERSION = "188";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1642,6 +1642,64 @@
     </div>`;
   }
 
+  /* ---------- הפעלה: "עדיין לא שלחת את הקישור ללקוחות" ----------
+     זה מה שמכריע אם ספר חדש נשאר או נעלם. כמעט כל ספר שלא המשיך אחרי הניסיון
+     פשוט לא שלח את הקישור ללקוחות שלו — אפס הזמנות, אפס ערך, ואז הוא מתנדף
+     (נמדד ידנית ע״י בעל המערכת, אוקטובר 2026). הכלים תמיד היו שם, בלשונית
+     "פרסום", אבל אף אחד לא דחף אותו להשתמש בהם.
+     לכן: כל עוד אף לקוח לא הזמין, יש באנר קבוע בכל לשוניות הניהול עם פעולה
+     אחת גדולה. **אין לו כפתור סגירה** — הוא נעלם לבד ברגע שמגיעה ההזמנה
+     הראשונה, וזו בדיוק המטרה.
+     תור שהספר הוסיף ידנית (userId מתחיל ב-"owner:") אינו נחשב: הוא לא מוכיח
+     שהלקוחות קיבלו את הקישור. תור שבוטל כן נחשב — הקישור עבד. */
+  function clientBookings(st) {
+    return ((st && st.bookings) || []).filter((b) => b && b.userId && String(b.userId).indexOf("owner:") !== 0);
+  }
+  function needsClients(st) { return clientBookings(st).length === 0; }
+
+  // ההודעה שהספר שולח ללקוחות — כתובה בשבילו, כדי שלא יצטרך לנסח כלום
+  function inviteText(st) {
+    const name = (st && st.shop && st.shop.name) || "המספרה";
+    return "היי! מעכשיו אפשר לקבוע תור ב" + name + " אונליין — בלי טלפונים ובלי הודעות 💈\n" +
+      "רואים את כל השעות הפנויות וקובעים ב-30 שניות:";
+  }
+
+  /* שיתוף הקישור ללקוחות. מעדיפים את תפריט השיתוף של המערכת: משם וואטסאפ
+     מאפשר לבחור כמה צ׳אטים וגם "סטטוס" בבת אחת — בניגוד ל-wa.me שפותח צ׳אט
+     אחד בלבד. נפילה-לאחור: העתקה ללוח, ואם גם זה לא — wa.me. */
+  async function shareToClients() {
+    const st = Store.get();
+    const url = clientLink();
+    const text = inviteText(st);
+    try {
+      if (navigator.share) { await navigator.share({ title: st.shop.name, text: text, url: url }); return; }
+    } catch (e) { return; }   // המשתמש ביטל — לא להציף אותו בנפילות-לאחור
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(text + "\n" + url);
+        toast("ההודעה הועתקה — הדביקו בוואטסאפ ושלחו ללקוחות", "good", "📋");
+        return;
+      }
+    } catch (e) {}
+    openExternal("https://wa.me/?text=" + encodeURIComponent(text + "\n" + url));
+  }
+
+  function noClientsBanner(st) {
+    if (!needsClients(st)) return "";
+    return `
+    <div class="banner warn send-link">
+      <span class="bn-ico">📣</span>
+      <div class="bn-body">
+        <div class="bn-title">אף לקוח עדיין לא הזמין אצלך תור</div>
+        <div class="bn-sub">הם פשוט לא יודעים שאפשר. שליחת הקישור לוקחת חצי דקה, והיא ההבדל בין מערכת ריקה למערכת שעובדת בשבילך.</div>
+      </div>
+      <div class="bn-actions">
+        <button class="btn btn-wa btn-sm" data-act="send-clients">שליחה ללקוחות</button>
+        <button class="btn btn-sm" data-act="share-status">תמונה לסטטוס</button>
+      </div>
+    </div>`;
+  }
+
   function ownerNotifBanner() {
     if (!Notify.supported()) return "";
     if (Notify.permission() === "granted") return "";
@@ -1993,6 +2051,7 @@
   }
 
   let adminShops = [];
+  let adminActivity = {};   // { shopId: { clients, lastTs } } — מתמלא אחרי טעינת הרשימה
   async function openAdminPanel() {
     setAdmSession(true);   // מכאן והלאה יש כפתור חזרה — בלי להקליד שוב את הקוד
     openModal(`
@@ -2008,7 +2067,15 @@
       renderAdminList();
     } catch (e) {
       const el = $("#adm-list"); if (el) el.textContent = "שגיאה בטעינת המספרות";
+      return;
     }
+    // כמה לקוחות הזמינו בכל מספרה — קריאה נוספת, מגיעה אחרי הרשימה ומרעננת אותה
+    try {
+      if (Store.adminShopActivity) {
+        adminActivity = await Store.adminShopActivity(adminShops.map((s) => s.id));
+        if ($("#adm-list")) renderAdminList();
+      }
+    } catch (e) { /* בלי הנתון הפאנל עדיין עובד */ }
   }
 
   // שורת מצב ההתחברות של האדמין בראש הפאנל
@@ -2071,6 +2138,10 @@
     });
     const total = realShops.length;
     const conv = (active + expired) ? Math.round(active / (active + expired) * 100) : 0;
+    /* מספרות בלי אף הזמנה של לקוח — הסיבה מספר אחת לנטישה: הספר לא שלח את
+       הקישור ללקוחות שלו. מוצג רק אחרי שנתוני הפעילות הגיעו. */
+    const measured = realShops.filter((s) => adminActivity[s.id]);
+    const silent = measured.filter((s) => !adminActivity[s.id].clients).length;
     const cell = (num, lbl, cls) =>
       `<div class="adm-stat ${cls || ""}"><div class="as-num">${num}</div><div class="as-lbl">${lbl}</div></div>`;
     return `
@@ -2082,10 +2153,34 @@
         ${cell(pending, "ממתין לאישור", "pend")}
         ${cell(newWeek, "נרשמו השבוע")}
         ${cell(newMonth, "נרשמו החודש")}
+        ${measured.length ? cell(silent, "בלי אף הזמנה", silent ? "exp" : "ok") : ""}
         ${cell(conv + "%", "המרה לתשלום")}
         ${cell("₪" + revenue, "הכנסה חודשית*", "ok")}
       </div>
       <p class="hint" style="margin:-6px 0 12px;font-size:11px">* הערכה גסה לפי ₪35 למנוי פעיל — לא מבחין בין חודשי לשנתי.</p>`;
+  }
+
+  /* תג הפעילות של מספרה בפאנל: כמה לקוחות הזמינו בה. "0 הזמנות" הוא הסימן
+     החשוב ביותר — ספר שלא שלח את הקישור ללקוחות, וכמעט תמיד גם לא ימשיך. */
+  function admActivityBadge(s) {
+    const a = adminActivity[s.id];
+    if (!a) return "";
+    if (!a.clients) return `<span class="adm-badge exp">⚠️ 0 הזמנות — לא שלח ללקוחות</span>`;
+    const last = a.lastTs ? " · אחרונה " + u.relativeDay(u.dateKey(new Date(a.lastTs))) : "";
+    return `<span class="adm-badge ok">✓ ${a.clients} הזמנות${esc(last)}</span>`;
+  }
+  /* כפתור וואטסאפ לספר שתקוע — ההודעה כבר כתובה, כדי שהרדיפה אחריו תהיה
+     לחיצה אחת במקום לפתוח את המספרה, לזכור מי הוא, ולנסח מחדש בכל פעם. */
+  function admNudgeBtn(s) {
+    const a = adminActivity[s.id];
+    if (!a || a.clients || !s.phone) return "";
+    const base = shareBase() + "#" + s.id;
+    const msg = "היי! ראיתי שעדיין לא הזמינו אצלך תור ב-BarberTor 🙂\n" +
+      "זה קורה כי הלקוחות שלך עוד לא קיבלו את הקישור שלך:\n" + base + "\n" +
+      "שלח להם אותו בוואטסאפ או תעלה אותו לסטטוס — ותתחיל לראות תורים נכנסים.";
+    const href = "https://wa.me/" + u.normalizePhone(s.phone).replace(/^0/, "972") +
+      "?text=" + encodeURIComponent(msg);
+    return `<a class="btn btn-wa btn-sm" href="${esc(href)}" target="_blank" rel="noopener">💬 תזכורת לספר</a>`;
   }
 
   function renderAdminList() {
@@ -2100,8 +2195,10 @@
         ${isTest ? `<span class="adm-badge test">🧪 מספרת הבדיקות שלך — לא נספרת בסטטיסטיקה</span>` : ""}
         <div class="adm-meta">${s.phone ? esc(s.phone) + " · " : ""}${s.paidUntil ? "שולם עד " + esc(u.longDate(u.dateKey(new Date(s.paidUntil)))) : "טרם שולם"}</div>
         <span class="adm-badge ${st.cls}">${esc(st.label)}</span>
+        ${admActivityBadge(s)}
         <div class="adm-btns">
           <button class="btn btn-sm" data-act="adm-visit" data-sid="${esc(s.id)}">🔗 כניסה</button>
+          ${admNudgeBtn(s)}
           <button class="btn btn-sm" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="1">+ חודש</button>
           <button class="btn btn-sm" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="12">+ שנה</button>
           <button class="btn btn-sm btn-danger" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="0">איפוס</button>
@@ -3191,6 +3288,86 @@
       return qr.createDataURL(cell || 6, margin == null ? 4 : margin);
     } catch (e) { return ""; }
   }
+  /* ---------- תמונה לסטטוס ----------
+     פוסט אחד בסטטוס וואטסאפ / סטורי מגיע לכל הלקוחות של הספר בבת אחת — הרבה
+     יותר מעשי מלשלוח לכל אחד בנפרד. מציירים תמונה מרובעת (שם המספרה + QR +
+     קריאה לפעולה) ומשתפים אותה דרך תפריט השיתוף; אם אי אפשר לשתף קובץ —
+     מורידים אותה והספר מעלה בעצמו. */
+  const STATUS_SIZE = 1080;
+  async function buildStatusImage() {
+    await ensureQrCode();
+    const st = Store.get();
+    const qr = qrDataUrl(clientLink(), 12, 1);
+    if (!qr) return null;
+    const S = STATUS_SIZE;
+    const cv = document.createElement("canvas");
+    cv.width = S; cv.height = S;
+    const g = cv.getContext("2d");
+    if (!g) return null;
+
+    const grad = g.createLinearGradient(0, 0, S, S);
+    grad.addColorStop(0, "#0b1220"); grad.addColorStop(1, "#13263a");
+    g.fillStyle = grad; g.fillRect(0, 0, S, S);
+
+    g.textAlign = "center";
+    g.direction = "rtl";
+    g.fillStyle = "#ffffff";
+    g.font = "800 68px Heebo, system-ui, Arial, sans-serif";
+    // שם ארוך יוצא מהמסגרת — מכווצים אותו עד שהוא נכנס
+    let name = (st.shop.name || "המספרה שלי");
+    let size = 68;
+    while (size > 34 && g.measureText(name).width > S - 140) { size -= 3; g.font = "800 " + size + "px Heebo, system-ui, Arial, sans-serif"; }
+    g.fillText(name, S / 2, 150);
+
+    g.fillStyle = "#38bdf8";
+    g.font = "700 40px Heebo, system-ui, Arial, sans-serif";
+    g.fillText("קביעת תור אונליין", S / 2, 218);
+
+    // לוח לבן ל-QR — כדי שייסרק גם על רקע כהה
+    const box = 560, bx = (S - box) / 2, by = 270;
+    g.fillStyle = "#ffffff";
+    if (g.roundRect) { g.beginPath(); g.roundRect(bx, by, box, box, 36); g.fill(); }
+    else g.fillRect(bx, by, box, box);
+
+    await new Promise((res) => {
+      const img = new Image();
+      img.onload = () => { const p = 28; g.drawImage(img, bx + p, by + p, box - p * 2, box - p * 2); res(); };
+      img.onerror = res;
+      img.src = qr;
+    });
+
+    g.fillStyle = "#ffffff";
+    g.font = "700 46px Heebo, system-ui, Arial, sans-serif";
+    g.fillText("סרקו וקבעו תור 📷", S / 2, by + box + 90);
+    g.fillStyle = "#9aa6b8";
+    g.font = "500 34px Heebo, system-ui, Arial, sans-serif";
+    g.direction = "ltr";
+    g.fillText(clientLink().replace(/^https?:\/\//, ""), S / 2, by + box + 150);
+
+    return await new Promise((res) => { try { cv.toBlob((b) => res(b), "image/png"); } catch (e) { res(null); } });
+  }
+
+  async function shareStatusImage() {
+    let blob = null;
+    try { blob = await buildStatusImage(); } catch (e) {}
+    if (!blob) { toast("לא הצלחנו ליצור את התמונה — אפשר לשלוח את הקישור", "", "⚠️"); return; }
+    const file = new File([blob], "barbertor-" + SHOP + ".png", { type: "image/png" });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], text: inviteText(Store.get()) + "\n" + clientLink() });
+        return;
+      }
+    } catch (e) { return; }   // ביטול של המשתמש
+    try {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "barbertor-" + SHOP + ".png";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      toast("התמונה הורדה — העלו אותה לסטטוס בוואטסאפ 📲", "good", "⬇️");
+    } catch (e) { toast("ההורדה נכשלה", "", "⚠️"); }
+  }
+
   async function downloadQr() {
     await ensureQrCode();
     const url = qrDataUrl(clientLink(), 16, 4);
@@ -3394,9 +3571,16 @@
     const upcomingCount = st.bookings.filter((b) =>
       b.status !== "cancelled" && u.dateTime(b.date, b.start).getTime() > now).length;
 
+    /* סדר הבאנרים. כל עוד אף לקוח לא הזמין — זה הדבר היחיד שחשוב, ולכן הוא
+       ראשון, והצעות הרשות (התראות, מוזיקה) מושתקות כדי לא לדלל אותו. ערימה של
+       ארבעה באנרים = הספר לא קורא אף אחד מהם. באנר הניסיון נשאר תמיד — זה מידע
+       שמגיע לו. בלשונית "פרסום" הבאנר מיותר, כי שם יושב הכרטיס הגדול עצמו. */
+    const activate = needsClients(st);
     const banners = locked ? "" :
-      subBanner() + spamBanner() + (view.ownerTab !== "settings" ? ownerNotifBanner() : "") +
-      ((view.ownerTab === "cal" || view.ownerTab === "bookings") ? musicNewsBanner(st) : "");
+      (activate && view.ownerTab !== "publish" ? noClientsBanner(st) : "") +
+      subBanner() + spamBanner() +
+      (!activate && view.ownerTab !== "settings" ? ownerNotifBanner() : "") +
+      (!activate && (view.ownerTab === "cal" || view.ownerTab === "bookings") ? musicNewsBanner(st) : "");
 
     const settingsPageLabel = {
       business: "פרטי העסק", booking: "תורים ותזכורות", brand: "מיתוג ועיצוב",
@@ -4897,6 +5081,23 @@
   }
 
   /* ---------- פרסום ללקוחות ---------- */
+  /* הכרטיס הראשון בלשונית פרסום כל עוד אף לקוח לא הזמין. זה המסך שהספר נוחת
+     עליו מיד אחרי ההרשמה, ולכן במקום תפריט של ארבע שורות הוא מקבל פעולה אחת
+     גדולה. אחרי ההזמנה הראשונה הכרטיס נעלם והתפריט הרגיל חוזר. */
+  function pubSendCard(st) {
+    if (!needsClients(st)) return "";
+    return `
+      <div class="card send-card">
+        <div class="sc-step">נשאר שלב אחד</div>
+        <h3>שלח/י את הקישור ללקוחות שלך</h3>
+        <p>בלי זה אף אחד לא יודע שאפשר לקבוע אצלך תור אונליין, והיומן יישאר ריק.
+           בחר/י בוואטסאפ כמה לקוחות בבת אחת — ההודעה כבר כתובה.</p>
+        <button class="btn btn-wa btn-lg" data-act="send-clients">שליחה ללקוחות בוואטסאפ</button>
+        <button class="btn btn-sm" data-act="share-status" style="margin-top:9px;width:100%">📲 תמונה מוכנה לסטטוס</button>
+        <div class="hint" style="margin-top:11px">טיפ: פוסט אחד בסטטוס מגיע לכל הלקוחות שלך בבת אחת — זו הדרך המהירה ביותר.</div>
+      </div>`;
+  }
+
   function ownerPublish(st) {
     const link = clientLink();
     const owner = (st.shop.ownerName || "").trim().split(/\s+/)[0];
@@ -4916,6 +5117,7 @@
           <h2>${owner ? esc(owner) + ", המספרה שלך מוכנה!" : "המספרה שלך מוכנה!"}</h2>
           <p>שלח/י את הקישור הזה ללקוחות — הם יזמינו תור לבד, ישירות מהטלפון.</p>
         </div>
+        ${pubSendCard(st)}
         <div class="card set-list">
           ${setRow({ nav: `data-act="sub-page" data-sub="link"`, ico: "🔗", color: "#0ea5e9",
             label: "הקישור האישי שלך", sub: "העתקה, שיתוף ותצוגת לקוח" })}
@@ -4943,6 +5145,8 @@
         <h2>${owner ? esc(owner) + ", המספרה שלך מוכנה!" : "המספרה שלך מוכנה!"}</h2>
         <p>שלח/י את הקישור הזה ללקוחות — הם יזמינו תור לבד, ישירות מהטלפון.</p>
       </div>
+
+      ${pubSendCard(st)}
 
       ${pubLinkCard(link)}
 
@@ -6529,6 +6733,9 @@
           await Store.setShopMedia("cover", "");
           toast("תמונת הנושא הוסרה", "", "🗑️"); render(); break;
         case "share-app": shareApp(); break;
+        // הפעלה: שליחת הקישור ללקוחות, ותמונה מוכנה לסטטוס
+        case "send-clients": shareToClients(); break;
+        case "share-status": shareStatusImage(); break;
         case "share-wa": {
           const stw = Store.get();
           const txt = "קביעת תור ל" + ((stw.shop && stw.shop.name) || "מספרה") + " 💈✂️\n" + clientLink();
