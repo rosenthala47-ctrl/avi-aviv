@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "188";
+  const APP_VERSION = "189";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -1829,6 +1829,21 @@
     return `<a class="btn btn-wa" href="${esc(href)}" target="_blank" rel="noopener" style="margin-top:10px;text-decoration:none">💬 ${esc(label || "פנייה בוואטסאפ")}</a>`;
   }
 
+  /* פנייה לבקשת הארכת ניסיון — לספר שהניסיון שלו נגמר בלי שאף לקוח הזמין.
+     ההארכה עצמה נעשית ידנית מפאנל המנויים (רק חשבון האדמין רשאי לכתוב ל-subs),
+     כדי שההחלטה תישאר אצל בעל המערכת ולא תהיה אוטומטית. */
+  function trialExtendWaButton() {
+    const cfg = UG_CONFIG.subscription || {};
+    if (!cfg.waPhone) return "";
+    const st = Store.get();
+    const name = (st && st.shop && st.shop.name) || "";
+    const msg = "שלום! פתחתי מספרה ב-BarberTor ולא הספקתי לנסות אותה —\n" +
+      "שלחתי עכשיו את הקישור ללקוחות, ואשמח לעוד כמה ימי ניסיון.\n" +
+      "המספרה: " + name + " (" + SHOP + ")";
+    const href = "https://wa.me/" + cfg.waPhone + "?text=" + encodeURIComponent(msg);
+    return `<a class="btn btn-wa" href="${esc(href)}" target="_blank" rel="noopener" style="margin-top:10px;text-decoration:none">💬 בקשת הארכה</a>`;
+  }
+
   /* טיימר חי (יורד כל שנייה) — מוכן כבר בעת הרינדור כדי שלא יהבהב "…". */
   function countdownHtml(until) {
     const left = Math.max(0, Number(until) - Date.now());
@@ -1954,6 +1969,35 @@
         </div>
       </div>`;
     }
+    /* ספר שהניסיון שלו נגמר **בלי שאף לקוח הזמין** לא באמת ניסה את המערכת:
+       הקישור שלו מעולם לא הגיע ללקוחות, ולכן הוא לא ראה כלום. לבקש ממנו כסף
+       בשלב הזה חסר טעם — ובפועל כך איבדנו כמעט את כולם. במקום זה הוא מקבל את
+       הפעולה שפספס, ודרך לבקש עוד זמן. המסלולים נשארים למטה למי שכן רוצה לשלם. */
+    if (needsClients(st)) {
+      return `
+      <div class="paywall">
+        <div class="pw-ico">📣</div>
+        <h2>לא הספקת לנסות באמת</h2>
+        <p>${esc(name)} — אף לקוח לא הזמין אצלך תור בתקופת הניסיון, כי הקישור שלך
+           עדיין לא הגיע אליהם. זה לוקח חצי דקה, וזה כל ההבדל.</p>
+        <div class="pw-card" style="text-align:start">
+          <div class="pw-card-t">שלח/י את הקישור ללקוחות</div>
+          <div class="pw-card-b">בחר/י בוואטסאפ כמה לקוחות בבת אחת — ההודעה כבר כתובה.
+            אפשר גם להעלות תמונה מוכנה לסטטוס, שמגיעה לכולם בבת אחת.</div>
+          <button class="btn btn-wa btn-lg" data-act="send-clients" style="margin-top:12px">שליחה ללקוחות בוואטסאפ</button>
+          <button class="btn btn-sm" data-act="share-status" style="margin-top:9px;width:100%">📲 תמונה מוכנה לסטטוס</button>
+        </div>
+        <div class="pw-card">
+          <div class="pw-card-t">רוצה עוד זמן לנסות?</div>
+          <div class="pw-card-b">שלח/י את הקישור ללקוחות, ואז דבר/י איתנו — נאריך לך את הניסיון כדי שתוכל/י לראות את זה עובד.</div>
+          ${trialExtendWaButton()}
+        </div>
+        <p class="hint">הלקוחות שלך יכולים לקבוע תור כבר עכשיו — עמוד ההזמנה שלך פעיל.
+          מה שנעול זה מסכי הניהול בלבד.</p>
+        ${planCards()}
+      </div>`;
+    }
+
     return `
       <div class="paywall">
         <div class="pw-ico">🔒</div>
@@ -3571,15 +3615,17 @@
     const upcomingCount = st.bookings.filter((b) =>
       b.status !== "cancelled" && u.dateTime(b.date, b.start).getTime() > now).length;
 
-    /* סדר הבאנרים. כל עוד אף לקוח לא הזמין — זה הדבר היחיד שחשוב, ולכן הוא
-       ראשון, והצעות הרשות (התראות, מוזיקה) מושתקות כדי לא לדלל אותו. ערימה של
-       ארבעה באנרים = הספר לא קורא אף אחד מהם. באנר הניסיון נשאר תמיד — זה מידע
-       שמגיע לו. בלשונית "פרסום" הבאנר מיותר, כי שם יושב הכרטיס הגדול עצמו. */
+    /* סדר הבאנרים. כל עוד אף לקוח לא הזמין — זה הדבר הראשון, ובשלב הזה משתיקים
+       את באנר המוזיקה: פיצ׳ר נחמד לספר שאין לו עדיין לקוחות הוא הסחת דעת.
+       **באנר ההתראות דווקא נשאר** — הספר חייב לאשר התראות *לפני* ההזמנה
+       הראשונה, אחרת היא תיכנס בשקט והוא יפספס בדיוק את הרגע שחיכינו לו.
+       באנר הניסיון נשאר תמיד — זה מידע שמגיע לו. בלשונית "פרסום" הבאנר מיותר,
+       כי שם יושב הכרטיס הגדול עצמו. */
     const activate = needsClients(st);
     const banners = locked ? "" :
       (activate && view.ownerTab !== "publish" ? noClientsBanner(st) : "") +
       subBanner() + spamBanner() +
-      (!activate && view.ownerTab !== "settings" ? ownerNotifBanner() : "") +
+      (view.ownerTab !== "settings" ? ownerNotifBanner() : "") +
       (!activate && (view.ownerTab === "cal" || view.ownerTab === "bookings") ? musicNewsBanner(st) : "");
 
     const settingsPageLabel = {

@@ -222,7 +222,12 @@ const NUDGE_STAGES = [
   { day: 5, title: "📣 עדיין לא הזמינו אצלך תור", body: "הלקוחות שלך לא יודעים שאפשר. שליחת הקישור לוקחת חצי דקה." },
   { day: 9, title: "📣 היומן שלך עדיין ריק", body: "פוסט אחד בסטטוס וואטסאפ מגיע לכל הלקוחות שלך בבת אחת — יש תמונה מוכנה באפליקציה." },
   { day: 14, title: "⏳ חצי מתקופת הניסיון עברה", body: "ועדיין לא שלחת את הקישור ללקוחות. בלי זה לא תדע אם המערכת מתאימה לך." },
+  // אחרי שהניסיון נגמר — הודעה אחת אחרונה. ספר שאף לקוח לא הזמין אצלו לא באמת
+  // ניסה את המערכת, ולכן מציעים לו להתחיל עכשיו ולבקש הארכה, לא לשלם.
+  { day: 31, title: "הניסיון נגמר — ולא הספקת לנסות", body: "אף לקוח לא הזמין אצלך תור. שלח/י את הקישור ללקוחות ודבר/י איתנו — נאריך לך את הניסיון." },
 ];
+// עד כמה אחרי סוף הניסיון עוד פונים. מספרה שננטשה מזמן לא מקבלת כלום.
+const NUDGE_GRACE_DAYS = 14;
 const MAX_NUDGE = 20;
 // אורך תקופת הניסיון — חייב להתאים ל-subscription.trialDays ב-config.js
 const TRIAL_DAYS = 30;
@@ -241,7 +246,8 @@ async function nudgeSilentShops(db, shopsVal, now, sendToUid, trialDays) {
     const start = Number(sub.trialStart) || Number(shop.shop && shop.shop.createdAt) || 0;
     if (!start) continue;
     const days = Math.floor((now - start) / 86400000);
-    if (days < NUDGE_STAGES[0].day || days >= trialDays) continue;           // לפני השלב הראשון, או שהניסיון נגמר
+    // לפני השלב הראשון, או שעברו יותר משבועיים מסוף הניסיון (ננטשה — לא מציקים)
+    if (days < NUDGE_STAGES[0].day || days > trialDays + NUDGE_GRACE_DAYS) continue;
     const hasClients = asArr(shop.bookings)
       .some((b) => b && b.userId && String(b.userId).indexOf("owner:") !== 0);
     if (hasClients) { if (next[sid] != null) delete next[sid]; continue; }   // הצליח — מנקים את הזיכרון
