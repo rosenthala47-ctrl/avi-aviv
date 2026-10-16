@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "189";
+  const APP_VERSION = "190";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -476,10 +476,13 @@
   let logoTaps = 0, logoTapTimer = null;
   /* תצוגת לקוח לבעלים — לראות בדיוק מה הלקוחות רואים, בלי להתנתק מהניהול.
      זהו מצב זמני בזיכרון (view.ownerPreview); רענון מחזיר לניהול. */
+  // האם הספר כבר ראה איך המספרה שלו נראית ללקוחות (ראו pubSendCard)
+  function sawShop() { try { return localStorage.getItem("ug_saw_shop__" + SHOP) === "1"; } catch (e) { return false; } }
   function previewAsClient() {
     view.ownerPreview = true;
     view.route = "client";
     view.clientTab = "book";
+    try { localStorage.setItem("ug_saw_shop__" + SHOP, "1"); } catch (e) {}
     render();
     try { window.scrollTo(0, 0); } catch (e) {}
   }
@@ -1684,18 +1687,25 @@
     openExternal("https://wa.me/?text=" + encodeURIComponent(text + "\n" + url));
   }
 
+  /* שתי הפעולות בבאנר הן בדיוק שתי השאלות של ספר חדש: "איך זה נראה?" ו"איך
+     שולחים?". לפני שצפה — הצפייה ראשונה; אחרי — השליחה. התמונה לסטטוס נשארת
+     בכרטיס שבלשונית "פרסום", כדי שבבאנר יהיו שתי בחירות ולא שלוש. */
   function noClientsBanner(st) {
     if (!needsClients(st)) return "";
+    const seen = sawShop();
+    const look = `<button class="btn btn-sm" data-act="preview-client">👁️ איך זה נראה</button>`;
+    const send = `<button class="btn btn-wa btn-sm" data-act="send-clients">שליחה ללקוחות</button>`;
     return `
     <div class="banner warn send-link">
       <span class="bn-ico">📣</span>
       <div class="bn-body">
         <div class="bn-title">אף לקוח עדיין לא הזמין אצלך תור</div>
-        <div class="bn-sub">הם פשוט לא יודעים שאפשר. שליחת הקישור לוקחת חצי דקה, והיא ההבדל בין מערכת ריקה למערכת שעובדת בשבילך.</div>
+        <div class="bn-sub">${seen
+          ? "הם פשוט לא יודעים שאפשר. שליחת הקישור לוקחת חצי דקה, והיא ההבדל בין מערכת ריקה למערכת שעובדת בשבילך."
+          : "ראה/י קודם איך המספרה שלך נראית ללקוחות, ואז שלח/י להם את הקישור — זה לוקח חצי דקה."}</div>
       </div>
       <div class="bn-actions">
-        <button class="btn btn-wa btn-sm" data-act="send-clients">שליחה ללקוחות</button>
-        <button class="btn btn-sm" data-act="share-status">תמונה לסטטוס</button>
+        ${seen ? send + look : look + send}
       </div>
     </div>`;
   }
@@ -5128,19 +5138,42 @@
 
   /* ---------- פרסום ללקוחות ---------- */
   /* הכרטיס הראשון בלשונית פרסום כל עוד אף לקוח לא הזמין. זה המסך שהספר נוחת
-     עליו מיד אחרי ההרשמה, ולכן במקום תפריט של ארבע שורות הוא מקבל פעולה אחת
-     גדולה. אחרי ההזמנה הראשונה הכרטיס נעלם והתפריט הרגיל חוזר. */
+     עליו מיד אחרי ההרשמה.
+     **שני שלבים, בסדר הזה:** קודם לראות איך המספרה נראית ללקוחות, ורק אחר כך
+     לשלוח. ספר שזה עתה מילא שאלון לא ראה עדיין שום דבר — לבקש ממנו לשלוח קישור
+     למשהו שהוא לא ראה זה מוזר, והוא לא ישלח (המשתמש העיר על כך, אוקטובר 2026).
+     ההדגשה עוברת לשלב 2 אחרי שהוא צפה פעם אחת (`sawShop`).
+     אחרי ההזמנה הראשונה הכרטיס נעלם לגמרי והתפריט הרגיל חוזר. */
   function pubSendCard(st) {
     if (!needsClients(st)) return "";
+    const seen = sawShop();
     return `
       <div class="card send-card">
-        <div class="sc-step">נשאר שלב אחד</div>
-        <h3>שלח/י את הקישור ללקוחות שלך</h3>
-        <p>בלי זה אף אחד לא יודע שאפשר לקבוע אצלך תור אונליין, והיומן יישאר ריק.
-           בחר/י בוואטסאפ כמה לקוחות בבת אחת — ההודעה כבר כתובה.</p>
-        <button class="btn btn-wa btn-lg" data-act="send-clients">שליחה ללקוחות בוואטסאפ</button>
-        <button class="btn btn-sm" data-act="share-status" style="margin-top:9px;width:100%">📲 תמונה מוכנה לסטטוס</button>
-        <div class="hint" style="margin-top:11px">טיפ: פוסט אחד בסטטוס מגיע לכל הלקוחות שלך בבת אחת — זו הדרך המהירה ביותר.</div>
+        <div class="sc-step">${seen ? "נשאר שלב אחד" : "שני שלבים ואתה בפנים"}</div>
+
+        <div class="sc-row${seen ? " done" : ""}">
+          <span class="sc-num">${seen ? "✓" : "1"}</span>
+          <div class="sc-body">
+            <h3>ככה המספרה שלך נראית ללקוחות</h3>
+            <p>בדוק/י שהכול נראה טוב — השירותים, המחירים והשעות הפנויות. זה בדיוק
+               מה שהלקוח רואה כשהוא פותח את הקישור.</p>
+            <button class="btn ${seen ? "btn-sm" : "btn-primary btn-lg"}" data-act="preview-client"
+                    style="${seen ? "width:100%" : ""}">👁️ צפייה במספרה שלי</button>
+          </div>
+        </div>
+
+        <div class="sc-row">
+          <span class="sc-num">2</span>
+          <div class="sc-body">
+            <h3>שלח/י את הקישור ללקוחות</h3>
+            <p>בלי זה אף אחד לא יודע שאפשר לקבוע אצלך תור, והיומן יישאר ריק.
+               בוואטסאפ אפשר לסמן כמה לקוחות בבת אחת — ההודעה כבר כתובה.</p>
+            <button class="btn btn-wa ${seen ? "btn-lg" : ""}" data-act="send-clients"
+                    style="width:100%">שליחה ללקוחות בוואטסאפ</button>
+            <button class="btn btn-sm" data-act="share-status" style="margin-top:9px;width:100%">📲 תמונה מוכנה לסטטוס</button>
+            <div class="hint" style="margin-top:11px">פוסט אחד בסטטוס מגיע לכל הלקוחות שלך בבת אחת — הדרך המהירה ביותר.</div>
+          </div>
+        </div>
       </div>`;
   }
 

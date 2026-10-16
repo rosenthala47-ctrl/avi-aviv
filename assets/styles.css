@@ -1121,8 +1121,19 @@ select.input {
   color: #25D366; background: rgba(37, 211, 102, .13);
   border-radius: 999px; padding: 4px 11px; margin-bottom: 10px;
 }
-.send-card h3 { font-size: 19px; font-weight: 800; letter-spacing: -.2px; }
-.send-card p { font-size: 14px; color: var(--muted); line-height: 1.6; margin: 8px 0 15px; }
+.send-card h3 { font-size: 17.5px; font-weight: 800; letter-spacing: -.2px; }
+.send-card p { font-size: 14px; color: var(--muted); line-height: 1.6; margin: 7px 0 13px; }
+/* שני השלבים: "תראה איך זה נראה" ואז "שלח" */
+.send-card .sc-row { display: flex; gap: 11px; align-items: flex-start; }
+.send-card .sc-row + .sc-row { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line-soft); }
+.send-card .sc-body { flex: 1; min-width: 0; }
+.send-card .sc-num {
+  flex: none; width: 26px; height: 26px; border-radius: 50%; margin-top: 2px;
+  display: grid; place-items: center; font-size: 13px; font-weight: 800;
+  background: var(--surface-3); color: var(--text);
+}
+.send-card .sc-row.done .sc-num { background: rgba(37, 211, 102, .18); color: #25D366; }
+.send-card .sc-row.done h3 { color: var(--muted); }
 .banner.send-link .bn-title { color: #f6c445; }
 
 /* כפתור צף "ניהול מנויים" — מוצג רק לבעל המערכת אחרי קוד-העל (ראו renderAdminBar).
