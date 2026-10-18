@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "190";
+  const APP_VERSION = "191";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -2225,16 +2225,28 @@
   }
   /* כפתור וואטסאפ לספר שתקוע — ההודעה כבר כתובה, כדי שהרדיפה אחריו תהיה
      לחיצה אחת במקום לפתוח את המספרה, לזכור מי הוא, ולנסח מחדש בכל פעם. */
+  /* ספר שתקוע (אפס הזמנות) — דרך לפנות אליו בלחיצה אחת, עם הודעה מוכנה.
+     לא לכל מספרה יש טלפון: עד v191 אפשר היה לדלג על שלב הטלפון בהרשמה. במקרה
+     כזה נופלים-לאחור לאינסטגרם, ואם גם הוא חסר — **אומרים את זה במפורש** במקום
+     להעלים את הכפתור בשקט (המשתמש שאל למה אין כפתור, אוקטובר 2026). */
   function admNudgeBtn(s) {
     const a = adminActivity[s.id];
-    if (!a || a.clients || !s.phone) return "";
+    if (!a || a.clients) return "";
+    const phone = s.phone || a.phone || "";
     const base = shareBase() + "#" + s.id;
-    const msg = "היי! ראיתי שעדיין לא הזמינו אצלך תור ב-BarberTor 🙂\n" +
-      "זה קורה כי הלקוחות שלך עוד לא קיבלו את הקישור שלך:\n" + base + "\n" +
-      "שלח להם אותו בוואטסאפ או תעלה אותו לסטטוס — ותתחיל לראות תורים נכנסים.";
-    const href = "https://wa.me/" + u.normalizePhone(s.phone).replace(/^0/, "972") +
-      "?text=" + encodeURIComponent(msg);
-    return `<a class="btn btn-wa btn-sm" href="${esc(href)}" target="_blank" rel="noopener">💬 תזכורת לספר</a>`;
+    if (phone) {
+      const msg = "היי! ראיתי שעדיין לא הזמינו אצלך תור ב-BarberTor 🙂\n" +
+        "זה קורה כי הלקוחות שלך עוד לא קיבלו את הקישור שלך:\n" + base + "\n" +
+        "שלח להם אותו בוואטסאפ או תעלה אותו לסטטוס — ותתחיל לראות תורים נכנסים.";
+      const href = "https://wa.me/" + u.normalizePhone(phone).replace(/^0/, "972") +
+        "?text=" + encodeURIComponent(msg);
+      return `<a class="btn btn-wa btn-sm" href="${esc(href)}" target="_blank" rel="noopener">💬 תזכורת לספר</a>`;
+    }
+    if (a.instagram) {
+      const ig = "https://instagram.com/" + String(a.instagram).replace(/^@/, "");
+      return `<a class="btn btn-sm" href="${esc(ig)}" target="_blank" rel="noopener">📷 הודעה באינסטגרם</a>`;
+    }
+    return `<span class="adm-noway">אין טלפון — דילג על השלב בהרשמה</span>`;
   }
 
   function renderAdminList() {
@@ -6026,7 +6038,10 @@
   }
   const WIZ_QUESTIONS = 14;  // שלבים 1..14 (14 = מסך הסיכום)
   // שלבים שאפשר לדלג עליהם — פרטים שאפשר להשלים אחר כך מההגדרות
-  const WIZ_SKIPPABLE = [4, 7, 8, 9, 12, 13];
+  /* שלבים שאפשר לדלג עליהם. **שלב 4 (טלפון) אינו ביניהם מאז v191:** בלי טלפון
+     הלקוחות לא יכולים להתקשר, ובעל המערכת לא יכול לפנות לספר שתקוע — וכך נוצרו
+     מספרות שאי אפשר להגיע אליהן בכלל. הכתובת באותו שלב נשארה רשות. */
+  const WIZ_SKIPPABLE = [7, 8, 9, 12, 13];
 
   // רטט קצר למשוב מגע (נתמך באנדרואיד; באייפון פשוט מתעלם)
   function haptic(ms) { try { if (navigator.vibrate) navigator.vibrate(ms || 12); } catch (e) {} }
@@ -6060,7 +6075,7 @@
                   autocapitalize="off" autocomplete="off" spellcheck="false" inputmode="latin">
            <div class="wiz-link" id="wz-linkPrev">${esc(base)}<b>${esc(d.handle || "הכתובת-שלך")}</b></div>`);
       case 4:
-        return wizQ("📍", "פרטי המספרה", "כדי שהלקוחות ידעו איך להגיע ואיך להתקשר. אפשר לדלג ולמלא אחר כך.",
+        return wizQ("📍", "פרטי המספרה", "הטלפון חובה — דרכו הלקוחות מתקשרים אליך, וגם אנחנו. את הכתובת אפשר למלא אחר כך.",
           `<input class="input wiz-input" id="wz-phone" type="tel" inputmode="tel" placeholder="טלפון · 050-0000000" value="${esc(d.phone)}">
            <div class="field-row wiz-addr-row" style="margin-top:10px">
              <input class="input wiz-input" id="wz-city" placeholder="עיר / יישוב" value="${esc(d.city)}" style="flex:1.1">
@@ -6371,7 +6386,18 @@
       d.handle = v;
       wizGo(4); return;
     }
-    if (wiz.step === 4) { wizCaptureStep4(); wizGo(5); return; }
+    if (wiz.step === 4) {
+      wizCaptureStep4();
+      // טלפון חובה (ראו WIZ_SKIPPABLE); הכתובת נשארה רשות
+      if (!u.isValidPhone(d.phone)) {
+        toast(d.phone ? "מספר הטלפון אינו תקין" : "צריך טלפון — הלקוחות מתקשרים אליו", "", "📞");
+        haptic(40);
+        const el = $("#wz-phone"); if (el) el.focus();
+        return;
+      }
+      d.phone = u.fmtPhone(d.phone);
+      wizGo(5); return;
+    }
     if (wiz.step === 5) {
       wizCaptureServices();
       const valid = (d.services || []).filter((s) => s.name && s.price >= 0 && s.durationMin >= 5);

@@ -565,7 +565,15 @@ UG.Store = (function () {
     const out = {};
     await Promise.all((ids || []).slice(0, 300).map(async (id) => {
       try {
-        const v = (await db.ref("shops/" + id + "/bookings").once("value")).val();
+        /* גם הטלפון והאינסטגרם — כדי שאפשר יהיה לפנות לספר תקוע. ב-shopIndex
+           הטלפון עשוי להיות חסר או ישן (הוא נכתב בעת ההרשמה), ולכן קוראים את
+           הערך החי מתוך המספרה עצמה. */
+        const [bSnap, pSnap, iSnap] = await Promise.all([
+          db.ref("shops/" + id + "/bookings").once("value"),
+          db.ref("shops/" + id + "/shop/phone").once("value"),
+          db.ref("shops/" + id + "/shop/instagram").once("value"),
+        ]);
+        const v = bSnap.val();
         const arr = Array.isArray(v) ? v : (v && typeof v === "object" ? Object.keys(v).map((k) => v[k]) : []);
         let clients = 0, lastTs = 0;
         arr.forEach((b) => {
@@ -574,7 +582,10 @@ UG.Store = (function () {
           const ts = Number(b.createdAt) || 0;
           if (ts > lastTs) lastTs = ts;
         });
-        out[id] = { clients: clients, lastTs: lastTs };
+        out[id] = {
+          clients: clients, lastTs: lastTs,
+          phone: String(pSnap.val() || ""), instagram: String(iSnap.val() || ""),
+        };
       } catch (e) { /* מספרה שלא ניתן לקרוא — פשוט בלי נתון */ }
     }));
     return out;
