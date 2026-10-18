@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "191";
+  const APP_VERSION = "192";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -2225,6 +2225,26 @@
   }
   /* כפתור וואטסאפ לספר שתקוע — ההודעה כבר כתובה, כדי שהרדיפה אחריו תהיה
      לחיצה אחת במקום לפתוח את המספרה, לזכור מי הוא, ולנסח מחדש בכל פעם. */
+  /* שורת פרטי הקשר של מספרה בפאנל: כתובת, שם הבעלים, וקישורים לרשתות. מעבר
+     לפנייה לספר, זה מה שמבדיל ספר אמיתי מהרשמת-בדיקה ("שדג / asdasd") בלי
+     להיכנס לכל מספרה בנפרד. מגיע עם נתוני הפעילות, ולכן מופיע רק אחריהם. */
+  function admContactRow(s) {
+    const a = adminActivity[s.id];
+    if (!a) return "";
+    const bits = [];
+    if (a.ownerName) bits.push(esc(a.ownerName));
+    if (a.address) bits.push("📍 " + esc(a.address));
+    const links = SOCIAL_PLATFORMS.map((pl) => {
+      const h = socialHandle(a[pl.key] || "", pl.key);
+      if (!h) return "";
+      return `<a class="adm-soc" href="${esc(socialUrl(h, pl.key))}" target="_blank" rel="noopener"
+                 title="${esc(pl.label)}: ${esc(h)}">${pl.emoji} ${esc(h)}</a>`;
+    }).filter(Boolean).join("");
+    if (!bits.length && !links) return "";
+    return `${bits.length ? `<div class="adm-meta">${bits.join(" · ")}</div>` : ""}` +
+      `${links ? `<div class="adm-socs">${links}</div>` : ""}`;
+  }
+
   /* ספר שתקוע (אפס הזמנות) — דרך לפנות אליו בלחיצה אחת, עם הודעה מוכנה.
      לא לכל מספרה יש טלפון: עד v191 אפשר היה לדלג על שלב הטלפון בהרשמה. במקרה
      כזה נופלים-לאחור לאינסטגרם, ואם גם הוא חסר — **אומרים את זה במפורש** במקום
@@ -2260,6 +2280,7 @@
         <div class="adm-name">${esc(s.name)} <span style="color:var(--muted);font-weight:400">· ${esc(s.id)}</span></div>
         ${isTest ? `<span class="adm-badge test">🧪 מספרת הבדיקות שלך — לא נספרת בסטטיסטיקה</span>` : ""}
         <div class="adm-meta">${s.phone ? esc(s.phone) + " · " : ""}${s.paidUntil ? "שולם עד " + esc(u.longDate(u.dateKey(new Date(s.paidUntil)))) : "טרם שולם"}</div>
+        ${admContactRow(s)}
         <span class="adm-badge ${st.cls}">${esc(st.label)}</span>
         ${admActivityBadge(s)}
         <div class="adm-btns">
