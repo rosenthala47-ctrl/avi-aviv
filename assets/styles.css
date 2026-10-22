@@ -1055,6 +1055,11 @@ select.input {
 .adm-badge.pend { color: #b45309; background: rgba(251,191,36,.2); }
 /* מספרה תקועה שאין דרך לפנות אליה — מסבירים למה אין כפתור (ראו admNudgeBtn) */
 .adm-noway { display: inline-flex; align-items: center; font-size: 12px; color: var(--muted-2); }
+/* תזכורת "נשארו לך X ימים" — נבדל מהכפתור הירוק של "שלח ללקוחות" (ראו admRemindBtn) */
+.btn.adm-remind {
+  color: #b45309; border-color: rgba(251, 191, 36, .45);
+  background: rgba(251, 191, 36, .12); text-decoration: none;
+}
 /* קישורי הרשתות של המספרה בפאנל (ראו admContactRow) */
 .adm-socs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .adm-soc {

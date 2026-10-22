@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "192";
+  const APP_VERSION = "193";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
   function resolveShopId() {
@@ -2225,6 +2225,58 @@
   }
   /* כפתור וואטסאפ לספר שתקוע — ההודעה כבר כתובה, כדי שהרדיפה אחריו תהיה
      לחיצה אחת במקום לפתוח את המספרה, לזכור מי הוא, ולנסח מחדש בכל פעם. */
+  /* ---------- תזכורת "נשארו לך X ימים" ----------
+     אותו חישוב של admShopStatus, אבל מוחזר כנתון ולא כתווית — כדי שאפשר יהיה
+     לבנות ממנו הודעה. חשוב שיישאר זהה, אחרת הכפתור יגיד משהו אחר מהתג שלידו. */
+  function admTimeLeft(s) {
+    const cfg = UG_CONFIG.subscription || {};
+    const now = Date.now();
+    if (s.pending) return { kind: "pending", days: 0 };
+    if (s.paidUntil && s.paidUntil > now) {
+      return { kind: "paid", days: Math.max(1, Math.ceil((s.paidUntil - now) / 86400000)) };
+    }
+    if (!s.createdAt) return { kind: "none", days: 0 };   // מספרה ותיקה — אין מה להזכיר
+    const trialEnd = s.createdAt + (Number(cfg.trialDays) || 30) * 86400000;
+    if (now < trialEnd) return { kind: "trial", days: Math.max(1, Math.ceil((trialEnd - now) / 86400000)) };
+    return { kind: "expired", days: Math.max(1, Math.ceil((now - trialEnd) / 86400000)) };
+  }
+  const admDays = (n) => (n === 1 ? "יום אחד" : n + " ימים");
+
+  /* ההודעה עצמה — נפתחת בוואטסאפ מוכנה לשליחה. אם למספרה אין עדיין אף הזמנה,
+     מצורפת גם הסיבה האמיתית והקישור שלה, כי זו תמיד הבעיה שמתחתית. */
+  function admRemindMsg(s, t) {
+    const a = adminActivity[s.id];
+    const price = subPriceText();
+    let head;
+    if (t.kind === "trial") {
+      head = "היי! נשארו לך עוד " + admDays(t.days) + " של תקופת הניסיון החינמית ב-BarberTor 🙂" +
+        (price ? "\nאחר כך אפשר להמשיך ב-" + price + ", בלי התחייבות." : "");
+    } else if (t.kind === "paid") {
+      head = "היי! המנוי שלך ב-BarberTor מסתיים בעוד " + admDays(t.days) + " 🙂\nרוצה שנחדש?";
+    } else {
+      head = "היי! תקופת הניסיון שלך ב-BarberTor הסתיימה לפני " + admDays(t.days) + "." +
+        (price ? "\nכדי להמשיך לנהל תורים אפשר להפעיל מנוי — " + price + "." : "");
+    }
+    if (a && !a.clients) {
+      head += "\n\nשים לב: עדיין לא הזמינו אצלך אף תור — כנראה הלקוחות שלך לא קיבלו את הקישור:\n" +
+        shareBase() + "#" + s.id +
+        "\nשלח להם אותו בוואטסאפ או העלה אותו לסטטוס, ותתחיל לראות תורים נכנסים.";
+    }
+    return head;
+  }
+
+  function admRemindBtn(s) {
+    const t = admTimeLeft(s);
+    if (t.kind === "none" || t.kind === "pending") return "";   // אין דדליין / כבר שילם
+    const a = adminActivity[s.id];
+    const phone = s.phone || (a && a.phone) || "";
+    if (!phone) return "";
+    const label = t.kind === "expired" ? "⏳ תזכורת · הסתיים" : "⏳ תזכורת · " + admDays(t.days);
+    const href = "https://wa.me/" + u.normalizePhone(phone).replace(/^0/, "972") +
+      "?text=" + encodeURIComponent(admRemindMsg(s, t));
+    return `<a class="btn btn-sm adm-remind" href="${esc(href)}" target="_blank" rel="noopener">${esc(label)}</a>`;
+  }
+
   /* שורת פרטי הקשר של מספרה בפאנל: כתובת, שם הבעלים, וקישורים לרשתות. מעבר
      לפנייה לספר, זה מה שמבדיל ספר אמיתי מהרשמת-בדיקה ("שדג / asdasd") בלי
      להיכנס לכל מספרה בנפרד. מגיע עם נתוני הפעילות, ולכן מופיע רק אחריהם. */
@@ -2285,6 +2337,7 @@
         ${admActivityBadge(s)}
         <div class="adm-btns">
           <button class="btn btn-sm" data-act="adm-visit" data-sid="${esc(s.id)}">🔗 כניסה</button>
+          ${admRemindBtn(s)}
           ${admNudgeBtn(s)}
           <button class="btn btn-sm" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="1">+ חודש</button>
           <button class="btn btn-sm" data-act="adm-extend" data-sid="${esc(s.id)}" data-m="12">+ שנה</button>
