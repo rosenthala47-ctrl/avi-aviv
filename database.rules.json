@@ -1,0 +1,78 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "shops": {
+      "$shopId": {
+        ".read": true,
+        ".write": "auth != null && (!data.child('shop/ownerUid').exists() || data.child('shop/ownerUid').val() === auth.uid || (auth.token.email === 'rosenthala47@gmail.com' && auth.token.email_verified === true && !newData.exists()))",
+        "bookings": {
+          ".write": "auth != null && root.child('shops/'+$shopId+'/shop/strictBookings').val() !== true",
+          "$bkId": {
+            ".write": "auth != null && root.child('shops/'+$shopId+'/shop/strictBookings').val() === true && ( (!data.exists() && newData.child('id').val() === $bkId) || root.child('shops/'+$shopId+'/shop/ownerUid').val() === auth.uid || (data.exists() && newData.exists() && newData.child('status').val() === 'cancelled' && newData.child('id').val() === data.child('id').val() && newData.child('date').val() === data.child('date').val() && newData.child('start').val() === data.child('start').val() && newData.child('serviceId').val() === data.child('serviceId').val() && newData.child('userId').val() === data.child('userId').val()) )"
+          }
+        },
+        "waitlist":  { ".write": "auth != null" },
+        "alerts":    { ".write": "auth != null" },
+        "reviews":   { ".write": "auth != null" },
+        "updatedAt": { ".write": "auth != null" }
+      }
+    },
+
+    "gallery": {
+      "$shopId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+
+    "shopMedia": {
+      "$shopId": {
+        ".read": true,
+        ".write": "auth != null && (!root.child('shops/'+$shopId+'/shop/ownerUid').exists() || root.child('shops/'+$shopId+'/shop/ownerUid').val() === auth.uid)"
+      }
+    },
+
+    "private": {
+      "$shopId": {
+        ".read": "auth != null && root.child('shops/'+$shopId+'/shop/ownerUid').val() === auth.uid",
+        "bk": {
+          "$bkId": {
+            ".write": "auth != null && (!data.exists() || root.child('shops/'+$shopId+'/shop/ownerUid').val() === auth.uid)"
+          }
+        },
+        "contacts": {
+          ".write": "auth != null && root.child('shops/'+$shopId+'/shop/ownerUid').val() === auth.uid"
+        }
+      }
+    },
+
+    "pushTokens": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+
+    "subs": {
+      ".read": true,
+      "$shopId": {
+        ".write": "auth != null && auth.token.email === 'rosenthala47@gmail.com' && auth.token.email_verified === true",
+        "pending": { ".write": "auth != null" }
+      }
+    },
+
+    "shopIndex": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "passHashes": {
+      "$hash": {
+        ".read": "auth != null",
+        ".write": "auth != null && !data.exists()"
+      }
+    }
+  }
+}
