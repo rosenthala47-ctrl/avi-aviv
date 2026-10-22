@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "194";
+  const APP_VERSION = "195";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ----------
      אינסטגרם ופייסבוק מצמידים פרמטר מעקב לקישור שמשתפים בהם (igsh / igshid / fbclid),
@@ -4395,6 +4395,7 @@
      מציג בדיוק את בורר הימים והשעות שהלקוח רואה, כדי שקל יהיה לראות מה פנוי.
      בנוסף יש «שעה אחרת» כדי לקבוע גם מחוץ לשעות הפעילות. */
   let addBk = null;
+  let addBkPick = [];   // הרשימה שמוצגת כרגע בבורר הלקוחות (בחירה לפי אינדקס)
 
   function ownerAddBooking() {
     const st = Store.get();
@@ -4403,11 +4404,122 @@
     addBk = {
       date: u.dateKey(now), start: "", custom: false,
       hour: String(now.getHours()).padStart(2, "0"), min: "00",
-      svcId: st.services[0].id, staff: "", name: "", phone: "", email: "", contactId: "",
+      svcId: st.services[0].id, staff: "", name: "", phone: "", email: "",
     };
+    // יש לקוחות → קודם בוחרים למי התור; אין → ישר לטופס, כמו קודם
+    if (pickableClients(st).length) { openModal(clientPickHtml()); wireClientPick(); return; }
     openModal(addBookingHtml());
     wireAddBooking();
     setTimeout(() => $("#ab-name") && $("#ab-name").focus(), 100);
+  }
+
+  /* ---------- בורר לקוחות להוספת תור ידני (v195) ----------
+     "הוספת תור ידני" פותח קודם את כל הלקוחות לפי א–ת — מי שהזמין אונליין ומי
+     שיובא, בלי כפילויות (clientsAgg מאחד לפי טלפון). לחיצה על לקוח ממלאת שם וטלפון
+     וממשיכה ליום ולשעה. עד v195 היה כאן רק תפריט נפתח בתחתית הטופס, ובו רק
+     אנשי קשר שיובאו — לקוח שהזמין בעצמו לא הופיע בו בכלל. */
+  function pickableClients(st) {
+    return clientsAgg(st)
+      // במספרה מאובטחת, בלי חשבון הבעלים, השם והטלפון מוסתרים — שורה כזו לא עוזרת לבחור
+      .filter((c) => (c.name && c.name !== "לקוח") || c.phone)
+      .sort((a, z) => String(a.name).trim().localeCompare(String(z.name).trim(), "he"));
+  }
+  // האות שמעל קבוצת השמות: עברית כמו שהיא, לטינית באות גדולה, כל השאר "#"
+  function pickLetter(name) {
+    const ch = String(name || "").trim().charAt(0);
+    if (/[א-ת]/.test(ch)) return ch;
+    if (/[a-z]/i.test(ch)) return ch.toUpperCase();
+    return "#";
+  }
+
+  function clientPickHtml() {
+    const st = Store.get();
+    addBkPick = pickableClients(st);
+    let last = "";
+    const rows = addBkPick.map((c, i) => {
+      const L = pickLetter(c.name);
+      const head = L !== last ? `<div class="cp-letter" data-l="${esc(L)}">${esc(L)}</div>` : "";
+      last = L;
+      const digits = c.phone ? u.normalizePhone(c.phone) : "";
+      const sub = [];
+      sub.push(c.phone ? `<span dir="ltr">${esc(u.fmtPhone(c.phone))}</span>` : `<span class="cp-nophone">אין טלפון שמור</span>`);
+      if (c.lastDate) sub.push("אחרון " + esc(u.relativeDay(c.lastDate)));
+      return head + `
+        <button class="cp-row" data-act="ab-pick" data-i="${i}" data-l="${esc(L)}"
+                data-q="${esc(String(c.name).toLowerCase() + " " + digits)}">
+          <span class="cp-av">${esc(String(c.name).trim().charAt(0) || "?")}</span>
+          <span class="cp-txt"><b>${isClientBlocked(c) ? "🚫 " : ""}${esc(c.name)}</b><small>${sub.join(" · ")}</small></span>
+        </button>`;
+    }).join("");
+    return `
+      <div class="m-title">הוספת תור ידני</div>
+      <div class="m-sub">למי התור? ${addBkPick.length} לקוחות, לפי א–ת</div>
+      <input class="input" id="cp-q" type="search" autocomplete="off" placeholder="🔍 חיפוש לפי שם או טלפון">
+      <div class="cp-list" id="cp-list">
+        <button class="cp-row cp-new" data-act="ab-new">
+          <span class="cp-av">＋</span>
+          <span class="cp-txt"><b id="cp-new-lbl">לקוח חדש</b><small>שם וטלפון שעוד לא ברשימה</small></span>
+        </button>
+        ${rows}
+        <p class="hint cp-none" id="cp-none" hidden>לא נמצא לקוח כזה ברשימה.</p>
+      </div>
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:12px">ביטול</button>
+    `;
+  }
+
+  // חיפוש חי: מסנן שורות ומסתיר אותיות שלא נשאר תחתן אף שם — בלי לצייר מחדש
+  function wireClientPick() {
+    const q = $("#cp-q");
+    if (!q) return;
+    q.addEventListener("input", () => {
+      const raw = q.value.trim().toLowerCase();
+      const digits = raw.replace(/\D/g, "");
+      const seen = new Set();
+      let any = false;
+      document.querySelectorAll("#cp-list .cp-row[data-i]").forEach((r) => {
+        const hay = r.dataset.q || "";
+        const hit = !raw || hay.indexOf(raw) !== -1 ||
+          (digits.length >= 3 && hay.replace(/\D/g, "").indexOf(digits) !== -1);
+        r.hidden = !hit;
+        if (hit) { any = true; seen.add(r.dataset.l); }
+      });
+      document.querySelectorAll("#cp-list .cp-letter").forEach((h) => { h.hidden = !seen.has(h.dataset.l); });
+      const none = $("#cp-none"); if (none) none.hidden = any;
+      const lbl = $("#cp-new-lbl");
+      if (lbl) lbl.textContent = raw ? "הוספת \"" + q.value.trim() + "\" כלקוח חדש" : "לקוח חדש";
+    });
+  }
+
+  // ממשיכים מהבורר לטופס (יום, שעה, שירות) — עם הלקוח שנבחר או עם שדות ריקים
+  function addBookingForm(focusId) {
+    $("#modal").innerHTML = `<div class="m-handle"></div>` + addBookingHtml();
+    $("#modal").scrollTop = 0;
+    wireAddBooking();
+    if (focusId) setTimeout(() => { const el = $(focusId); if (el) el.focus(); }, 100);
+  }
+  function addBookingPick(i) {
+    const c = addBkPick[Number(i)];
+    if (!c || !addBk) return;
+    addBk.name = c.name && c.name !== "לקוח" ? c.name : "";
+    addBk.phone = c.phone ? u.fmtPhone(c.phone) : "";
+    // בלי טלפון שמור — הטלפון חובה בתור ידני, אז מכוונים ישר לשדה
+    addBookingForm(addBk.phone ? "" : (addBk.name ? "#ab-phone" : "#ab-name"));
+    if (!addBk.phone) toast("אין טלפון שמור ללקוח הזה — הוסיפו אותו", "", "📞");
+  }
+  function addBookingNew() {
+    if (!addBk) return;
+    // מה שהוקלד בחיפוש עובר לשדה המתאים: ספרות → טלפון, אחרת → שם
+    const typed = (($("#cp-q") && $("#cp-q").value) || "").trim();
+    const isPhone = typed && /^[\d\s+()-]+$/.test(typed);
+    addBk.name = isPhone ? "" : typed;
+    addBk.phone = isPhone ? typed : "";
+    addBookingForm(addBk.name ? "#ab-phone" : "#ab-name");
+  }
+  function addBookingBackToList() {
+    captureAddBooking();
+    $("#modal").innerHTML = `<div class="m-handle"></div>` + clientPickHtml();
+    $("#modal").scrollTop = 0;
+    wireClientPick();
   }
 
   // שמירת מה שהוקלד לפני ציור מחדש של המודאל
@@ -4415,8 +4527,7 @@
     if (!addBk) return;
     const g = (id) => { const e = $(id); return e ? e.value : undefined; };
     const map = { svcId: "#ab-svc", staff: "#ab-staff", name: "#ab-name", phone: "#ab-phone",
-                  email: "#ab-email", contactId: "#ab-contact", hour: "#ab-hour", min: "#ab-min",
-                  date: "#ab-date" };
+                  email: "#ab-email", hour: "#ab-hour", min: "#ab-min", date: "#ab-date" };
     Object.keys(map).forEach((k) => { const v = g(map[k]); if (v !== undefined) addBk[k] = v; });
   }
 
@@ -4472,7 +4583,8 @@
       `<option value="${s.id}" ${a.svcId === s.id ? "selected" : ""}>${esc(s.name)} · ${u.fmtDuration(s.durationMin)}</option>`).join("");
     const hourOptions = Array.from({ length: 24 }, (_, h) => { const v = String(h).padStart(2, "0"); return `<option value="${v}" ${a.hour === v ? "selected" : ""}>${v}</option>`; }).join("");
     const minOptions = ["00", "15", "30", "45"].map((m) => `<option value="${m}" ${a.min === m ? "selected" : ""}>${m}</option>`).join("");
-    const contacts = (Store.getContacts()).slice().sort((x, y) => (x.name || "").localeCompare(y.name || "", "he"));
+    // הלקוח ראשון בטופס: כך מה שנבחר ברשימה מופיע מיד, מלא, בראש החלון
+    const hasList = pickableClients(st).length > 0;
     const staff = st.shop.staff || [];
     const chosen = a.custom ? (a.hour + ":" + a.min) : a.start;
 
@@ -4481,6 +4593,20 @@
       <div class="m-sub">${chosen
         ? `נבחר: <b>${esc(chosen)}</b> · ${esc(u.relativeDay(a.date))}`
         : "בחרו יום ושעה מהיומן"}</div>
+
+      <div class="ab-client">
+        <div class="ab-client-head">
+          <span>👤 הלקוח</span>
+          ${hasList ? `<button class="btn btn-sm" data-act="ab-pick-list">👥 בחירה מהרשימה</button>` : ""}
+        </div>
+        <div class="field"><label>שם הלקוח</label>
+          <input class="input" id="ab-name" placeholder="שם הלקוח" value="${esc(a.name)}"></div>
+        <div class="field"><label>טלפון</label>
+          <input class="input" id="ab-phone" type="tel" inputmode="tel" placeholder="050-0000000" value="${esc(a.phone)}"></div>
+        ${(UG.Email && UG.Email.configured()) ? `
+        <div class="field"><label>אימייל לאישור (לא חובה)</label>
+          <input class="input" id="ab-email" type="email" inputmode="email" placeholder="name@email.com" value="${esc(a.email)}"></div>` : ""}
+      </div>
 
       <div class="field"><label>שירות</label>
         <select class="input" id="ab-svc">${svcOptions}</select></div>
@@ -4509,33 +4635,12 @@
         <select class="input" id="ab-min" style="flex:1">${minOptions}</select>
       </div>` : ""}
 
-      ${contacts.length ? `
-      <div class="field" style="margin-top:12px"><label>בחירת לקוח קיים (לא חובה)</label>
-        <select class="input" id="ab-contact">
-          <option value="">— לקוח חדש —</option>
-          ${contacts.map((c) => `<option value="${esc(c.id)}" data-name="${esc(c.name)}" data-phone="${esc(c.phone)}" ${a.contactId === c.id ? "selected" : ""}>${esc(c.name)}${c.phone ? " · " + esc(c.phone) : ""}</option>`).join("")}
-        </select></div>` : ""}
-      <div class="field"><label>שם הלקוח</label>
-        <input class="input" id="ab-name" placeholder="שם הלקוח" value="${esc(a.name)}"></div>
-      <div class="field"><label>טלפון</label>
-        <input class="input" id="ab-phone" type="tel" inputmode="tel" placeholder="050-0000000" value="${esc(a.phone)}"></div>
-      ${(UG.Email && UG.Email.configured()) ? `
-      <div class="field"><label>אימייל לאישור (לא חובה)</label>
-        <input class="input" id="ab-email" type="email" inputmode="email" placeholder="name@email.com" value="${esc(a.email)}"></div>` : ""}
-      <button class="btn btn-primary" data-act="save-add-booking">קביעת התור</button>
+      <button class="btn btn-primary" data-act="save-add-booking" style="margin-top:16px">קביעת התור</button>
       <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">ביטול</button>
     `;
   }
 
   function wireAddBooking() {
-    const cs = $("#ab-contact");
-    if (cs) cs.addEventListener("change", () => {
-      const opt = cs.options[cs.selectedIndex];
-      if (opt && opt.value) {
-        if ($("#ab-name")) $("#ab-name").value = opt.dataset.name || "";
-        if ($("#ab-phone")) $("#ab-phone").value = opt.dataset.phone || "";
-      }
-    });
     const cb = $("#ab-custom");
     if (cb) cb.addEventListener("change", () => {
       captureAddBooking();
@@ -7186,6 +7291,9 @@
 
         // הוספת תור ידנית ע״י הבעלים (24 שעות)
         case "add-booking": ownerAddBooking(); break;
+        case "ab-pick": addBookingPick(t.dataset.i); break;
+        case "ab-new": addBookingNew(); break;
+        case "ab-pick-list": addBookingBackToList(); break;
         case "save-add-booking": saveAddBooking(); break;
 
         // ייבוא לקוחות

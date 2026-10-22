@@ -1302,5 +1302,17 @@ window.UG.I18N_DICT.en = Object.assign(
   "{0}, המספרה שלך מוכנה!": "{0}, your barbershop is ready!",
   // במסך הסיכום של השאלון "ספרים" הוא כותרת שורה — באות גדולה כמו שאר הכותרות
   "ספרים": "Barbers",
-  "שירות אחד": "1 service"
+  "שירות אחד": "1 service",
+
+  /* ── הוספת תור ידני: בורר הלקוחות (clientPickHtml, v195) ── */
+  "למי התור? {0} לקוחות, לפי א–ת": function (n) { return /^\d+$/.test(n) ? "Who is it for? " + n + " clients, A–Z" : null; },
+  "חיפוש לפי שם או טלפון": "Search by name or phone",
+  "לקוח חדש": "New client",
+  "שם וטלפון שעוד לא ברשימה": "A name and phone not on the list yet",
+  "הוספת \"{0}\" כלקוח חדש": "Add \"{0}\" as a new client",
+  "לא נמצא לקוח כזה ברשימה.": "No such client on the list.",
+  "אין טלפון שמור": "No phone saved",
+  "הלקוח": "Client",
+  "בחירה מהרשימה": "Pick from list",
+  "אין טלפון שמור ללקוח הזה — הוסיפו אותו": "No phone saved for this client — please add it"
 });
