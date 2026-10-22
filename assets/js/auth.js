@@ -65,7 +65,7 @@ UG.Auth = (function () {
     /* התחברות עם Google. מנסה חלון קופץ (popup); אם הסביבה חוסמת אותו
        (נפוץ באפליקציה מותקנת) — נופל להפניה (redirect) שתטען מחדש את הדף.
        מחזיר את המשתמש כשה-popup הצליח, או null אם בוצעה הפניה. */
-    async signInWithGoogle() {
+    async signInWithGoogle(opts) {
       await ensure();
       const provider = new firebase.auth.GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
@@ -77,6 +77,10 @@ UG.Auth = (function () {
         if (c === "auth/popup-blocked" || c === "auth/cancelled-popup-request" ||
             c === "auth/popup-closed-by-user" || c === "auth/operation-not-supported-in-this-environment") {
           if (c === "auth/popup-closed-by-user") throw e;   // המשתמש סגר בכוונה — לא להפנות
+          // בדפדפן מוטמע (אינסטגרם/פייסבוק) אסור להפנות: גוגל חוסמת שם את ההתחברות,
+          // והלקוח נתקע בעמוד שגיאה של גוגל בלי דרך חזרה לאפליקציה. במקום זה זורקים,
+          // והקורא מציג את הכניסה עם טלפון.
+          if (opts && opts.noRedirect) throw e;
           await _auth.signInWithRedirect(provider);
           return null;
         }

@@ -14,14 +14,32 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "193";
+  const APP_VERSION = "194";
 
-  /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ---------- */
+  /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ----------
+     אינסטגרם ופייסבוק מצמידים פרמטר מעקב לקישור שמשתפים בהם (igsh / igshid / fbclid),
+     והוא נדבק לכתובת האישית שיושבת אחרי ה-# — "#ronen?igsh=MzRlODBi". עד v194 הניקוי
+     הפך את זה ל-"ronenigshmzrlodbi", מספרה שלא קיימת, והלקוח קיבל "המספרה לא נמצאה" —
+     בדיוק אותו קישור שעבד מוואטסאפ (תלונה של ספר, אוקטובר 2026). לכן חותכים את
+     הכתובת בתו הראשון שאינו חלק ממנה, במקום למחוק את התווים ולהדביק את השאר. */
+  function cleanHandle(s) {
+    return String(s || "").trim().toLowerCase()
+      .replace(/^#/, "")               // הסימן עצמו, אם הועבר יחד עם location.hash
+      .split(/[?&#/\s]/)[0]            // קוטע את זבל המעקב (?igsh=…, &igshid=…) ולא בולע אותו
+      .replace(/[^a-z0-9-]/g, "");
+  }
   function resolveShopId() {
-    let h = (location.hash || "").replace(/^#/, "").trim().toLowerCase();
+    let h = cleanHandle(location.hash || "");
     if (h === "new" || h === "signup") return "__new__";   // מסך הרשמה/פתיחה
-    h = h.replace(/[^a-z0-9-]/g, "");
     if (h) return h;                                        // מספרה לפי כתובת אישית (כולל #main = אורי)
+    // קישור שהגיע בלי # בכלל (יש כלי קישורים ושדות "ביו" שמורידים את הסימן ואת מה
+    // שאחריו): מקבלים את הכתובת גם מפרמטר רגיל — ?s=ronen או ?shop=ronen.
+    try {
+      const q = new URLSearchParams(location.search || "");
+      const qh = cleanHandle(q.get("s") || q.get("shop") || "");
+      if (qh === "new" || qh === "signup") return "__new__";
+      if (qh) return qh;
+    } catch (e) {}
     // בלי כתובת אישית: בדומיין הישן של אורי מציגים את המספרה שלו (תאימות לקישורים קיימים).
     if ((location.hostname || "").toLowerCase().indexOf("ori-grushko") !== -1) return "main";
     // בדומיין המוצר (פתיחת האפליקציה): אם למכשיר יש מספרה בבעלותו — פותחים ישר
@@ -34,6 +52,24 @@
     return "__new__";
   }
   const SHOP = resolveShopId();
+
+  /* מיישרים את הכתובת לצורה הנקייה "#handle" כשהיא הגיעה מלוכלכת (זבל מעקב של
+     אינסטגרם) או כשהכתובת האישית הגיעה בפרמטר — כדי שכל שאר הקוד (שיתוף, התקנה,
+     זיהוי "נפתח בלי קישור") יראה קישור תקני אחד. מה שאחרי ה-? נשאר (שם יושב ?lang=).
+     כשאין בכתובת שום רמז למספרה — לא נוגעים: היעדר ה-# הוא סימן מכוון שהאפליקציה
+     נפתחה מהאייקון, ועליו נשען מצב הניהול של הספר. */
+  (function normalizeShopUrl() {
+    const raw = (location.hash || "").replace(/^#/, "");
+    let hasParam = false;
+    try {
+      const q = new URLSearchParams(location.search || "");
+      hasParam = !!(q.get("s") || q.get("shop"));
+    } catch (e) {}
+    if (!raw && !hasParam) return;
+    const want = "#" + (SHOP === "__new__" ? "new" : SHOP);
+    if (location.hash === want) return;
+    try { history.replaceState(null, "", location.pathname + location.search + want); } catch (e) {}
+  })();
 
   /* ---------- שפה: אנגלית — ב-try, במסך פתיחת מספרה, ובמספרה שנפתחה באנגלית ----------
      מספרה עברית קיימת לא מושפעת בכלל: LANG תמיד "he", קבצי התרגום לא נטענים, ושום
@@ -127,6 +163,23 @@
   function isCordovaOnly() {
     return !!window.cordova && !window.Capacitor;
   }
+  /* האם הדף נפתח בדפדפן המוטמע בתוך אפליקציה אחרת (אינסטגרם, פייסבוק, טיקטוק)?
+     שם גוגל חוסמת התחברות עם חשבון גוגל ומציגה "this browser may not be secure" —
+     מסך שנראה ללקוח כמו סוף הדרך. לכן שם מקדמים את הכניסה עם טלפון, שעובדת תמיד.
+     וואטסאפ אינו ברשימה בכוונה: הוא פותח את הדפדפן האמיתי של המכשיר, ושם הכול עובד —
+     וזו הסיבה שאותו קישור בדיוק התנהג אחרת בשתי האפליקציות. */
+  function isInAppBrowser() {
+    const ua = navigator.userAgent || "";
+    return /Instagram|FBAN|FBAV|FB_IAB|FBIOS|BytedanceWebview|musical_ly|TikTok|Line\/|Snapchat|LinkedInApp/i.test(ua);
+  }
+  // שם האפליקציה העוטפת — לנסח ללקוח הודעה שהוא מבין
+  function inAppName() {
+    const ua = navigator.userAgent || "";
+    if (/Instagram/i.test(ua)) return "אינסטגרם";
+    if (/FBAN|FBAV|FB_IAB|FBIOS/i.test(ua)) return "פייסבוק";
+    if (/BytedanceWebview|musical_ly|TikTok/i.test(ua)) return "טיקטוק";
+    return "האפליקציה";
+  }
   // בסיס הכתובת לשיתוף: מעדיף publicBaseUrl מה-config (חובה במעטפת אפליקציה),
   // אחרת הכתובת הנוכחית (דפדפן רגיל).
   function shareBase() {
@@ -145,6 +198,20 @@
   function clientLink() {
     // כולל #main גם למספרה של אורי — כדי שהקישור יעבוד גם בדומיין המוצר (שם הכתובת הריקה = מסך פתיחה)
     return shareBase() + "#" + SHOP;
+  }
+  /* אותו קישור בצורת פרמטר במקום #. נחוץ לכתובת intent:// (אסור בה שני סימני #),
+     ושורד גם כלי קישורים שמורידים את מה שאחרי ה-#. resolveShopId מקבל את שתי הצורות. */
+  function clientLinkQ() {
+    return shareBase().replace(/[?#].*$/, "") + "?s=" + encodeURIComponent(SHOP);
+  }
+  /* מעבר מהדפדפן המוטמע (אינסטגרם) לדפדפן האמיתי. באנדרואיד אפשר לעשות את זה
+     בלחיצה אחת דרך intent://; באייפון אין לזה ממשק, ולכן שם רק מסבירים איפה הכפתור. */
+  function openInBrowserBtn() {
+    if (!isInAppBrowser()) return "";
+    if (/Android/i.test(navigator.userAgent || "")) {
+      return `<button class="btn btn-ghost btn-sm" data-act="open-browser" style="margin-top:10px">🌐 פתיחה בדפדפן</button>`;
+    }
+    return `<p class="hint" style="margin-top:8px">לפתיחה בדפדפן: הקישו על <b>⋯</b> בפינה ובחרו <b>פתח בדפדפן</b>.</p>`;
   }
   /* האם המספרה הזו משתמשת במודל החדש מבוסס-חשבון (זיהוי חובה ללקוח + אבטחת ספר)?
      נשלט מ-config.authShops. "*" = כל המספרות. */
@@ -963,9 +1030,19 @@
     if (!(UG.Auth && authAvail)) { toast("התחברות Google אינה זמינה כרגע", "", "⚠️"); return; }
     try {
       rememberGoogleIntent("client");
-      const user = await UG.Auth.signInWithGoogle();
+      const user = await UG.Auth.signInWithGoogle({ noRedirect: isInAppBrowser() });
       if (user) { clearGoogleIntent(); applyGoogleClientIdentity(user); render(); setTimeout(() => promptBirthday(), 900); setTimeout(() => promptMusic(), 2200); }
-    } catch (e) { clearGoogleIntent(); toast(UG.Auth.humanError(e), "", "⚠️"); }
+    } catch (e) {
+      clearGoogleIntent();
+      // בדפדפן המוטמע של אינסטגרם/פייסבוק גוגל חוסמת את ההתחברות; שולחים את הלקוח
+      // לדרך שעובדת שם במקום להציג לו שגיאה שאין ממנה המשך.
+      if (isInAppBrowser()) {
+        view.authPhoneForm = true; render();
+        toast("גוגל חוסמת התחברות מתוך " + inAppName() + " — המשיכו עם הטלפון", "", "📱");
+        return;
+      }
+      toast(UG.Auth.humanError(e), "", "⚠️");
+    }
   }
 
   function agSavePhone() {
@@ -1018,9 +1095,17 @@
           <div class="ag-logo">${shopLogo(st) ? `<img src="${esc(shopLogo(st))}" alt="">` : esc((shopName || "מ")[0])}</div>
           <h2>${esc(shopName)}</h2>
           <p>היכנסו כדי לקבוע תור ולעקוב אחרי התורים שלכם.</p>
-          <button class="btn btn-google" data-act="ag-google"><span class="g-ico">${googleIcoSvg()}</span>המשך עם Google</button>
-          <div class="auth-or"><span>או</span></div>
-          <button class="btn" data-act="ag-phone-form">המשך עם טלפון</button>
+          ${isInAppBrowser() ? `
+            <button class="btn btn-primary" data-act="ag-phone-form">המשך עם טלפון</button>
+            <div class="auth-or"><span>או</span></div>
+            <button class="btn btn-google" data-act="ag-google"><span class="g-ico">${googleIcoSvg()}</span>המשך עם Google</button>
+            <p class="hint" style="margin-top:12px">פתחתם את הקישור מתוך ${esc(inAppName())}. ההתחברות עם Google לא תמיד נפתחת שם — הכניסה עם טלפון עובדת תמיד.</p>
+            ${openInBrowserBtn()}
+          ` : `
+            <button class="btn btn-google" data-act="ag-google"><span class="g-ico">${googleIcoSvg()}</span>המשך עם Google</button>
+            <div class="auth-or"><span>או</span></div>
+            <button class="btn" data-act="ag-phone-form">המשך עם טלפון</button>
+          `}
           <p class="hint" style="margin-top:18px">
             <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--muted)">מדיניות פרטיות</a>
             · <a href="terms.html" target="_blank" rel="noopener" style="color:var(--muted)">תנאי שימוש</a>
@@ -7005,6 +7090,14 @@
           if (!h) { toast("הזינו את הכתובת האישית שלכם", "", "✋"); break; }
           location.hash = h; location.reload(); break;
         }
+        // יציאה מהדפדפן המוטמע של אינסטגרם לדפדפן של המכשיר (אנדרואיד)
+        case "open-browser":
+          try { location.href = "intent://" + clientLinkQ().replace(/^https?:\/\//, "") + "#Intent;scheme=https;end"; }
+          catch (e) {
+            try { await navigator.clipboard.writeText(clientLink()); toast("הקישור הועתק — הדביקו בדפדפן", "good", "📋"); }
+            catch (e2) { toast("פתחו את הקישור בדפדפן של הטלפון", "", "🌐"); }
+          }
+          break;
         case "open-signup": location.hash = "new"; location.reload(); break;
         case "ob-cancel": location.hash = ""; location.reload(); break;
         case "copy-link":
