@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "195";
+  const APP_VERSION = "196";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ----------
      אינסטגרם ופייסבוק מצמידים פרמטר מעקב לקישור שמשתפים בהם (igsh / igshid / fbclid),
@@ -841,6 +841,12 @@
       return t < be && (t + span) > bs;
     }) || null;
     const blockedSpan = (t) => blockMins.some((bm) => bm >= t && bm < t + span);   // חסימה כלשהי בתוך המשך
+    /* הפסקה קבועה שנוגעת במשך התור — סוגרת את המשבצת, אלא אם הספר פתח את השעה
+       הזו ידנית ביום הזה (opens גובר על ההפסקה). */
+    const breaks = Store.breaksOn(st, dateKey);
+    const opensSet = new Set(st.opens || []);
+    const onBreakAt = (start, t) => !opensSet.has(dateKey + "|" + start) &&
+      breaks.some((b) => t < b.to && (t + span) > b.from);
     /* משבצת פנויה שנותרו לה פחות מ-cutoff דקות — מוסתרת מהלקוח. מחשבים לפי
        חותמת זמן מלאה (ולא דקות ביום) כדי שזה יעבוד גם כשהחלון חוצה חצות. */
     const cutoffMs = hideFreeCutoffMin(st) * 60000;
@@ -853,7 +859,8 @@
     // fits = השירות מסתיים עד שעת הסגירה (רלוונטי לשעות פעילות; שעה שנפתחה ידנית פטורה)
     const mk = (start, t, blocked, fits) => {
       const booking = bookingAt(t);
-      return { start, booking, blocked: blocked || blockedSpan(t), fits: fits, past: isToday && t <= nowMin, hidden: hiddenAt(start, booking) };
+      const onBreak = onBreakAt(start, t);
+      return { start, booking, blocked: blocked || blockedSpan(t) || onBreak, onBreak, fits: fits, past: isToday && t <= nowMin, hidden: hiddenAt(start, booking) };
     };
     const byStart = new Map();
     // שעות בתוך הפעילות
@@ -901,6 +908,7 @@
     const nowMin = now.getHours() * 60 + now.getMinutes();
     const blocks = new Set(st.blocks || []);
     const opens = new Set(st.opens || []);
+    const breaks = Store.breaksOn(st, dateKey);
     const dayBookings = st.bookings.filter((b) => b.status !== "cancelled" && b.date === dateKey);
     const cutoffMs = hideFreeCutoffMin(st) * 60000;
     const nowTs = now.getTime();
@@ -912,11 +920,14 @@
       const opened = opens.has(dateKey + "|" + start);
       const blocked = blocks.has(dateKey + "|" + start);
       const booking = dayBookings.find((b) => { const bs = u.toMin(b.start), be = u.toMin(b.end); return t < be && end > bs; }) || null;
-      const available = (inHours && !blocked) || opened;
+      // משבצת שנוגעת בהפסקה קבועה: סגורה, אלא אם נפתחה ידנית ליום הזה.
+      // היא מתנהגת כמו שעה מחוץ לפעילות — המתג פותח/סוגר אותה דרך opens.
+      const onBreak = inHours && breaks.some((b) => t < b.to && end > b.from);
+      const available = (inHours && !blocked && !onBreak) || opened;
       // נסגר להרשמה: פנוי וזמין, אבל קרוב מדי למועד לפי הגדרת "סגירת ההרשמה"
       const lead = u.dateTime(dateKey, start).getTime() - nowTs;
       const signupClosed = !!cutoffMs && !booking && available && lead > 0 && lead < cutoffMs;
-      slots.push({ start, booking, inHours, opened, past: isToday && t <= nowMin,
+      slots.push({ start, booking, inHours, opened, onBreak, past: isToday && t <= nowMin,
         available, signupClosed });
     }
     return slots;
@@ -2907,10 +2918,14 @@
     for (let i = 0; i < 7; i++) {
       const d = st.schedule[i];
       const timeTxt = d.active ? `${esc(d.open)}–${esc(d.close)}` : (d.variable ? "משתנה" : "סגור");
+      // הפסקות קבועות של היום הזה — כדי שהלקוח יבין למה 13:00 לא מופיע
+      const brk = d.active ? brkList(st).filter((b) => b.days.indexOf(i) !== -1 &&
+        u.toMin(b.from) < u.toMin(d.close) && u.toMin(b.to) > u.toMin(d.open)) : [];
       rows.push(`
         <div class="hours-row ${i === todayDow ? "today" : ""}">
           <span class="hr-day">${u.DOW[i]}${i === todayDow ? " · היום" : ""}</span>
-          <span class="hr-time"${d.active ? ' dir="ltr"' : ""}>${timeTxt}</span>
+          <span class="hr-time"><span${d.active ? ' dir="ltr"' : ""}>${timeTxt}</span>${brk.map((b) =>
+            `<small class="hr-brk">הפסקה <span dir="ltr">${esc(b.from)}–${esc(b.to)}</span></small>`).join("")}</span>
         </div>`);
     }
     return `
@@ -3906,15 +3921,19 @@
       }
       const state = s.signupClosed
         ? "נסגר להרשמה"
+        : s.onBreak
+        ? (s.available ? "פתוח בהפסקה" : "☕ הפסקה")
         : s.available
         ? (s.inHours ? "פנוי" : "פתוח")
         : (s.inHours ? "לא פנוי" : "מחוץ לשעות");
+      // שעת הפסקה נפתחת/נסגרת דרך opens, כמו שעה מחוץ לפעילות
+      const regular = s.inHours && !s.onBreak;
       return `
-      <div class="slot-line ${s.available ? "" : "off"} ${s.inHours ? "" : "extra"}">
+      <div class="slot-line ${s.available ? "" : "off"} ${regular ? "" : "extra"}${s.onBreak ? " brk" : ""}">
         <span class="sl-time">${s.start}</span>
-        <div class="sl-mid"><span class="sl-state ${s.signupClosed ? "closed" : s.available ? "free" : "blocked"}">${state}${(s.available && !s.inHours && !s.signupClosed) ? " ⏰" : ""}</span></div>
+        <div class="sl-mid"><span class="sl-state ${s.signupClosed ? "closed" : s.available ? "free" : "blocked"}">${state}${(s.available && !regular && !s.signupClosed) ? " ⏰" : ""}</span></div>
         <label class="switch">
-          <input type="checkbox" data-slot-open="${view.oDate}|${s.start}" data-inhours="${s.inHours ? "1" : "0"}" ${s.available ? "checked" : ""}>
+          <input type="checkbox" data-slot-open="${view.oDate}|${s.start}" data-inhours="${regular ? "1" : "0"}" ${s.available ? "checked" : ""}>
           <span class="track"></span><span class="thumb"></span>
         </label>
       </div>`;
@@ -3926,6 +3945,7 @@
       <div class="section-title">${esc(u.longDate(view.oDate))} · סימון זמינות</div>
       ${body}
       <p class="hint">כל שעות היממה (00:00–24:00) מוצגות כאן — אפשר לפתוח תורים גם בלילה ומוקדם בבוקר. הדליקו מתג כדי לפתוח שעה ללקוחות — <b>גם מחוץ לשעות הפעילות הרגילות</b> (מסומן ⏰). כבו מתג כדי לסמן שעה כלא-פנויה. שעה שכבר נקבעה מסומנת ״תפוס״.</p>
+      ${Store.breaksOn(st, view.oDate).length ? `<p class="hint">שעות ההפסקה הקבועה מסומנות ☕ — מתג פותח אותן ליום הזה בלבד.</p>` : ""}
     `;
   }
 
@@ -3977,6 +3997,90 @@
     return parts.join(" · ");
   }
 
+  /* ---------- הפסקות קבועות (v196) ----------
+     ספר ביקש (אוקטובר 2026): "שהוא יסגור את השעות שקבעתי בהן הפסקות, במקום לזכור
+     כל פעם מחדש". הספר מגדיר "13:00–14:00 בימים א׳–ה׳" פעם אחת, והשעות נסגרות
+     ללקוחות בכל שבוע. הנתונים והאכיפה: Store.setBreaks / Store.breaksOn / buildBooking. */
+  const brkList = (st) => (st && st.breaks) || [];
+  /* מה ההפסקה סוגרת בפועל. הרשת קבועה (כל slotStep מרגע הפתיחה), ולכן הפסקה שלא
+     יושבת על הרשת סוגרת משבצות שלמות — 13:00–14:00 בתורים של 45 דק׳ מ-09:00 סוגרת
+     12:45–14:15. מחזיר את היום הראשון שבו זה שונה ממה שהוגדר, כדי להסביר לספר. */
+  function breakEffect(st, b) {
+    const step = st.shop.slotStep || 45;
+    const f = u.toMin(b.from), to = u.toMin(b.to);
+    for (const i of b.days) {
+      const d = st.schedule[i];
+      if (!d || !d.active) continue;
+      const open = u.toMin(d.open), close = u.toMin(d.close);
+      let lo = null, hi = null;
+      for (let t = open; t + step <= close; t += step) {
+        if (t < to && t + step > f) { if (lo === null) lo = t; hi = t + step; }
+      }
+      if (lo === null) return { day: i, outside: true };
+      if (lo !== f || hi !== to) return { day: i, from: u.toHHMM(lo), to: u.toHHMM(hi), step, open: d.open };
+    }
+    return null;
+  }
+  // תורים עתידיים שכבר נקבעו בתוך ההפסקה — נשארים בתוקף, אבל הספר צריך לדעת
+  function breakClashes(st, b) {
+    const today = u.dateKey(new Date());
+    const f = u.toMin(b.from), to = u.toMin(b.to);
+    return (st.bookings || []).filter((x) => x && x.status !== "cancelled" && x.date >= today &&
+      b.days.indexOf(u.parseKey(x.date).getDay()) !== -1 &&
+      u.toMin(x.start) < to && u.toMin(x.end) > f).length;
+  }
+  function breakEditor(st, b, n) {
+    const eff = breakEffect(st, b);
+    const clash = breakClashes(st, b);
+    const notes = [];
+    if (!b.days.length) notes.push(`<p class="hint brk-note">לא נבחר אף יום — ההפסקה לא פעילה.</p>`);
+    if (eff && eff.outside) notes.push(`<p class="hint brk-note">ביום ${esc(u.DOW[eff.day])} השעות האלה מחוץ לשעות הפעילות — אין שם מה לסגור.</p>`);
+    else if (eff) notes.push(`<p class="hint brk-note">התורים אצלך כל ${esc(u.fmtDuration(eff.step))} מ-<span dir="ltr">${esc(eff.open)}</span>, ולכן ביום ${esc(u.DOW[eff.day])} נסגר בפועל <b dir="ltr">${esc(eff.from)}–${esc(eff.to)}</b>.</p>`);
+    if (clash) notes.push(`<p class="hint brk-note warn">⚠️ ${clash === 1 ? "תור אחד שכבר נקבע נופל" : clash + " תורים שכבר נקבעו נופלים"} בזמן ההפסקה — ${clash === 1 ? "הוא נשאר" : "הם נשארים"} בתוקף.</p>`);
+    return `
+      <div class="brk-item">
+        <div class="brk-head">
+          <b>☕ הפסקה${n ? " " + n : ""}</b>
+          <button class="btn btn-ghost btn-sm" data-act="brk-del" data-id="${esc(b.id)}">🗑️ מחיקה</button>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>מהשעה</label>
+            <select class="input" data-brk="from" data-id="${esc(b.id)}">${timeOptions(b.from)}</select></div>
+          <div class="field"><label>עד השעה</label>
+            <select class="input" data-brk="to" data-id="${esc(b.id)}">${timeOptions(b.to)}</select></div>
+        </div>
+        <label class="fld-lbl">בימים</label>
+        <div class="brk-days">${[0, 1, 2, 3, 4, 5, 6].map((i) => `
+          <button type="button" class="brk-day ${b.days.indexOf(i) !== -1 ? "on" : ""} ${st.schedule[i].active ? "" : "closed"}"
+                  data-act="brk-day" data-id="${esc(b.id)}" data-wd="${i}" aria-pressed="${b.days.indexOf(i) !== -1}">${esc(u.DOW_SHORT[i])}</button>`).join("")}
+        </div>
+        ${notes.join("")}
+      </div>`;
+  }
+  function breaksPage(st) {
+    const list = brkList(st);
+    return `
+      <div class="section-title">☕ הפסקות קבועות</div>
+      <div class="card">
+        <p class="hint" style="margin-top:0">קובעים פעם אחת — והשעות האלה נסגרות ללקוחות <b>בכל שבוע</b> בימים שבחרתם. לא צריך לחסום אותן מחדש כל יום.</p>
+        ${list.length ? list.map((b, i) => breakEditor(st, b, list.length > 1 ? i + 1 : 0)).join("") : `<p class="hint brk-empty">עוד לא הוגדרה הפסקה.</p>`}
+        <button class="btn btn-primary btn-sm" data-act="brk-add" style="width:100%;margin-top:6px">＋ הוספת הפסקה</button>
+      </div>
+      <p class="hint">רוצים לעבוד ביום מסוים גם בזמן ההפסקה? פתחו את השעה בלשונית ״יומן״ — היא תיפתח לאותו יום בלבד. תור ידני אפשר לקבוע גם בתוך ההפסקה, ותורים שכבר נקבעו בה לא מתבטלים.</p>`;
+  }
+  // שמירה + רענון. כל עריכה של הפסקה עוברת כאן
+  async function saveBreaks(list, msg) {
+    await Store.setBreaks(list);
+    if (msg) toast(msg, "sky", "☕");
+    haptic(12); render();
+  }
+  function breaksRowVal(st) {
+    const list = brkList(st).filter((b) => b.days.length);
+    if (!list.length) return { val: "אין", ltr: false };
+    if (list.length === 1) return { val: list[0].from + "–" + list[0].to, ltr: true };
+    return { val: list.length + " הפסקות", ltr: false };
+  }
+
   // לשונית ״שעות״ — ימי הפעילות ושעות העבודה השבועיות
   function ownerHours(st) {
     const rows = [];
@@ -4019,6 +4123,7 @@
     // מבנה מסודר: שורה לכל יום → לחיצה פותחת את עריכת אותו יום
     if (tidyOwner()) {
       if (view.subPage === "vac") return subBack("חזרה לשעות") + vacationsCard;
+      if (view.subPage === "breaks") return subBack("חזרה לשעות") + breaksPage(st);
       const dayIdx = /^day([0-6])$/.exec(view.subPage || "");
       if (dayIdx) {
         const i = Number(dayIdx[1]); const d = st.schedule[i];
@@ -4049,6 +4154,8 @@
           })).join("")}
         </div>
         <div class="card set-list">
+          ${(() => { const bv = breaksRowVal(st); return setRow({ nav: `data-act="sub-page" data-sub="breaks"`, ico: "☕", color: "#a16207",
+            label: "הפסקות קבועות", sub: "שעות שנסגרות לבד בכל שבוע", val: bv.val, ltr: bv.ltr }); })()}
           ${setRow({ nav: `data-act="sub-page" data-sub="vac"`, ico: "🌴", color: "#f97316",
             label: "חופשות וסגירת תאריכים", sub: "חסימת ימים שבהם לא עובדים",
             val: upcomingClosed.length ? upcomingClosed.length + " תאריכים" : "אין" })}
@@ -4574,7 +4681,7 @@
         if (s.booking) {
           return `<button class="slot taken" disabled>${s.start}<span class="slot-tag">${esc(bkName(s.booking) || "תפוס")}</span></button>`;
         }
-        const tag = s.blocked ? `<span class="slot-tag show">חסום</span>` : (s.past ? `<span class="slot-tag show">עבר</span>` : "");
+        const tag = s.onBreak ? `<span class="slot-tag show">הפסקה</span>` : s.blocked ? `<span class="slot-tag show">חסום</span>` : (s.past ? `<span class="slot-tag show">עבר</span>` : "");
         return `<button class="slot ${(!a.custom && a.start === s.start) ? "selected" : ""} ${s.past ? "slot-past" : ""}" data-abslot="${s.start}">${s.start}${tag}</button>`;
       }).join("") + `</div>`;
     }
@@ -7383,6 +7490,33 @@
           await Store.setBookingStatus(t.dataset.id, "booked", "owner");
           toast("הסימון בוטל", "", "↩️"); render(); break;
 
+        // הפסקות קבועות
+        case "brk-add": {
+          const st0 = Store.get();
+          const list = brkList(st0).map((b) => Object.assign({}, b));
+          const work = [0, 1, 2, 3, 4, 5, 6].filter((i) => st0.schedule[i].active);
+          const first = !list.length;
+          list.push({ id: u.uid(), from: first ? "13:00" : "16:00", to: first ? "14:00" : "16:30",
+            days: work.length ? work : [0, 1, 2, 3, 4, 5, 6] });
+          await saveBreaks(list, "נוספה הפסקה — אפשר לשנות שעות וימים");
+          break;
+        }
+        case "brk-del": {
+          const list = brkList(Store.get()).filter((b) => b.id !== t.dataset.id);
+          await saveBreaks(list, "ההפסקה נמחקה");
+          break;
+        }
+        case "brk-day": {
+          const wd = Number(t.dataset.wd);
+          const list = brkList(Store.get()).map((b) => {
+            if (b.id !== t.dataset.id) return b;
+            const has = b.days.indexOf(wd) !== -1;
+            return Object.assign({}, b, { days: has ? b.days.filter((x) => x !== wd) : b.days.concat(wd) });
+          });
+          await saveBreaks(list, "");
+          break;
+        }
+
         // חופשות / חסימת תאריכים
         case "add-vacation": {
           const from = ($("#vac-from") && $("#vac-from").value) || "";
@@ -7585,6 +7719,19 @@
       if (a.dataset.weekVariable !== undefined && a.type === "checkbox") {
         await Store.setWeekVariable(a.checked);
         haptic(12); toast(a.checked ? "השבוע כולו סומן כמשתנה" : "חזרתם לשעות ברירת המחדל", "sky", "🔀"); render();
+        return;
+      }
+      // שעת התחלה/סיום של הפסקה קבועה
+      if (a.dataset.brk) {
+        const list = brkList(Store.get()).map((b) => Object.assign({}, b));
+        const b = list.find((x) => x.id === a.dataset.id);
+        if (!b) return;
+        b[a.dataset.brk] = a.value;
+        if (u.toMin(b.to) <= u.toMin(b.from)) {
+          toast("שעת הסיום צריכה להיות אחרי שעת ההתחלה", "", "✋");
+          render(); return;   // מחזיר את הבורר לערך השמור
+        }
+        await saveBreaks(list, "ההפסקה עודכנה");
         return;
       }
       if (a.dataset.slotOpen !== undefined && a.type === "checkbox") {

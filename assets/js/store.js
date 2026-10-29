@@ -66,6 +66,7 @@ UG.Store = (function () {
       blockedClients: [],    // לקוחות חסומים (לא יכולים לקבוע תור אונליין)
       blocks: [],            // שעות בתוך הפעילות שהבעלים סימן כלא-פנויות: "YYYY-MM-DD|HH:MM"
       opens: [],             // שעות מחוץ לפעילות שהבעלים פתח ליום ספציפי: "YYYY-MM-DD|HH:MM"
+      breaks: [],            // הפסקות קבועות: { id, from:"HH:MM", to:"HH:MM", days:[0..6] } — חוזרות כל שבוע
       waitlist: [],          // רשימת המתנה לשעות תפוסות
       alerts: [],            // "התפנה תור" — התראות ממתינות למשתמשים
       reviews: [],           // דירוגים וביקורות של לקוחות
@@ -81,6 +82,33 @@ UG.Store = (function () {
     if (Array.isArray(v)) return v.filter((x) => x != null);
     if (v && typeof v === "object") return Object.keys(v).map((k) => v[k]).filter((x) => x != null);
     return [];
+  }
+
+  /* ---------- הפסקות קבועות (v196) ----------
+     הספר מגדיר פעם אחת "13:00–14:00 בימים א׳–ה׳", וכל משבצת שנוגעת בהפסקה נסגרת
+     ללקוחות בכל שבוע — בלי לחסום אותה ידנית מחדש בכל יום. שעה שהספר פתח ידנית
+     ביום מסוים (opens) גוברת על ההפסקה באותו יום בלבד. הספר עצמו רשאי לקבוע תור
+     ידני גם בתוך ההפסקה. RTDB מחזיר מערכים לפעמים כאובייקט — לכן asArray. */
+  function normBreaks(list) {
+    const hhmm = /^\d{2}:\d{2}$/;
+    return asArray(list).map((b) => {
+      if (!b || typeof b !== "object") return null;
+      const from = String(b.from || ""), to = String(b.to || "");
+      if (!hhmm.test(from) || !hhmm.test(to) || u.toMin(to) <= u.toMin(from)) return null;
+      const days = [...new Set(asArray(b.days).map(Number).filter((d) => d >= 0 && d <= 6))].sort();
+      return { id: String(b.id || u.uid()), from, to, days };
+    }).filter(Boolean);
+  }
+  // ההפסקות שחלות על תאריך מסוים, בדקות מתחילת היום: [{ from, to }]
+  function breaksOn(cur, dateKey) {
+    const dow = u.parseKey(dateKey).getDay();
+    return asArray(cur && cur.breaks)
+      .filter((b) => b && asArray(b.days).map(Number).indexOf(dow) !== -1)
+      .map((b) => ({ from: u.toMin(b.from), to: u.toMin(b.to) }));
+  }
+  // האם הטווח [startMin, endMin) נוגע בהפסקה ביום הזה
+  function overlapsBreak(cur, dateKey, startMin, endMin) {
+    return breaksOn(cur, dateKey).some((b) => startMin < b.to && endMin > b.from);
   }
 
   /* מיזוג בטוח מול ברירת המחדל (למקרה של גרסאות ישנות בזיכרון) */
@@ -103,6 +131,7 @@ UG.Store = (function () {
     if (!Array.isArray(s.blockedClients)) s.blockedClients = [];
     if (!Array.isArray(s.blocks)) s.blocks = [];
     if (!Array.isArray(s.opens)) s.opens = [];
+    s.breaks = normBreaks(s.breaks);
     if (!Array.isArray(s.reviews)) s.reviews = [];
     if (!Array.isArray(s.shop.staff)) s.shop.staff = [];
     if (!s.shop.address) s.shop.address = base.shop.address;
@@ -889,6 +918,11 @@ UG.Store = (function () {
     Object.assign(state.schedule[day], patch);
     return persist();
   }
+  // שמירת רשימת ההפסקות הקבועות כולה (הוספה/עריכה/מחיקה עוברות כולן דרך כאן)
+  function setBreaks(list) {
+    state.breaks = normBreaks(list);
+    return persist();
+  }
   /* מסמן/מבטל "משתנה" לכל השבוע בבת אחת (במקום שבעה עדכונים נפרדים).
      הפעלה: כל הימים ללא שעות קבועות — ההזמנה תתבסס רק על שעות שנפתחו ידנית
      ביומן. ביטול: חזרה לשעות ברירת המחדל הרגילות (לא לשעות הקודמות — אין להן
@@ -999,12 +1033,15 @@ UG.Store = (function () {
     const key = dateKey + "|" + start;
     state.blocks = state.blocks || [];
     state.opens = state.opens || [];
+    /* כל כיוון מנקה גם את הסימון ההפוך שנשאר מפעם קודמת — אחרת שעה שנחסמה פעם
+       ונפלה אחר כך בתוך הפסקה (או בשעות שהשתנו) הייתה נראית לספר "פתוחה" אבל
+       נשארת סגורה ללקוחות, או הפוך. */
     if (available) {
-      if (inHours) state.blocks = state.blocks.filter((k) => k !== key);
-      else if (!state.opens.includes(key)) state.opens.push(key);
+      state.blocks = state.blocks.filter((k) => k !== key);
+      if (!inHours && !state.opens.includes(key)) state.opens.push(key);
     } else {
-      if (inHours) { if (!state.blocks.includes(key)) state.blocks.push(key); }
-      else state.opens = state.opens.filter((k) => k !== key);
+      state.opens = state.opens.filter((k) => k !== key);
+      if (inHours && !state.blocks.includes(key)) state.blocks.push(key);
     }
     return persist();
   }
@@ -1125,6 +1162,10 @@ UG.Store = (function () {
       const dow = u.parseKey(data.date).getDay();
       const sched = cur.schedule && cur.schedule[dow];
       const isOpened = (cur.opens || []).includes(data.date + "|" + data.start);
+      // הפסקה קבועה — חלה על לקוחות בלבד, אלא אם הספר פתח את השעה הזו ידנית היום
+      if (!isOpened && overlapsBreak(cur, data.date, startMin, endMin)) {
+        return { ok: false, reason: "השעה הזו בהפסקה של המספרה — בחרו שעה אחרת" };
+      }
       if (sched && sched.active && !isOpened) {
         const openMin = u.toMin(sched.open), closeMin = u.toMin(sched.close);
         if (startMin >= openMin && startMin < closeMin && endMin > closeMin) {
@@ -1269,6 +1310,7 @@ UG.Store = (function () {
     const t = u.toMin(start), end = t + step;
     if (t < u.toMin(sched.open) || end > u.toMin(sched.close)) return false;
     if ((cur.blocks || []).includes(dateKey + "|" + start)) return false;
+    if (!(cur.opens || []).includes(dateKey + "|" + start) && overlapsBreak(cur, dateKey, t, end)) return false;
     const lead = u.dateTime(dateKey, start).getTime() - Date.now();
     if (lead <= 0) return false;
     // אחרי "סגירת ההרשמה" המשבצת כבר לא נחשבת פנויה — אין טעם להתריע שהתפנתה
@@ -1406,7 +1448,7 @@ UG.Store = (function () {
 
   return {
     init, subscribe, get,
-    setDay, setWeekVariable, saveShop, upsertService, removeService, upsertProduct, removeProduct,
+    setDay, setBreaks, breaksOn, setWeekVariable, saveShop, upsertService, removeService, upsertProduct, removeProduct,
     addContacts, removeContact, addBroadcast, addClosedDates, removeClosedDate,
     setSlotOpen, blockClient, unblockClient,
     createBooking, setBookingStatus, deleteBooking,

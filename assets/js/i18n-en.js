@@ -1314,5 +1314,34 @@ window.UG.I18N_DICT.en = Object.assign(
   "אין טלפון שמור": "No phone saved",
   "הלקוח": "Client",
   "בחירה מהרשימה": "Pick from list",
-  "אין טלפון שמור ללקוח הזה — הוסיפו אותו": "No phone saved for this client — please add it"
+  "אין טלפון שמור ללקוח הזה — הוסיפו אותו": "No phone saved for this client — please add it",
+
+  /* ── הפסקות קבועות (breaksPage / ownerDayGrid / hoursCard, v196) ── */
+  "הפסקות קבועות": "Fixed breaks",
+  "שעות שנסגרות לבד בכל שבוע": "Hours that close on their own every week",
+  "{0} הפסקות": function (n) { return /^\d+$/.test(n) ? n + " breaks" : null; },
+  "קובעים פעם אחת — והשעות האלה נסגרות ללקוחות <0/> בימים שבחרתם. לא צריך לחסום אותן מחדש כל יום.":
+    "Set it once — these hours close to clients <0/> on the days you choose. No need to block them again every day.",
+  "בכל שבוע": "every week",
+  "עוד לא הוגדרה הפסקה.": "No break set yet.",
+  "הוספת הפסקה": "Add a break",
+  "הפסקה": "Break",
+  "הפסקה {0}": function (n) { return /^\d+$/.test(n) ? "Break " + n : null; },
+  "מהשעה": "From",
+  "עד השעה": "Until",
+  "בימים": "On days",
+  "לא נבחר אף יום — ההפסקה לא פעילה.": "No day selected — this break is off.",
+  "ביום {0} השעות האלה מחוץ לשעות הפעילות — אין שם מה לסגור.": "On {0} these hours are outside your opening hours — there's nothing to close.",
+  "התורים אצלך כל {0} מ-<0/>, ולכן ביום {1} נסגר בפועל <1/>.": "Your slots are every {0} starting <0/>, so on {1} it actually closes <1/>.",
+  "⚠️ תור אחד שכבר נקבע נופל בזמן ההפסקה — הוא נשאר בתוקף.": "⚠️ 1 appointment already booked falls during the break — it stays valid.",
+  "⚠️ {0} תורים שכבר נקבעו נופלים בזמן ההפסקה — הם נשארים בתוקף.": function (n) { return /^\d+$/.test(n) ? "⚠️ " + n + " appointments already booked fall during the break — they stay valid." : null; },
+  "רוצים לעבוד ביום מסוים גם בזמן ההפסקה? פתחו את השעה בלשונית ״יומן״ — היא תיפתח לאותו יום בלבד. תור ידני אפשר לקבוע גם בתוך ההפסקה, ותורים שכבר נקבעו בה לא מתבטלים.":
+    "Want to work through the break on a particular day? Open that hour in the \"Calendar\" tab — it opens for that day only. You can still add a manual appointment during the break, and appointments already booked in it aren't cancelled.",
+  "נוספה הפסקה — אפשר לשנות שעות וימים": "Break added — you can change the hours and days",
+  "ההפסקה נמחקה": "Break deleted",
+  "ההפסקה עודכנה": "Break updated",
+  "שעת הסיום צריכה להיות אחרי שעת ההתחלה": "The end time must be after the start time",
+  "פתוח בהפסקה": "Open during break",
+  "שעות ההפסקה הקבועה מסומנות ☕ — מתג פותח אותן ליום הזה בלבד.": "Fixed-break hours are marked ☕ — a switch opens them for this day only.",
+  "השעה הזו בהפסקה של המספרה — בחרו שעה אחרת": "That time is during the shop's break — please pick another time"
 });

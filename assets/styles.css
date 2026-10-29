@@ -308,7 +308,9 @@
 .hours-row.today { font-weight: 800; }
 .hours-row.today .hr-time { color: var(--sky-2); }
 .hr-day { font-size: 14px; }
-.hr-time { font-size: 14px; color: var(--muted); font-weight: 600; }
+.hr-time { font-size: 14px; color: var(--muted); font-weight: 600; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+/* הפסקה קבועה של היום — שורה קטנה מתחת לשעות */
+.hr-brk { font-size: 12px; font-weight: 600; color: var(--muted-2); }
 
 * , *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -610,6 +612,25 @@ select.input {
 /* שעה מחוץ לשעות הפעילות שנפתחה/ניתנת לפתיחה — קו מקווקו עדין להבחנה */
 .slot-line.extra { border-bottom-style: dashed; }
 .slot-line.extra.off .sl-time { opacity: .6; }
+/* שעה בתוך הפסקה קבועה */
+.slot-line.brk .sl-state.blocked { color: #d97706; }
+
+/* ==== הפסקות קבועות (breaksPage) ==== */
+.brk-item { border: 1px solid var(--line-soft); border-radius: 14px; padding: 12px 12px 10px; margin-bottom: 12px; background: var(--surface-2); }
+.brk-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.brk-head b { font-size: 15px; }
+.brk-head .btn { width: auto; }
+.brk-days { display: flex; gap: 6px; flex-wrap: wrap; }
+.brk-day {
+  flex: 1 1 0; min-width: 38px; height: 40px; border-radius: 11px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--muted);
+  font: inherit; font-weight: 800; font-size: 14px; cursor: pointer;
+}
+.brk-day.on { background: var(--sky); border-color: var(--sky); color: #fff; }
+.brk-day.closed:not(.on) { opacity: .45; }
+.brk-note { margin: 10px 0 0; font-size: 12.5px; }
+.brk-note.warn { color: #d97706; }
+.brk-empty { text-align: center; margin: 4px 0 12px; }
 
 /* ==== שירותים ==== */
 .service-item { display: flex; align-items: center; gap: 12px; }
