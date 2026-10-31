@@ -44,6 +44,9 @@
         },
         "contacts": {
           ".write": "auth != null && root.child('shops/'+$shopId+'/shop/ownerUid').val() === auth.uid"
+        },
+        "prices": {
+          ".write": "auth != null && root.child('shops/'+$shopId+'/shop/ownerUid').val() === auth.uid"
         }
       }
     },

@@ -1343,5 +1343,26 @@ window.UG.I18N_DICT.en = Object.assign(
   "שעת הסיום צריכה להיות אחרי שעת ההתחלה": "The end time must be after the start time",
   "פתוח בהפסקה": "Open during break",
   "שעות ההפסקה הקבועה מסומנות ☕ — מתג פותח אותן ליום הזה בלבד.": "Fixed-break hours are marked ☕ — a switch opens them for this day only.",
-  "השעה הזו בהפסקה של המספרה — בחרו שעה אחרת": "That time is during the shop's break — please pick another time"
+  "השעה הזו בהפסקה של המספרה — בחרו שעה אחרת": "That time is during the shop's break — please pick another time",
+
+  /* ── מחיר מיוחד ללקוח (clientPriceHtml / clientDetail, v197) ── */
+  "מחיר מיוחד": "Special price",
+  "מחיר מיוחד ללקוח": "Special price for this client",
+  "שינוי המחיר המיוחד": "Change special price",
+  "💰 מחיר מיוחד ל{0}: <0/> <1/>": "💰 Special price for {0}: <0/> <1/>",
+  "לקוח הזה": "this client",
+  "רגיל": "regular",
+  "רגיל {0}": "regular {0}",
+  "רק אתה רואה את זה. הלקוחות האחרים לא יודעים — וגם הוא עצמו רואה באפליקציה את המחיר הרגיל.":
+    "Only you can see this. Other clients don't know — and this client also sees the regular price in the app.",
+  "שדה ריק = המחיר הרגיל. המחיר המיוחד חל על כל התורים שלו מעכשיו, גם על אלה שכבר נקבעו. תורים שכבר עברו נשארים במחיר שהיה.":
+    "Empty = the regular price. The special price applies to all of this client's appointments from now on, including ones already booked. Past appointments keep the price they had.",
+  "חזרה למחיר הרגיל": "Back to the regular price",
+  "חזרה לכרטיס הלקוח": "Back to client card",
+  "המחיר המיוחד נשמר": "Special price saved",
+  "לא היה מה לשנות": "Nothing to change",
+  "חזר למחיר הרגיל": "Back to the regular price",
+  "מחיר לא תקין": "Invalid price",
+  "השמירה נכשלה — נסו שוב": "Saving failed — please try again",
+  "💰 כדי לקבוע ללקוח מחיר מיוחד צריך את הטלפון שלו.": "💰 To set a special price you need this client's phone number."
 });

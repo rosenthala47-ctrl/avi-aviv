@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "196";
+  const APP_VERSION = "197";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ----------
      אינסטגרם ופייסבוק מצמידים פרמטר מעקב לקישור שמשתפים בהם (igsh / igshid / fbclid),
@@ -3914,7 +3914,7 @@
           <span class="sl-time">${s.start}</span>
           <div class="sl-mid">
             <span class="sl-name">${esc(bkName(s.booking) || "לקוח")}${s.booking.spam ? " 🛡️" : ""}${birthdayNearDate(bkDob(s.booking), view.oDate, 3) ? " 🎂" : ""}</span>
-            <span class="sl-sub">${esc(s.booking.serviceName)}</span>
+            <span class="sl-sub">${esc(s.booking.serviceName)}${isSpecial(s.booking) ? ` · <span class="cp-tag">💰 ${u.fmtPrice(bkPrice(s.booking))}</span>` : ""}</span>
           </div>
           <span class="status-tag status-booked">תפוס</span>
         </div>`;
@@ -4465,7 +4465,7 @@
         </div>
         <div class="bk-body">
           <div class="bk-title">${esc(bkName(b) || "לקוח")}</div>
-          <div class="bk-sub">${esc(b.serviceName)} · ${bkPhone(b) ? `<a href="tel:${esc(bkPhone(b))}">${esc(bkPhone(b))}</a>` : "ללא טלפון"}</div>
+          <div class="bk-sub">${esc(b.serviceName)}${isSpecial(b) ? ` · <span class="cp-tag">💰 ${u.fmtPrice(bkPrice(b))}</span>` : ""} · ${bkPhone(b) ? `<a href="tel:${esc(bkPhone(b))}">${esc(bkPhone(b))}</a>` : "ללא טלפון"}</div>
           <div class="bk-sub">${esc(u.longDate(b.date))}${b.staff ? ` · <span class="staff-req">🧑‍🔧 ביקש: ${esc(b.staff)}</span>` : ""}</div>
           ${(() => {
             const dob = bkDob(b) || dobByKey[clientKey(b)] || "";
@@ -4717,6 +4717,14 @@
 
       <div class="field"><label>שירות</label>
         <select class="input" id="ab-svc">${svcOptions}</select></div>
+      ${(() => {
+        // לקוח עם מחיר מיוחד — תזכורת לספר כבר בזמן הקביעה
+        const k = a.phone ? u.normalizePhone(a.phone) : "";
+        const when = chosen ? u.dateTime(a.date, chosen).getTime() : Date.now();
+        const sp = specialPrice(k, a.svcId, when);
+        const svc = st.services.find((x) => x.id === a.svcId);
+        return sp != null && svc ? `<p class="hint cp-hint">💰 מחיר מיוחד ל${esc(a.name || "לקוח הזה")}: <b>${u.fmtPrice(sp)}</b> <span class="cp-reg">(רגיל ${u.fmtPrice(svc.price)})</span></p>` : "";
+      })()}
       ${staff.length ? `
       <div class="field"><label>ספר</label>
         <select class="input" id="ab-staff">
@@ -4748,6 +4756,9 @@
   }
 
   function wireAddBooking() {
+    // החלפת שירות מרעננת את החלון — כדי שהתזכורת על מחיר מיוחד תתאים לשירות שנבחר
+    const sv = $("#ab-svc");
+    if (sv) sv.addEventListener("change", () => refreshAddBooking());
     const cb = $("#ab-custom");
     if (cb) cb.addEventListener("change", () => {
       captureAddBooking();
@@ -4783,13 +4794,103 @@
     closeModal();
     toast(past ? "התור נוסף ונספר בהכנסות ✓" : "התור נוסף ✓", "good", "➕");
     // מייל אישור ללקוח — משלימים שם/מייל מקומית (במספרה מאובטחת הם אינם בתור הציבורי)
-    sendBookingEmail(Object.assign({}, res.booking, { userName: name, email: email }));
+    // המייל הולך ללקוח הזה בלבד — ולכן עם המחיר שלו, אם יש לו מחיר מיוחד
+    const spMail = specialPrice(u.normalizePhone(phone), a.svcId, u.dateTime(a.date, start).getTime());
+    sendBookingEmail(Object.assign({}, res.booking, { userName: name, email: email },
+      spMail != null ? { price: spMail } : {}));
     addBk = null;
     render();
   }
 
   /* ---------- רשימת לקוחות (CRM) ---------- */
   function clientKey(b) { const ph = bkPhone(b); return (ph && u.normalizePhone(ph)) || b.userId || bkName(b) || "לקוח"; }
+
+  /* ---------- מחיר מיוחד ללקוח (v197) ----------
+     ספר ביקש (אוקטובר 2026): ללחוץ על לקוח ולקבוע לו מחיר תספורת אחר, בלי שהלקוחות
+     האחרים ידעו. המחיר נשמר אצל הספר בלבד (Store.getClientPrices — בכספת במספרה
+     מאובטחת) ו**לא נכתב לתור**: התור נשאר עם המחיר הרגיל, והמסכים של הספר מחשבים את
+     המחיר בפועל (bkPrice). כך המכשיר של הלקוח לא מחזיק את המחיר אף פעם, ואין כתיבה
+     ברקע לצומת התורים (שבמספרה רגילה נכתב כולו בבת אחת ויכול היה לדרוס תור חדש).
+     הלקוח עצמו רואה באפליקציה את המחיר הרגיל — את המחיר המיוחד הוא שומע מהספר. */
+  const priceKeyOk = (k) => /^\+?\d{6,15}$/.test(String(k || ""));
+  // המחיר שהיה בתוקף ברגע ts לפי ההיסטוריה (מסודרת לפי זמן). null = רגיל
+  function priceAt(hist, ts) {
+    let p = null;
+    (hist || []).forEach((h) => { if (h.at <= ts) p = h.p; });
+    return typeof p === "number" ? p : null;
+  }
+  function specialPrice(key, svcId, ts) {
+    if (!priceKeyOk(key) || !svcId) return null;
+    const per = Store.getClientPrices()[key];
+    return per && per[svcId] ? priceAt(per[svcId], ts) : null;
+  }
+  /* המחיר בפועל של תור — לפי המחיר המיוחד שהיה בתוקף בשעת התור. תור שכבר עבר לפני
+     שנקבע המחיר נשאר במחיר שלו, ושינוי מחיר לא משנה את הדוח של חודשים קודמים. */
+  function bkPrice(b) {
+    if (!b) return 0;
+    const sp = specialPrice(clientKey(b), b.serviceId, u.dateTime(b.date, b.start).getTime());
+    return sp != null ? sp : Number(b.price || 0);
+  }
+  const isSpecial = (b) => !!b && specialPrice(clientKey(b), b.serviceId, u.dateTime(b.date, b.start).getTime()) != null;
+  // המחירים המיוחדים שבתוקף עכשיו ללקוח: [{ svc, p }]
+  function activeSpecials(key) {
+    const now = Date.now();
+    return Store.get().services
+      .map((svc) => ({ svc, p: specialPrice(key, svc.id, now) }))
+      .filter((x) => x.p != null);
+  }
+  // שורת תקציר: "💰 תספורת גבר 50 ₪ (רגיל 70 ₪)"
+  function specialsLine(key) {
+    // כל שירות בתוך span משלו — כך מנוע התרגום מתרגם כל אחד לחוד, גם כשיש כמה
+    return activeSpecials(key).map((x) =>
+      `<span>${esc(x.svc.name)} <b>${u.fmtPrice(x.p)}</b> <span class="cp-reg">(רגיל ${u.fmtPrice(x.svc.price)})</span></span>`).join(" · ");
+  }
+
+  function clientPriceHtml(key) {
+    const st = Store.get();
+    const c = clientsAgg(st).find((x) => x.key === key);
+    if (!c) return "";
+    const now = Date.now();
+    const svcs = st.services.filter((s) => s.active !== false);
+    const has = activeSpecials(key).length > 0;
+    return `
+      <div class="m-title">💰 מחיר מיוחד · ${esc(c.name)}</div>
+      <div class="m-sub">רק אתה רואה את זה. הלקוחות האחרים לא יודעים — וגם הוא עצמו רואה באפליקציה את המחיר הרגיל.</div>
+      ${svcs.map((svc) => {
+        const cur = specialPrice(key, svc.id, now);
+        return `
+        <div class="field"><label>${esc(svc.name)} <span class="cp-reg">· רגיל ${u.fmtPrice(svc.price)}</span></label>
+          <input class="input" type="number" inputmode="numeric" min="0" max="100000" step="1"
+                 data-cpsvc="${esc(svc.id)}" placeholder="${esc(String(svc.price))} — רגיל" value="${cur != null ? esc(String(cur)) : ""}"></div>`;
+      }).join("")}
+      <p class="hint" style="margin:4px 0 14px">שדה ריק = המחיר הרגיל. המחיר המיוחד חל על כל התורים שלו מעכשיו, גם על אלה שכבר נקבעו. תורים שכבר עברו נשארים במחיר שהיה.</p>
+      <button class="btn btn-primary" data-act="cp-save" data-key="${esc(key)}">שמירה</button>
+      ${has ? `<button class="btn btn-ghost" data-act="cp-clear" data-key="${esc(key)}" style="margin-top:8px">חזרה למחיר הרגיל</button>` : ""}
+      <button class="btn btn-ghost" data-act="client-detail" data-key="${esc(key)}" style="margin-top:8px">‹ חזרה לכרטיס הלקוח</button>`;
+  }
+  async function saveClientPrice(key, clear) {
+    const st = Store.get();
+    const changes = {};
+    let bad = false;
+    st.services.filter((s) => s.active !== false).forEach((svc) => {
+      if (clear) { changes[svc.id] = null; return; }
+      const el = document.querySelector(`[data-cpsvc="${svc.id}"]`);
+      const v = el ? el.value.trim() : "";
+      if (v === "") { changes[svc.id] = null; return; }
+      const n = Number(v);
+      if (!isFinite(n) || n < 0 || n > 100000) { bad = true; return; }
+      // אותו מחיר כמו הרגיל = אין מחיר מיוחד
+      changes[svc.id] = Math.round(n) === Number(svc.price) ? null : Math.round(n);
+    });
+    if (bad) { toast("מחיר לא תקין", "", "✋"); return; }
+    try {
+      const n = await Store.setClientPrices(key, changes);
+      toast(clear ? "חזר למחיר הרגיל" : (n ? "המחיר המיוחד נשמר" : "לא היה מה לשנות"), n ? "good" : "", "💰");
+    } catch (e) { toast("השמירה נכשלה — נסו שוב", "", "⚠️"); return; }
+    haptic(12);
+    clientDetail(key);
+    render();
+  }
 
   /* ---------- חסימת לקוח בעייתי ---------- */
   function blockedList() { return (Store.get() || {}).blockedClients || []; }
@@ -4853,7 +4954,7 @@
       if (nm) c.name = nm;
       if (ph) c.phone = ph;
       const db = bkDob(b); if (db) c.dob = db;   // תאריך לידה (מגיע עם התור)
-      if (b.status === "confirmed") { c.visits++; c.spent += Number(b.price || 0); }
+      if (b.status === "confirmed") { c.visits++; c.spent += bkPrice(b); }
       if (b.status === "noshow") c.noShows = (c.noShows || 0) + 1;
       const ts = u.dateTime(b.date, b.start).getTime();
       if (ts > c.lastTs) { c.lastTs = ts; c.lastDate = b.date; c.imported = false; }
@@ -4915,6 +5016,7 @@
             if (c.visits) bits.push(c.visits + " ביקורים");
             if (c.lastDate) bits.push("אחרון " + u.relativeDay(c.lastDate));
             if (c.noShows) bits.push("❌ " + c.noShows + " לא הגיע");
+            if (priceKeyOk(c.key) && activeSpecials(c.key).length) bits.push("💰 מחיר מיוחד");
             const bi = birthdayInfo(c.dob);
             if (bi && bi.days <= 14) bits.push("🎂 " + (bi.days === 0 ? "היום!" : bi.days === 1 ? "מחר" : "בעוד " + bi.days + " ימים"));
             return setRow({
@@ -5138,9 +5240,17 @@
       : c.imported
       ? `<button class="btn btn-danger" data-act="del-contact" data-id="${esc(c.contactId || "")}">🗑️ הסרה מהרשימה</button>`
       : `<button class="btn btn-danger" data-act="block-client" data-key="${esc(c.key)}">🚫 חסימת הלקוח</button>`;
+    // מחיר מיוחד — רק ללקוח עם טלפון (הטלפון הוא המפתח שמזהה אותו גם בתורים הבאים)
+    const sp = specialsLine(key);
+    const priceBlock = priceKeyOk(key) ? `
+      <div class="cd-price${sp ? " on" : ""}">
+        ${sp ? `<div class="cd-price-now">💰 מחיר מיוחד: ${sp}</div>` : ""}
+        <button class="btn btn-sm" data-act="cp-edit" data-key="${esc(key)}">💰 ${sp ? "שינוי המחיר המיוחד" : "מחיר מיוחד ללקוח"}</button>
+      </div>` : `<p class="hint" style="margin:10px 0 0">💰 כדי לקבוע ללקוח מחיר מיוחד צריך את הטלפון שלו.</p>`;
     openModal(`
       <div class="m-title">${esc(c.name)}${blocked ? " 🚫" : ""}</div>
       <div class="m-sub">${bks.length} תורים · ${u.fmtPrice(c.spent)} סה״כ${c.phone ? ` · <a href="tel:${esc(c.phone)}">${esc(u.fmtPhone(c.phone))}</a>` : ""}</div>
+      ${priceBlock}
       ${(() => { const bi = birthdayInfo(c.dob); return bi ? `<p class="hint" style="margin:10px 0 0"><b>🎂 יום הולדת:</b> ${esc(bi.ddmm)} · ${esc(bi.label)}</p>` : ""; })()}
       ${blocked ? `<p class="hint" style="margin:10px 0 0;color:var(--bad)">הלקוח חסום — לא יכול לקבוע תור אונליין.</p>` : ""}
       ${(!blocked && c.noShows >= 2) ? `<p class="hint" style="margin:10px 0 0;color:var(--bad)">⚠️ לא הגיע ${c.noShows} פעמים — כדאי לשקול חסימה.</p>` : ""}
@@ -5148,7 +5258,7 @@
         ${bks.length ? bks.map((b) => `
           <div class="summary-row">
             <span class="sr-k">${esc(u.longDate(b.date))} · ${esc(b.start)}</span>
-            <span class="sr-v">${esc(b.serviceName)} · ${u.fmtPrice(b.price)} ${b.status === "confirmed" ? "✓" : ""}</span>
+            <span class="sr-v">${esc(b.serviceName)} · ${isSpecial(b) ? "💰 " : ""}${u.fmtPrice(bkPrice(b))} ${b.status === "confirmed" ? "✓" : ""}</span>
           </div>`).join("") : `<p class="hint" style="margin:6px 0 0">עדיין לא הזמין תור.</p>`}
       </div>
       <div style="margin-top:14px">${acts}</div>
@@ -5174,7 +5284,7 @@
       .filter((b) => b.status === "confirmed" && b.date.startsWith(ym))
       .map((b) => ({ b, ts: u.dateTime(b.date, b.start).getTime() }))
       .sort((a, z) => a.ts - z.ts);
-    const total = rows.reduce((s, x) => s + Number(x.b.price || 0), 0);
+    const total = rows.reduce((s, x) => s + bkPrice(x.b), 0);
 
     const table = rows.length ? `
       <div class="card" style="padding:4px 0;overflow-x:auto">
@@ -5186,7 +5296,7 @@
               <td class="st-date">${Number(x.b.date.slice(8, 10))}.${Number(x.b.date.slice(5, 7))} · ${esc(x.b.start)}</td>
               <td class="st-name">${esc(bkName(x.b) || "לקוח")}</td>
               <td>${esc(x.b.serviceName)}</td>
-              <td class="money">${u.fmtPrice(x.b.price)}</td>
+              <td class="money">${isSpecial(x.b) ? "💰 " : ""}${u.fmtPrice(bkPrice(x.b))}</td>
               <td><button class="row-del" data-act="del-report" data-id="${x.b.id}" aria-label="מחיקה">✕</button></td>
             </tr>`).join("")}
           </tbody>
@@ -6152,10 +6262,10 @@
     const lines = [head.map(csvCell).join(",")];
     let total = 0;
     rows.forEach((b) => {
-      total += Number(b.price || 0);
+      total += bkPrice(b);
       lines.push([
         b.date, b.start, bkName(b) || "לקוח", bkPhone(b) || "", b.serviceName || "",
-        b.staff || "", Number(b.price || 0),
+        b.staff || "", bkPrice(b),
       ].map(csvCell).join(","));
     });
     lines.push("");
@@ -7188,6 +7298,9 @@
           break;
         }
         case "client-detail": clientDetail(t.dataset.key); break;
+        case "cp-edit": $("#modal").innerHTML = `<div class="m-handle"></div>` + clientPriceHtml(t.dataset.key); $("#modal").scrollTop = 0; break;
+        case "cp-save": await saveClientPrice(t.dataset.key, false); break;
+        case "cp-clear": await saveClientPrice(t.dataset.key, true); break;
         case "secure-shop": openSecureShop(); break;
         case "release-security": releaseSecurity(); break;
         case "auth-signout":

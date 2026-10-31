@@ -33,6 +33,15 @@ UG.Store = (function () {
   let contactsCache = [];
   const contactsSubs = new Set();
   const CKEY = (id) => "ug_contacts_v1__" + id;   // מפתח מקומי לספר הלקוחות
+  /* מחיר מיוחד ללקוח (v197) — מידע של הבעלים בלבד. במספרה מאובטחת בצומת פרטי
+     (private/<id>/prices); אחרת בתוך המספרה (state.clientPrices), כמו ספר הלקוחות.
+     מבנה: { <טלפון מנורמל>: { <מזהה שירות>: [ { p: מחיר | null, at: מתי נקבע } ] } }.
+     שומרים היסטוריה ולא רק את המחיר האחרון: תור נספר לפי המחיר שהיה בתוקף בשעת
+     התור — כך שינוי או ביטול של מחיר מיוחד לא משנה בדיעבד את הדוח של חודשים קודמים.
+     p חסר (RTDB מוחק null) = חזרה למחיר הרגיל מאותו רגע. */
+  let pricesCache = {};
+  const XKEY = (id) => "ug_client_prices_v1__" + id;
+  const PRICE_KEY = /^\+?\d{6,15}$/;   // מפתח = טלפון מנורמל (גם תקין כמפתח ב-RTDB)
 
   /* ---------- מצב ברירת מחדל ---------- */
   function defaultState() {
@@ -84,6 +93,25 @@ UG.Store = (function () {
     return [];
   }
 
+  // מחירים מיוחדים: מתקן מבנה שחזר מ-RTDB (מערכים כאובייקט, null שנמחק) וזורק זבל
+  function normPrices(m) {
+    const out = {};
+    if (!m || typeof m !== "object") return out;
+    Object.keys(m).forEach((key) => {
+      if (!PRICE_KEY.test(key) || !m[key] || typeof m[key] !== "object") return;
+      const per = {};
+      Object.keys(m[key]).forEach((svc) => {
+        const hist = asArray(m[key][svc])
+          .filter((h) => h && typeof h === "object" && Number(h.at) > 0)
+          .map((h) => ({ p: (typeof h.p === "number" && h.p >= 0) ? h.p : null, at: Number(h.at) }))
+          .sort((a, z) => a.at - z.at);
+        if (hist.length) per[svc] = hist;
+      });
+      if (Object.keys(per).length) out[key] = per;
+    });
+    return out;
+  }
+
   /* ---------- הפסקות קבועות (v196) ----------
      הספר מגדיר פעם אחת "13:00–14:00 בימים א׳–ה׳", וכל משבצת שנוגעת בהפסקה נסגרת
      ללקוחות בכל שבוע — בלי לחסום אותה ידנית מחדש בכל יום. שעה שהספר פתח ידנית
@@ -132,6 +160,7 @@ UG.Store = (function () {
     if (!Array.isArray(s.blocks)) s.blocks = [];
     if (!Array.isArray(s.opens)) s.opens = [];
     s.breaks = normBreaks(s.breaks);
+    if (s.clientPrices) s.clientPrices = normPrices(s.clientPrices);
     if (!Array.isArray(s.reviews)) s.reviews = [];
     if (!Array.isArray(s.shop.staff)) s.shop.staff = [];
     if (!s.shop.address) s.shop.address = base.shop.address;
@@ -156,7 +185,7 @@ UG.Store = (function () {
      Backend מקומי
      =======================================================================*/
   function LocalBackend(id) {
-    const skey = KEY(id), gkey = GKEY(id), mkey = MKEY(id), pkey = PKEY(id), ckey = CKEY(id);
+    const skey = KEY(id), gkey = GKEY(id), mkey = MKEY(id), pkey = PKEY(id), ckey = CKEY(id), xkey = XKEY(id);
     let bc = null;
     try { bc = new BroadcastChannel("ug_barber_" + id); } catch (e) {}
     const listeners = { state: [], gallery: [], media: [], priv: [], contacts: [] };
@@ -242,6 +271,14 @@ UG.Store = (function () {
         listeners.contacts.forEach((fn) => fn(arr || []));
         return Promise.resolve();
       },
+      // מחירים מיוחדים ללקוחות (צומת פרטי בענן; מקומית — אחסון נפרד)
+      onPrices(cb) {
+        try { cb(JSON.parse(localStorage.getItem(xkey) || "{}")); } catch (e) { cb({}); }
+      },
+      savePrices(m) {
+        try { localStorage.setItem(xkey, JSON.stringify(m || {})); } catch (e) {}
+        return Promise.resolve();
+      },
       exists() { return Promise.resolve(localStorage.getItem(skey) != null); },
     };
   }
@@ -322,6 +359,7 @@ UG.Store = (function () {
     const mediaRef = db.ref("shopMedia/" + id);   // רקע/לוגו — צומת נפרד, נטען ברקע
     const privRef = db.ref("private/" + id + "/bk");   // פרטי לקוח — צומת מוגן לבעלים
     const contactsRef = db.ref("private/" + id + "/contacts");   // ספר הלקוחות — מוגן לבעלים
+    const pricesRef = db.ref("private/" + id + "/prices");       // מחירים מיוחדים — מוגן לבעלים
     return {
       mode: "cloud",
       _db: db, _ref: ref,
@@ -349,6 +387,9 @@ UG.Store = (function () {
         }, () => { /* לא-בעלים — נחסם */ });
       },
       saveContacts(arr) { return contactsRef.set(clone(arr || [])); },
+      // מחירים מיוחדים ללקוחות — כמו ספר הלקוחות: הבעלים בלבד; ללקוח הקריאה נחסמת
+      onPrices(cb) { pricesRef.on("value", (snap) => cb(snap.val() || {}), () => { /* לא-בעלים — נחסם */ }); },
+      savePrices(m) { return pricesRef.set(clone(m || {})); },
       read() {
         return ref.once("value").then((snap) => (snap.exists() ? normalize(snap.val()) : null));
       },
@@ -539,6 +580,8 @@ UG.Store = (function () {
     if (backend.onBookingPriv) backend.onBookingPriv((m) => { privCache = m || {}; emit(); });
     // ספר הלקוחות — נטען לבעלים בלבד (הקריאה נחסמת ללקוח). כשהוא מגיע, מרעננים.
     if (backend.onContacts) backend.onContacts((arr) => { contactsCache = Array.isArray(arr) ? arr : []; emitContacts(); emit(); });
+    // מחירים מיוחדים ללקוחות — לבעלים בלבד (הקריאה נחסמת ללקוח)
+    if (backend.onPrices) backend.onPrices((m) => { pricesCache = normPrices(m); emit(); });
     // מנוי — קריאה ראשונית + מעקב בזמן אמת (אם אתה מפעיל את המספרה, זה יתעדכן מיד)
     if (backend.readSub) {
       try { subState = await backend.readSub(); } catch (e) { subState = null; }
@@ -670,6 +713,8 @@ UG.Store = (function () {
     const snap = JSON.parse(JSON.stringify(state || {}));
     // במספרה מאובטחת ספר הלקוחות נמצא בצומת הפרטי — משלימים אותו לגיבוי כדי שלא יאבד
     if (extraPrivate() && (contactsCache || []).length) snap.contacts = JSON.parse(JSON.stringify(contactsCache));
+    // וכך גם המחירים המיוחדים ללקוחות
+    if (extraPrivate() && Object.keys(pricesCache || {}).length) snap.clientPrices = JSON.parse(JSON.stringify(pricesCache));
     return {
       format: "barbertor-backup",
       version: 1,
@@ -697,6 +742,11 @@ UG.Store = (function () {
       contactsCache = incoming.contacts.slice();
       incoming.contacts = [];
       try { await backend.saveContacts(contactsCache); emitContacts(); } catch (e) {}
+    }
+    if (extraPrivate() && incoming.clientPrices && backend.savePrices) {
+      pricesCache = normPrices(incoming.clientPrices);
+      delete incoming.clientPrices;
+      try { await backend.savePrices(pricesCache); } catch (e) {}
     }
     state = incoming;
     await persist();
@@ -991,6 +1041,51 @@ UG.Store = (function () {
     if (priv) { contactsCache = base; emitContacts(); return backend.saveContacts(base).then(emit).then(() => added); }
     return persist().then(() => added);
   }
+  /* ---------- מחיר מיוחד ללקוח (v197) ---------- */
+  function getClientPrices() {
+    const pub = normPrices(state && state.clientPrices);
+    if (!extraPrivate()) return pub;
+    // מחירים שנקבעו לפני שהמספרה אובטחה עדיין בצומת הגלוי — מצרפים אותם (הכספת
+    // גוברת), והשמירה הבאה מעבירה אותם לכספת ומוחקת את העותק הגלוי.
+    return Object.assign({}, pub, pricesCache || {});
+  }
+  /* changes = { <מזהה שירות>: מחיר | null }. null = חזרה למחיר הרגיל. מוסיף גרסה רק
+     כשהמחיר באמת השתנה, ושומר עד 20 גרסאות לשירות. מחזיר כמה שירותים השתנו. */
+  function setClientPrices(key, changes) {
+    key = String(key || "");
+    if (!PRICE_KEY.test(key)) return Promise.reject(new Error("צריך טלפון של הלקוח"));
+    const priv = extraPrivate();
+    const map = JSON.parse(JSON.stringify(getClientPrices()));
+    const per = map[key] || {};
+    const now = Date.now();
+    let changed = 0;
+    Object.keys(changes || {}).forEach((svc) => {
+      const raw = changes[svc];
+      const p = (raw == null || raw === "") ? null : Math.max(0, Math.round(Number(raw)));
+      if (p != null && !isFinite(p)) return;
+      const hist = per[svc] || [];
+      const last = hist.length ? hist[hist.length - 1].p : null;
+      if (last === p) return;              // לא השתנה (כולל "רגיל" → "רגיל")
+      hist.push({ p: p, at: now });
+      per[svc] = hist.slice(-20);
+      changed++;
+    });
+    if (!changed) return Promise.resolve(0);
+    map[key] = per;
+    if (priv) {
+      pricesCache = map; emit();
+      return backend.savePrices(map).then(async () => {
+        if (state.clientPrices && Object.keys(state.clientPrices).length) {
+          state.clientPrices = null;
+          try { await persist(); } catch (e) { /* העותק הגלוי יימחק בשמירה הבאה */ }
+        }
+        return changed;
+      }, (err) => { throw reportWriteError(err); });
+    }
+    state.clientPrices = map;
+    return persist().then(() => changed);
+  }
+
   function removeContact(id) {
     if (extraPrivate()) {
       contactsCache = (contactsCache || []).filter((c) => c.id !== id);
@@ -1449,7 +1544,7 @@ UG.Store = (function () {
   return {
     init, subscribe, get,
     setDay, setBreaks, breaksOn, setWeekVariable, saveShop, upsertService, removeService, upsertProduct, removeProduct,
-    addContacts, removeContact, addBroadcast, addClosedDates, removeClosedDate,
+    addContacts, removeContact, getClientPrices, setClientPrices, addBroadcast, addClosedDates, removeClosedDate,
     setSlotOpen, blockClient, unblockClient,
     createBooking, setBookingStatus, deleteBooking,
     joinWaitlist, leaveWaitlist, consumeAlert, addReview, savePushToken,

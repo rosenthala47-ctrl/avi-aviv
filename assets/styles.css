@@ -1176,6 +1176,14 @@ select.input {
 .cp-new .cp-av { background: var(--sky); color: #fff; }
 .cp-new b { color: var(--sky); }
 .cp-none { padding: 14px; margin: 0; text-align: center; }
+/* מחיר מיוחד ללקוח (clientPriceHtml / bkPrice) — נראה לספר בלבד */
+.cd-price { margin-top: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.cd-price.on { padding: 10px 12px; border-radius: 12px; background: rgba(245, 158, 11, .10); border: 1px solid rgba(245, 158, 11, .35); }
+.cd-price-now { font-size: 14px; line-height: 1.6; }
+.cd-price .btn { width: auto; }
+.cp-reg { color: var(--muted); font-weight: 500; font-size: .92em; }
+.cp-tag { color: #d97706; font-weight: 700; white-space: nowrap; }
+.cp-hint { margin: -4px 0 12px; }
 /* בטופס עצמו: בלוק הלקוח בראש החלון, עם כפתור חזרה לרשימה */
 .ab-client {
   border: 1px solid var(--line-soft); border-radius: 14px; padding: 12px 12px 2px;
