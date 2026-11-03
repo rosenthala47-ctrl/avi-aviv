@@ -1362,6 +1362,10 @@ window.UG.I18N_DICT.en = Object.assign(
   "הלקוח רואה את המחיר הזה באפליקציה": "The client sees this price in the app",
   "הלקוח רואה באפליקציה את המחיר הרגיל": "The client sees the regular price in the app",
   "המחיר שלך": "Your price",
+  /* ── וואטסאפ ללקוח שקבע תור (v199) ── */
+  "אין טלפון תקין ללקוח הזה": "No valid phone number for this client",
+  "וואטסאפ ללקוח": "WhatsApp the client",
+  "חיוג ללקוח": "Call the client",
   "שדה ריק = המחיר הרגיל. המחיר המיוחד חל על כל התורים שלו מעכשיו, גם על אלה שכבר נקבעו. תורים שכבר עברו נשארים במחיר שהיה.":
     "Empty = the regular price. The special price applies to all of this client's appointments from now on, including ones already booked. Past appointments keep the price they had.",
   "חזרה למחיר הרגיל": "Back to the regular price",

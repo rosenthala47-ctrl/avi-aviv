@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "198";
+  const APP_VERSION = "199";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ----------
      אינסטגרם ופייסבוק מצמידים פרמטר מעקב לקישור שמשתפים בהם (igsh / igshid / fbclid),
@@ -3918,6 +3918,8 @@
             <span class="sl-name">${esc(bkName(s.booking) || "לקוח")}${s.booking.spam ? " 🛡️" : ""}${birthdayNearDate(bkDob(s.booking), view.oDate, 3) ? " 🎂" : ""}</span>
             <span class="sl-sub">${esc(s.booking.serviceName)}${isSpecial(s.booking) ? ` · <span class="cp-tag">💰 ${u.fmtPrice(bkPrice(s.booking))}</span>` : ""}</span>
           </div>
+          ${bkPhone(s.booking) ? `<a class="sl-call" href="tel:${esc(bkPhone(s.booking))}" aria-label="חיוג ללקוח">📞</a>` : ""}
+          ${bookingWaBtn(s.booking, "sl-wa")}
           <span class="status-tag status-booked">תפוס</span>
         </div>`;
       }
@@ -4467,7 +4469,11 @@
         </div>
         <div class="bk-body">
           <div class="bk-title">${esc(bkName(b) || "לקוח")}</div>
-          <div class="bk-sub">${esc(b.serviceName)}${isSpecial(b) ? ` · <span class="cp-tag">💰 ${u.fmtPrice(bkPrice(b))}</span>` : ""} · ${bkPhone(b) ? `<a href="tel:${esc(bkPhone(b))}">${esc(bkPhone(b))}</a>` : "ללא טלפון"}</div>
+          <div class="bk-sub">${esc(b.serviceName)}${isSpecial(b) ? ` · <span class="cp-tag">💰 ${u.fmtPrice(bkPrice(b))}</span>` : ""}${bkPhone(b) ? "" : " · ללא טלפון"}</div>
+          ${bkPhone(b) ? `<div class="bk-contact">
+            <a class="bk-call" href="tel:${esc(bkPhone(b))}">📞 <span dir="ltr">${esc(bkPhone(b))}</span></a>
+            ${bookingWaBtn(b)}
+          </div>` : ""}
           <div class="bk-sub">${esc(u.longDate(b.date))}${b.staff ? ` · <span class="staff-req">🧑‍🔧 ביקש: ${esc(b.staff)}</span>` : ""}</div>
           ${(() => {
             const dob = bkDob(b) || dobByKey[clientKey(b)] || "";
@@ -5207,6 +5213,45 @@
     const n = u.normalizePhone(phone || "");
     if (!/^0\d{8,9}$/.test(n)) return "";
     return "972" + n.slice(1);
+  }
+
+  // כמו waIntl, אבל מקבל גם מספר בינלאומי (‎+44…‎) — לשליחה ללקוח שקבע תור
+  function waNumber(phone) {
+    const intl = waIntl(phone);
+    if (intl) return intl;
+    const n = u.normalizePhone(phone || "");
+    return /^\+\d{8,15}$/.test(n) ? n.slice(1) : "";
+  }
+  const WA_SVG = `<svg class="wa-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M.057 24l1.687-6.163a11.867 11.867 0 01-1.587-5.945C.16 5.335 5.495 0 12.05 0a11.82 11.82 0 018.413 3.488 11.824 11.824 0 013.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 01-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.767.967-.94 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>`;
+
+  /* ---------- וואטסאפ ללקוח שקבע תור (v199) ----------
+     ספר ביקש (נובמבר 2026): ביום של התורים לשלוח ללקוח וואטסאפ, ולא רק לחייג. הכפתור
+     פותח צ׳אט עם הלקוח ועם הודעה מוכנה — תזכורת לתור קרוב, או תודה על תור שעבר — שהספר
+     יכול לערוך לפני השליחה. היום/מחר מחושבים לפי הפרש ימים, לא לפי טקסט התאריך. */
+  function bookingWaText(b) {
+    const st = Store.get();
+    const shop = (st && st.shop && st.shop.name) || "";
+    const first = String(bkName(b) || "").trim().split(/\s+/)[0];
+    const hi = first && first !== "לקוח" ? first : "";
+    const start = u.dateTime(b.date, b.start);
+    const days = Math.round((u.parseKey(b.date).getTime() - u.parseKey(u.dateKey(new Date())).getTime()) / 86400000);
+    const past = start.getTime() < Date.now();
+    if (LANG === "en") {
+      const when = days === 0 ? "today" : days === 1 ? "tomorrow" : "on " + u.longDate(b.date);
+      return past
+        ? `Hi${hi ? " " + hi : ""} 👋 Thanks for coming to ${shop}! Hope to see you again soon 💈`
+        : `Hi${hi ? " " + hi : ""} 👋 A reminder of your appointment at ${shop} ${when} at ${b.start} (${b.serviceName}). See you! 💈`;
+    }
+    const when = days === 0 ? "היום" : days === 1 ? "מחר" : "ב" + u.longDate(b.date);
+    return past
+      ? `היי${hi ? " " + hi : ""} 👋 תודה שבאת ל${shop}! נשמח לראות אותך שוב 💈`
+      : `היי${hi ? " " + hi : ""} 👋 מזכיר לך את התור שלך ב${shop} ${when} בשעה ${b.start} (${b.serviceName}). נתראה! 💈`;
+  }
+  // כפתור וואטסאפ קטן ליד תור — רק כשיש ללקוח טלפון שאפשר לשלוח אליו
+  function bookingWaBtn(b, cls) {
+    return waNumber(bkPhone(b))
+      ? `<button type="button" class="${cls || "bk-wa"}" data-act="wa-booking" data-id="${esc(b.id)}" aria-label="וואטסאפ ללקוח">${WA_SVG}${cls === "sl-wa" ? "" : "וואטסאפ"}</button>`
+      : "";
   }
 
   // כל הלקוחות עם טלפון — מהתורים ומהרשימה שיובאה, ללא כפילויות
@@ -7342,6 +7387,13 @@
           break;
         }
         case "client-detail": clientDetail(t.dataset.key); break;
+        case "wa-booking": {
+          const b = (Store.get().bookings || []).find((x) => x.id === t.dataset.id);
+          const num = b ? waNumber(bkPhone(b)) : "";
+          if (!num) { toast("אין טלפון תקין ללקוח הזה", "", "📵"); break; }
+          openExternal("https://wa.me/" + num + "?text=" + encodeURIComponent(bookingWaText(b)));
+          break;
+        }
         case "cp-edit": $("#modal").innerHTML = `<div class="m-handle"></div>` + clientPriceHtml(t.dataset.key); $("#modal").scrollTop = 0; break;
         case "cp-save": await saveClientPrice(t.dataset.key, false); break;
         case "cp-clear": await saveClientPrice(t.dataset.key, true); break;
