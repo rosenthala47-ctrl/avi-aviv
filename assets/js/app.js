@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "199";
+  const APP_VERSION = "200";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ----------
      אינסטגרם ופייסבוק מצמידים פרמטר מעקב לקישור שמשתפים בהם (igsh / igshid / fbclid),
@@ -1214,7 +1214,7 @@
     return `
       ${hero}
       ${rescheduleBanner(st)}
-      ${alertBanner(st)}
+      ${clientAlerts(st)}
       ${notifBanner()}
       ${arrivalBanner(st)}
       ${reviewBanner(st)}
@@ -2648,7 +2648,7 @@
     return `
       ${condensedClient() ? `<button class="btn btn-ghost btn-sm home-back" data-tab="home">‹ חזרה לעמוד הבית</button>` : (shopCover(st) ? `<div class="client-cover"><img src="${esc(shopCover(st))}" alt=""></div>` : "")}
       ${rescheduleBanner(st)}
-      ${alertBanner(st)}
+      ${clientAlerts(st)}
       ${notifBanner()}
       ${arrivalBanner(st)}
       ${reviewBanner(st)}
@@ -2761,6 +2761,158 @@
         <button class="btn btn-ghost btn-sm" data-act="alert-dismiss" data-id="${mine.id}">לא עכשיו</button>
       </div>
     </div>`;
+  }
+
+  /* ---------- החלפת תורים בין לקוחות (v200 — try בלבד) ----------
+     רעיון של ספר (נובמבר 2026): לקוח שרוצה שעה תפוסה מציע ללקוח שקבע אותה להתחלף.
+     הספר הציע וואטסאפ בין הלקוחות או צ׳אט — בחרנו בקשה אנונימית בתוך האפליקציה: וואטסאפ
+     היה מוסר ללקוח זר את הטלפון של לקוח אחר, וזה בדיוק מה שהכספת נועדה למנוע. הצד השני
+     רק לוחץ "מסכים" או "לא", ובהסכמה התורים מתחלפים מיד (Store.answerSwap). במספרה
+     מחמירה לקוח לא רשאי להזיז תורים — ההסכמה נשמרת והספר מאשר (ownerSwapBanner).
+     נקודות כניסה: חלון השעה התפוסה (swapOfferHtml), באנר למי שהתור שלו מבוקש
+     (swapInBanner), באנר תוצאה (swapOutBanner), שורה ב"התורים שלי" (swapMineLine).
+     להרחבה לשאר המספרות — להוסיף ל-SWAP_SHOPS, ורצוי מתג הפעלה בהגדרות של הספר. */
+  const SWAP_SHOPS = ["try"];
+  function swapFeature() { return SWAP_SHOPS.indexOf(SHOP) !== -1; }
+  const SWAP_SEEN = "ug_swap_seen__" + SHOP;
+  function swapSeen() { try { return JSON.parse(localStorage.getItem(SWAP_SEEN) || "[]"); } catch (e) { return []; } }
+  function markSwapSeen(key) {
+    try { const l = swapSeen(); if (l.indexOf(key) === -1) { l.push(key); localStorage.setItem(SWAP_SEEN, JSON.stringify(l.slice(-60))); } } catch (e) {}
+  }
+  // "מחר בשעה 12:00" (באנגלית ישר "Tomorrow at 12:00" — בלי תבנית כללית במילון)
+  const swapWhen = (date, start) => u.relativeDay(date) + (LANG === "en" ? " at " : " בשעה ") + start;
+  // בקשות שמחכות לתשובה שלי (התור שלי מבוקש), מהישנה לחדשה
+  function swapsToMe(st) {
+    if (!swapFeature() || view.ownerPreview || !identity.userId) return [];
+    return Store.swapList().filter((x) => x.status === "pending" && x.bUser === identity.userId && Store.swapCheck(st, x).ok)
+      .sort((a, z) => a.createdAt - z.createdAt);
+  }
+  function swapInBanner(st) {
+    const list = swapsToMe(st);
+    if (!list.length) return "";
+    const sw = list[0];
+    return `
+    <div class="banner sky swap-banner">
+      <span class="bn-ico">🔄</span>
+      <div class="bn-body">
+        <div class="bn-title">לקוח אחר מבקש להתחלף איתך בתור</div>
+        <div class="bn-sub">התור שלך: <b>${esc(swapWhen(sw.bDate, sw.bStart))}</b></div>
+        <div class="bn-sub">במקומו: <b>${esc(swapWhen(sw.aDate, sw.aStart))}</b></div>
+        <div class="bn-sub">אותו שירות, רק השעה מתחלפת. הפרטים שלך לא נחשפים לאף אחד.</div>
+        ${list.length > 1 ? `<div class="bn-sub">ועוד ${list.length - 1} בקשות</div>` : ""}
+      </div>
+      <div class="bn-actions">
+        <button class="btn btn-primary btn-sm" data-act="swap-accept" data-id="${esc(sw.id)}">מסכים להחליף</button>
+        <button class="btn btn-ghost btn-sm" data-act="swap-decline" data-id="${esc(sw.id)}">לא, תודה</button>
+      </div>
+    </div>`;
+  }
+  /* תשובה על החלפה — מוצגת פעם אחת (עד שסוגרים), לפי מזהה + מצב. למבקש תמיד; למי
+     שהתור שלו התבקש — רק כשהספר הוא שהחליט (מספרה מחמירה), כי אחרת הוא עצמו לחץ. */
+  function swapOutBanner(st) {
+    if (!swapFeature() || view.ownerPreview || !identity.userId) return "";
+    const seen = swapSeen();
+    const me = identity.userId;
+    const sw = Store.swapList()
+      .filter((x) => ((x.aUser === me && ["done", "declined", "accepted"].indexOf(x.status) !== -1) ||
+          (x.bUser === me && x.by === "owner" && (x.status === "done" || x.status === "declined"))) &&
+        seen.indexOf(x.id + ":" + x.status) === -1 && (x.decidedAt || 0) > Date.now() - 7 * 86400000)
+      .sort((a, z) => (z.decidedAt || 0) - (a.decidedAt || 0))[0];
+    if (!sw) return "";
+    const asA = sw.aUser === me;
+    const myBk = asA ? sw.aBk : sw.bBk;
+    const nowAt = asA ? swapWhen(sw.bDate, sw.bStart) : swapWhen(sw.aDate, sw.aStart);
+    const wasAt = asA ? swapWhen(sw.aDate, sw.aStart) : swapWhen(sw.bDate, sw.bStart);
+    const byOwner = sw.by === "owner";
+    const m = sw.status === "done"
+      ? { cls: "good", ico: "✅", t: byOwner ? "הספר אישר את ההחלפה!" : "ההחלפה בוצעה!", s: "התור שלך עכשיו " + nowAt }
+      : sw.status === "accepted"
+      ? { cls: "good", ico: "👍", t: "הלקוח הסכים להתחלף", s: "ממתין לאישור הספר — נעדכן אותך" }
+      : { cls: "", ico: "🙂", t: byOwner ? "הספר לא אישר את ההחלפה" : "הבקשה להחלפה לא אושרה", s: "התור שלך נשאר " + wasAt };
+    return `
+    <div class="banner ${m.cls}">
+      <span class="bn-ico">${m.ico}</span>
+      <div class="bn-body"><div class="bn-title">${esc(m.t)}</div><div class="bn-sub">${esc(m.s)}</div></div>
+      <div class="bn-actions">
+        ${sw.status === "done" ? `<button class="btn btn-sm" data-act="add-cal" data-id="${esc(myBk)}">📅 ליומן</button>` : ""}
+        <button class="btn btn-ghost btn-sm" data-act="swap-seen" data-id="${esc(sw.id + ":" + sw.status)}">סגירה</button>
+      </div>
+    </div>`;
+  }
+  /* אצל הספר (מספרה מחמירה): שני לקוחות הסכימו להתחלף — ההחלפה מחכה לאישורו */
+  function ownerSwapBanner(st) {
+    if (!swapFeature()) return "";
+    const list = Store.swapList().filter((x) => x.status === "accepted" && Store.swapCheck(st, x).ok)
+      .sort((a, z) => (a.decidedAt || 0) - (z.decidedAt || 0));
+    if (!list.length) return "";
+    const sw = list[0];
+    const a = st.bookings.find((x) => x.id === sw.aBk), b = st.bookings.find((x) => x.id === sw.bBk);
+    return `
+    <div class="banner sky swap-banner">
+      <span class="bn-ico">🔄</span>
+      <div class="bn-body">
+        <div class="bn-title">שני לקוחות רוצים להחליף תורים</div>
+        <div class="bn-sub">${esc(bkName(a) || "לקוח")} עובר ל${esc(swapWhen(sw.bDate, sw.bStart))}</div>
+        <div class="bn-sub">${esc(bkName(b) || "לקוח")} עובר ל${esc(swapWhen(sw.aDate, sw.aStart))}</div>
+        ${list.length > 1 ? `<div class="bn-sub">ועוד ${list.length - 1} בקשות</div>` : ""}
+      </div>
+      <div class="bn-actions">
+        <button class="btn btn-primary btn-sm" data-act="owner-swap-ok" data-id="${esc(sw.id)}">אישור ההחלפה</button>
+        <button class="btn btn-ghost btn-sm" data-act="owner-swap-no" data-id="${esc(sw.id)}">דחייה</button>
+      </div>
+    </div>`;
+  }
+  // כל ההתראות שבראש עמוד הלקוח. במספרה בלי החלפות — בדיוק alertBanner, כמו קודם
+  function clientAlerts(st) { return swapInBanner(st) + swapOutBanner(st) + alertBanner(st); }
+  /* בחלון של שעה תפוסה: הצעה להתחלף עם מי שקבע אותה. התור המבוקש = התור שתופס את
+     הריבוע ברשת, לפי משך השירות שהלקוח בחר — בדיוק כמו שהרשת סימנה אותו "תפוס". */
+  function swapOfferHtml(st, dateKey, start) {
+    if (!swapFeature() || !identity.userId) return "";
+    const svc = st.services.find((x) => x.id === view.selService);
+    const dur = (svc && svc.durationMin) || st.shop.slotStep || 45;
+    const slot = gridSlots(dateKey, dur).find((x) => x.start === start);
+    const target = slot && slot.booking;
+    if (!target || !target.userId || String(target.userId).indexOf("owner:") === 0 || target.userId === identity.userId) return "";
+    const now = Date.now();
+    const mine = (st.bookings || [])
+      .filter((b) => b && b.userId === identity.userId && b.status !== "cancelled" && b.status !== "noshow" &&
+        u.dateTime(b.date, b.start).getTime() > now)
+      .sort((a, z) => u.dateTime(a.date, a.start) - u.dateTime(z.date, z.start));
+    const pending = Store.swapList().find((x) => x.status === "pending" && x.aUser === identity.userId &&
+      x.bBk === target.id && Store.swapCheck(st, x).ok);
+    let body;
+    if (pending) {
+      body = `<p class="swap-p">✓ שלחת בקשה להתחלף עם התור שלך ${esc(swapWhen(pending.aDate, pending.aStart))}. נעדכן אותך כשהוא יענה.</p>
+        <button class="btn btn-ghost btn-sm" data-act="swap-cancel" data-id="${esc(pending.id)}">ביטול הבקשה</button>`;
+    } else if (!mine.length) {
+      body = `<p class="hint swap-p">יש לך תור אחר אצלנו? אפשר להציע למי שקבע את השעה הזו להתחלף איתך. כדי להציע — קבעו קודם תור בשעה פנויה.</p>`;
+    } else {
+      body = mine.map((m) => {
+        const chk = Store.swapCheck(st, { aBk: m.id, bBk: target.id, aUser: identity.userId, bUser: target.userId,
+          aDate: m.date, aStart: m.start, bDate: target.date, bStart: target.start });
+        return chk.ok
+          ? `<button class="swap-opt" data-act="swap-request" data-a="${esc(m.id)}" data-b="${esc(target.id)}">
+               <span>להציע את התור שלי: <b>${esc(swapWhen(m.date, m.start))}</b></span><small>${esc(m.serviceName)}</small></button>`
+          : `<div class="swap-opt off"><span>התור שלך ${esc(swapWhen(m.date, m.start))}</span><small>${esc(chk.reason)}</small></div>`;
+      }).join("") + `<p class="hint swap-p">${st.shop && st.shop.strictBookings
+        ? "הבקשה נשלחת בלי השם והטלפון שלך. אם הוא יסכים — הספר יאשר את ההחלפה."
+        : "הבקשה נשלחת בלי השם והטלפון שלך. אם הוא יסכים — התורים מתחלפים מיד."}</p>`;
+    }
+    return `
+      <div class="swap-box">
+        <div class="swap-h">🔄 להתחלף עם מי שקבע ב-${esc(target.start)}</div>
+        ${body}
+      </div>`;
+  }
+  // ב"התורים שלי": בקשה ששלחתי על התור הזה, או סימון שהוא כבר הוחלף
+  function swapMineLine(st, b) {
+    if (!swapFeature()) return "";
+    const lines = Store.swapList()
+      .filter((x) => x.status === "pending" && x.aUser === identity.userId && x.aBk === b.id && Store.swapCheck(st, x).ok)
+      .map((x) => `<div class="swap-line">🔄 הצעת להתחלף עם ${esc(swapWhen(x.bDate, x.bStart))} · ממתין לתשובה
+        <button type="button" class="swap-x" data-act="swap-cancel" data-id="${esc(x.id)}">ביטול</button></div>`);
+    if (b.swapId && b.swappedAt) lines.push(`<div class="swap-line done">🔄 התור הוחלף עם לקוח אחר</div>`);
+    return lines.join("");
   }
 
   /* ---------- באנר בקשת דירוג אחרי תספורת ---------- */
@@ -2991,7 +3143,7 @@
       .sort((a, z) => a.ts - z.ts);
 
     if (!mine.length && !myWaits.length) {
-      return alertBanner(st) + reviewBanner(st) + clientMusicCard(st) +
+      return clientAlerts(st) + reviewBanner(st) + clientMusicCard(st) +
         emptyState("🎟️", "אין לך תורים", condensedClient() ? "לחצו ״בית״ ואז ״הזמנת תור״ כדי לקבוע את התור הראשון" : "עברו ל״קביעת תור״ כדי לקבוע את התור הראשון");
     }
     const card = (x, isPast) => {
@@ -3019,13 +3171,14 @@
           <div class="bk-body">
             <div class="bk-title">${esc(b.serviceName)}</div>
             <div class="bk-sub">${esc(u.longDate(b.date))} · <b>${u.fmtPrice(myBkPrice(b))}</b></div>
+            ${isPast ? "" : swapMineLine(st, b)}
           </div>
           ${st2}
         </div>
         ${actions}
       </div>`;
     };
-    let html = alertBanner(st) + reviewBanner(st) + clientMusicCard(st);
+    let html = clientAlerts(st) + reviewBanner(st) + clientMusicCard(st);
     // "קבע שוב כמו פעם קודמת" — קיצור מהיר על בסיס התור האחרון (לקוחות חוזרים)
     const lastBk = past.length ? past[0].b : null;
     if (lastBk) {
@@ -3657,16 +3810,20 @@
         <div class="m-title">אתם ברשימת ההמתנה 🔔</div>
         <div class="m-sub">לשעה ${esc(start)}, ${esc(u.longDate(dateKey))}</div>
         <p style="font-size:14px;color:var(--muted);margin-bottom:18px">אם התור יתפנה — תקבלו הודעה מיד ותוכלו להזמין אותו לפני כולם.</p>
+        ${swapOfferHtml(st, dateKey, start)}
         <button class="btn btn-danger" data-act="leave-wait" data-id="${mine.id}">יציאה מרשימת ההמתנה</button>
         <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">סגור</button>
       `);
       return;
     }
+    // החלפה עם מי שקבע (try בלבד) — כשיש, היא ראשונה, ורשימת ההמתנה אחריה
+    const swapHtml = swapOfferHtml(st, dateKey, start);
     openModal(`
-      <div class="m-title">השעה תפוסה — רשימת המתנה</div>
-      <div class="m-sub">אם התור יתפנה, נודיע לכם מיד ותוכלו לתפוס אותו</div>
+      <div class="m-title">${swapHtml ? "השעה תפוסה" : "השעה תפוסה — רשימת המתנה"}</div>
+      <div class="m-sub">${swapHtml ? "אפשר להציע החלפה, או להיכנס לרשימת ההמתנה" : "אם התור יתפנה, נודיע לכם מיד ותוכלו לתפוס אותו"}</div>
       <div class="summary-row"><span class="sr-k">תאריך</span><span class="sr-v">${esc(u.longDate(dateKey))}</span></div>
       <div class="summary-row"><span class="sr-k">שעה</span><span class="sr-v">${esc(start)}</span></div>
+      ${swapHtml ? swapHtml + `<div class="swap-or"><span>🔔 או: רשימת המתנה — נודיע לכם אם יתפנה</span></div>` : ""}
       <div style="height:16px"></div>
       <div class="field-row">
         <div class="field"><label>שם פרטי <span class="req">*</span></label>
@@ -3821,6 +3978,7 @@
        כי שם יושב הכרטיס הגדול עצמו. */
     const activate = needsClients(st);
     const banners = locked ? "" :
+      ownerSwapBanner(st) +
       (activate && view.ownerTab !== "publish" ? noClientsBanner(st) : "") +
       subBanner() + spamBanner() +
       (view.ownerTab !== "settings" ? ownerNotifBanner() : "") +
@@ -3916,7 +4074,7 @@
           <span class="sl-time">${s.start}</span>
           <div class="sl-mid">
             <span class="sl-name">${esc(bkName(s.booking) || "לקוח")}${s.booking.spam ? " 🛡️" : ""}${birthdayNearDate(bkDob(s.booking), view.oDate, 3) ? " 🎂" : ""}</span>
-            <span class="sl-sub">${esc(s.booking.serviceName)}${isSpecial(s.booking) ? ` · <span class="cp-tag">💰 ${u.fmtPrice(bkPrice(s.booking))}</span>` : ""}</span>
+            <span class="sl-sub">${esc(s.booking.serviceName)}${isSpecial(s.booking) ? ` · <span class="cp-tag">💰 ${u.fmtPrice(bkPrice(s.booking))}</span>` : ""}${s.booking.swapId ? ` · <span class="swap-tag">🔄 הוחלף</span>` : ""}</span>
           </div>
           ${bkPhone(s.booking) ? `<a class="sl-call" href="tel:${esc(bkPhone(s.booking))}" aria-label="חיוג ללקוח">📞</a>` : ""}
           ${bookingWaBtn(s.booking, "sl-wa")}
@@ -4474,7 +4632,7 @@
             <a class="bk-call" href="tel:${esc(bkPhone(b))}">📞 <span dir="ltr">${esc(bkPhone(b))}</span></a>
             ${bookingWaBtn(b)}
           </div>` : ""}
-          <div class="bk-sub">${esc(u.longDate(b.date))}${b.staff ? ` · <span class="staff-req">🧑‍🔧 ביקש: ${esc(b.staff)}</span>` : ""}</div>
+          <div class="bk-sub">${esc(u.longDate(b.date))}${b.staff ? ` · <span class="staff-req">🧑‍🔧 ביקש: ${esc(b.staff)}</span>` : ""}${b.swapId ? ` · <span class="swap-tag">🔄 הוחלף בין לקוחות</span>` : ""}</div>
           ${(() => {
             const dob = bkDob(b) || dobByKey[clientKey(b)] || "";
             const bi = dob ? birthdayInfo(dob) : null;
@@ -7387,6 +7545,43 @@
           break;
         }
         case "client-detail": clientDetail(t.dataset.key); break;
+        // החלפת תורים בין לקוחות (try)
+        case "swap-request": {
+          t.disabled = true;
+          const r = await Store.requestSwap({ aBk: t.dataset.a, bBk: t.dataset.b, aUser: identity.userId });
+          if (!r.ok) { t.disabled = false; toast(r.reason || "לא הצלחנו לשלוח את הבקשה", "", "⚠️"); break; }
+          closeModal(); haptic(14);
+          toast("הבקשה נשלחה! נעדכן אותך כשהוא יענה", "good", "🔄");
+          render(); break;
+        }
+        case "swap-cancel": {
+          await Store.cancelSwap(t.dataset.id, identity.userId);
+          closeModal(); toast("הבקשה בוטלה", "", "🔄"); render(); break;
+        }
+        case "swap-accept": {
+          t.disabled = true;
+          const sw0 = Store.swapList().find((x) => x.id === t.dataset.id);
+          const r = await Store.answerSwap(t.dataset.id, true, identity.userId);
+          if (!r.ok) { toast(r.reason || "ההחלפה נכשלה — נסו שוב", "", "⚠️"); render(); break; }
+          haptic(18);
+          if (r.status === "accepted") toast("הסכמת! ההחלפה תושלם אחרי שהספר יאשר", "good", "👍");
+          else toast("התחלפתם! התור שלך עכשיו " + (sw0 ? swapWhen(sw0.aDate, sw0.aStart) : ""), "good", "✅");
+          render(); break;
+        }
+        case "swap-decline": {
+          await Store.answerSwap(t.dataset.id, false, identity.userId);
+          toast("הבקשה נדחתה — התור שלך נשאר כמו שהיה", "", "🙂"); render(); break;
+        }
+        case "swap-seen": markSwapSeen(t.dataset.id); render(); break;
+        case "owner-swap-ok":
+        case "owner-swap-no": {
+          const yes = act === "owner-swap-ok";
+          t.disabled = true;
+          const r = await Store.approveSwap(t.dataset.id, yes);
+          if (!r.ok) { toast(r.reason || "ההחלפה נכשלה — נסו שוב", "", "⚠️"); render(); break; }
+          toast(yes ? "ההחלפה בוצעה — שני התורים עודכנו ✓" : "ההחלפה נדחתה — התורים נשארו כמו שהיו", yes ? "good" : "", "🔄");
+          render(); break;
+        }
         case "wa-booking": {
           const b = (Store.get().bookings || []).find((x) => x.id === t.dataset.id);
           const num = b ? waNumber(bkPhone(b)) : "";

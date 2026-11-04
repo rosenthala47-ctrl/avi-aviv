@@ -804,6 +804,27 @@ select.input {
 .banner.sky { border-color: rgba(56,189,248,.4); background: linear-gradient(120deg, rgba(56,189,248,.12), var(--surface)); }
 .banner.good { border-color: rgba(52,211,153,.35); background: linear-gradient(120deg, rgba(52,211,153,.10), var(--surface)); }
 .banner.warn { border-color: rgba(251,191,36,.45); background: linear-gradient(120deg, rgba(251,191,36,.13), var(--surface)); }
+/* החלפת תורים בין לקוחות (swapOfferHtml / swapInBanner, v200) */
+.swap-banner .bn-sub b { color: var(--text); }
+.swap-box {
+  margin-top: 14px; padding: 13px 14px; border-radius: 14px;
+  border: 1px solid rgba(56,189,248,.35); background: linear-gradient(120deg, rgba(56,189,248,.10), var(--surface));
+}
+.swap-box .swap-h { font-weight: 800; font-size: 15px; margin-bottom: 10px; }
+.swap-box .swap-p { margin: 8px 0 0; font-size: 13px; line-height: 1.6; }
+.swap-opt {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%;
+  padding: 11px 13px; margin-top: 8px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--surface-2); color: inherit; font: inherit; font-size: 14px; text-align: start; cursor: pointer;
+}
+.swap-opt b { color: var(--sky-2); }
+.swap-opt small { font-size: 12px; color: var(--muted); }
+.swap-opt.off { cursor: default; opacity: .6; }
+.swap-or { margin: 16px 0 0; text-align: center; font-size: 13px; color: var(--muted); font-weight: 700; }
+.swap-line { margin-top: 6px; font-size: 12.5px; color: var(--sky-2); font-weight: 600; }
+.swap-line.done { color: var(--muted); }
+.swap-x { border: 0; background: none; color: var(--bad); font: inherit; font-weight: 700; padding: 0 4px; cursor: pointer; }
+.swap-tag { color: var(--sky-2); font-weight: 700; white-space: nowrap; }
 
 /* ==== שלבי אשף חדשים: תיאור, אינסטגרם, אייקון, מקור הגעה, סיכום ==== */
 .wiz-count { text-align: start; font-size: 12px; color: var(--muted); margin-top: 6px; }

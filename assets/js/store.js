@@ -141,6 +141,205 @@ UG.Store = (function () {
     return breaksOn(cur, dateKey).some((b) => startMin < b.to && endMin > b.from);
   }
 
+  /* ---------- החלפת תורים בין לקוחות (v200 — try בלבד, ראו SWAP_SHOPS ב-app.js) ----------
+     רעיון של ספר (נובמבר 2026): לקוח שרוצה שעה תפוסה מציע ללקוח שקבע אותה להתחלף
+     איתו. **בלי לחשוף טלפון או שם** — הבקשה עוברת באפליקציה, אנונימית, והצד השני רק
+     מסכים או לא. בהסכמה שני התורים מתחלפים *במקום*: אותו מזהה, אותו שירות ואותם
+     פרטים — רק התאריך והשעה מתחלפים. כך גם הכספת (פרטי לקוח לפי מזהה תור) נשארת
+     מקושרת לתור הנכון.
+     רשומה: swaps/<id> = { id, aBk, bBk, aUser, bUser, aDate, aStart, bDate, bStart,
+       status, createdAt, decidedAt, by }. a = המבקש (מציע את התור שלו), b = מי שהתור שלו
+     מבוקש. aDate/aStart/bDate/bStart = "צילום" בזמן הבקשה: אם אחד התורים זז או בוטל
+     מאז — הבקשה פשוט כבר לא תקפה (swapCheck).
+     status: pending → done / declined / cancelled / void, או accepted = הסכים, אבל
+     ההחלפה עוד לא בוצעה. זה קורה במספרה מחמירה, שבה לקוח לא רשאי להזיז תורים — ואז
+     **הספר מאשר ידנית** (approveSwap). לא אוטומטית בכוונה: את צומת הבקשות כל אחד יכול
+     לכתוב, ואישור אוטומטי היה מאפשר לזייף "הסכמה" ולהזיז דרך המכשיר של הספר תורים
+     של לקוחות אחרים — בדיוק מה שהמצב המחמיר נועד למנוע.
+     by = מי החליט: "client" (הלקוח שהתור שלו התבקש) או "owner" (הספר). */
+  const SWAP_LEAD_MS = 60 * 60000;   // שני התורים חייבים להיות לפחות שעה קדימה
+  const SWAP_MAX_PENDING = 3;        // בקשות פתוחות לכל לקוח
+  const SWAP_STATUSES = ["pending", "accepted", "done", "declined", "cancelled", "void"];
+  function normSwaps(v) {
+    const out = {};
+    asArray(v).forEach((x) => {
+      if (!x || typeof x !== "object" || !x.id || !x.aBk || !x.bBk) return;
+      const r = {};
+      ["id", "aBk", "bBk", "aUser", "bUser", "aDate", "aStart", "bDate", "bStart"].forEach((k) => { r[k] = String(x[k] || ""); });
+      r.status = SWAP_STATUSES.indexOf(x.status) !== -1 ? x.status : "pending";
+      r.createdAt = Number(x.createdAt) || 0;
+      if (x.decidedAt) r.decidedAt = Number(x.decidedAt) || 0;
+      if (x.by === "client" || x.by === "owner") r.by = x.by;
+      out[r.id] = r;
+    });
+    return out;
+  }
+  const swapLive = (x) => !!x && x.status !== "cancelled" && x.status !== "noshow";
+  /* האם אפשר לבצע את ההחלפה עכשיו. בודק את מה שהיה נבדק אילו כל אחד היה קובע את
+     התור של השני: התנגשות עם תורים אחרים, ובשירות ארוך יותר מהתור שהוא תופס — שהזמן
+     הנוסף לא נופל בהפסקה ולא אחרי שעת הסגירה. זמן שהשני כבר תפס בסדר — הוא היה שם. */
+  function swapCheck(cur, sw, now) {
+    now = now || Date.now();
+    const bks = (cur && cur.bookings) || [];
+    const a = bks.find((x) => x && x.id === sw.aBk), b = bks.find((x) => x && x.id === sw.bBk);
+    if (!swapLive(a) || !swapLive(b)) return { ok: false, reason: "אחד התורים כבר לא קיים — הבקשה לא רלוונטית" };
+    if (!a.userId || a.userId !== sw.aUser || !b.userId || b.userId !== sw.bUser || a.userId === b.userId) {
+      return { ok: false, reason: "הבקשה לא רלוונטית יותר" };
+    }
+    if (a.date !== sw.aDate || a.start !== sw.aStart || b.date !== sw.bDate || b.start !== sw.bStart) {
+      return { ok: false, reason: "אחד התורים זז בינתיים — הבקשה לא רלוונטית" };
+    }
+    const ta = u.dateTime(a.date, a.start).getTime(), tb = u.dateTime(b.date, b.start).getTime();
+    if (ta - now < SWAP_LEAD_MS || tb - now < SWAP_LEAD_MS) {
+      return { ok: false, reason: "כבר מאוחר מדי להחליף — אחד התורים בעוד פחות משעה" };
+    }
+    const dur = (x) => Math.max(1, u.toMin(x.end) - u.toMin(x.start));
+    const aEnd = u.toMin(b.start) + dur(a), bEnd = u.toMin(a.start) + dur(b);
+    const noFit = { ok: false, reason: "השירותים באורך שונה, ואין מספיק זמן פנוי כדי להתחלף" };
+    if (aEnd > 24 * 60 || bEnd > 24 * 60) return noFit;
+    const aNew = { date: b.date, start: b.start, end: u.toHHMM(aEnd) };
+    const bNew = { date: a.date, start: a.start, end: u.toHHMM(bEnd) };
+    const others = bks.filter((x) => swapLive(x) && x.id !== a.id && x.id !== b.id);
+    const hits = (n, x) => x.date === n.date && u.toMin(n.start) < u.toMin(x.end) && u.toMin(n.end) > u.toMin(x.start);
+    if (others.some((x) => hits(aNew, x) || hits(bNew, x)) || hits(aNew, bNew)) return noFit;
+    const extOk = (n, partner) => {
+      const pEnd = u.toMin(partner.end), nEnd = u.toMin(n.end);
+      if (nEnd <= pEnd) return true;                     // נכנס בתוך הזמן שהשני תפס
+      const opened = (cur.opens || []).includes(n.date + "|" + n.start);
+      if (opened) return true;                           // שעה שהספר פתח ידנית — פטורה, כמו בקביעה רגילה
+      if (overlapsBreak(cur, n.date, pEnd, nEnd)) return false;
+      const sched = cur.schedule && cur.schedule[u.parseKey(n.date).getDay()];
+      if (sched && sched.active) {
+        const open = u.toMin(sched.open), close = u.toMin(sched.close), s0 = u.toMin(n.start);
+        if (s0 >= open && s0 < close && nEnd > close) return false;
+      }
+      return true;
+    };
+    if (!extOk(aNew, b) || !extOk(bNew, a)) return noFit;
+    return { ok: true, a, b, aNew, bNew };
+  }
+  function swapList() { return Object.keys((state && state.swaps) || {}).map((k) => state.swaps[k]); }
+  function saveSwap(sw) {
+    state.swaps = normSwaps(state.swaps);
+    state.swaps[sw.id] = sw;
+    emit();
+    if (backend.setSwap) return backend.setSwap(sw.id, sw).catch((err) => { throw reportWriteError(err); });
+    return persistChildren(["swaps"]);
+  }
+  async function freshForSwap() {
+    try { await withTimeout(reloadFromRemote(), 8000); } catch (e) { /* עובדים עם המצב הקיים */ }
+    refreshLocal();
+  }
+  // לקוח a מציע את התור aBk שלו בתמורה לתור bBk של לקוח אחר
+  async function requestSwap(data) {
+    await freshForSwap();
+    const bks = state.bookings || [];
+    const a = bks.find((x) => x && x.id === data.aBk), b = bks.find((x) => x && x.id === data.bBk);
+    if (!a || !b) return { ok: false, reason: "התור כבר לא קיים" };
+    // תור שהספר רשם ידנית — אין מולו לקוח באפליקציה שיוכל לענות
+    if (!b.userId || String(b.userId).indexOf("owner:") === 0) return { ok: false, reason: "אי אפשר להציע החלפה על התור הזה" };
+    const sw = { id: u.uid(), aBk: a.id, bBk: b.id, aUser: String(data.aUser || ""), bUser: b.userId,
+      aDate: a.date, aStart: a.start, bDate: b.date, bStart: b.start, status: "pending", createdAt: Date.now() };
+    const chk = swapCheck(state, sw);
+    if (!chk.ok) return chk;
+    const open = swapList().filter((x) => x.aUser === sw.aUser && x.status === "pending" && swapCheck(state, x).ok);
+    if (open.some((x) => x.aBk === a.id && x.bBk === b.id)) return { ok: false, reason: "כבר שלחת בקשה על התור הזה" };
+    if (open.length >= SWAP_MAX_PENDING) return { ok: false, reason: "יש לך כבר " + SWAP_MAX_PENDING + " בקשות פתוחות — חכו לתשובה או בטלו אחת" };
+    try { await saveSwap(sw); } catch (e) { return { ok: false, reason: bookingErrText(e) }; }
+    return { ok: true, swap: sw };
+  }
+  async function cancelSwap(id, userId) {
+    await freshForSwap();
+    const sw = (state.swaps || {})[id];
+    if (!sw || sw.aUser !== userId || sw.status !== "pending") return { ok: false };
+    await saveSwap(Object.assign({}, sw, { status: "cancelled", decidedAt: Date.now() }));
+    return { ok: true };
+  }
+  // b עונה. בהסכמה — מבצעים מיד (או משאירים לספר במספרה מחמירה)
+  async function answerSwap(id, accept, userId) {
+    await freshForSwap();
+    const sw = (state.swaps || {})[id];
+    if (!sw || sw.bUser !== userId) return { ok: false, reason: "הבקשה לא נמצאה" };
+    if (sw.status !== "pending") return { ok: false, reason: "כבר ענית על הבקשה הזו" };
+    if (!accept) {
+      await saveSwap(Object.assign({}, sw, { status: "declined", decidedAt: Date.now(), by: "client" }));
+      return { ok: true, status: "declined" };
+    }
+    return executeSwap(sw, "client");
+  }
+  // הספר (מספרה מחמירה): אישור או דחייה של החלפה שהלקוחות כבר הסכימו עליה
+  async function approveSwap(id, approve) {
+    await freshForSwap();
+    const sw = (state.swaps || {})[id];
+    if (!sw || sw.status !== "accepted") return { ok: false, reason: "הבקשה לא נמצאה" };
+    if (!approve) {
+      await saveSwap(Object.assign({}, sw, { status: "declined", decidedAt: Date.now(), by: "owner" }));
+      return { ok: true, status: "declined" };
+    }
+    return executeSwap(sw, "owner");
+  }
+  /* הביצוע עצמו. במספרה רגילה — טרנזקציה אחת על צומת התורים (שני התורים זזים יחד או
+     אף אחד). במספרה מחמירה — עדכון רב-נתיבי אחד; ללקוח הוא נדחה בחוקי האבטחה, ואז
+     הבקשה נשארת "accepted" עד שהספר מאשר (approveSwap). */
+  async function executeSwap(sw, by) {
+    const stamp = Date.now();
+    const apply = (cur) => {
+      const chk = swapCheck(cur, sw);
+      if (!chk.ok) return chk;
+      Object.assign(chk.a, chk.aNew, { swapId: sw.id, swappedAt: stamp });
+      Object.assign(chk.b, chk.bNew, { swapId: sw.id, swappedAt: stamp });
+      return { ok: true };
+    };
+    let res;
+    if (strictBookings()) {
+      const chk = swapCheck(state, sw);
+      if (!chk.ok) res = chk;
+      else {
+        const fields = (n) => ({ date: n.date, start: n.start, end: n.end, swapId: sw.id, swappedAt: stamp });
+        try {
+          if (backend.updateChildren) {
+            const patch = {};
+            [[chk.a, chk.aNew], [chk.b, chk.bNew]].forEach(([x, n]) => {
+              const f = fields(n);
+              Object.keys(f).forEach((k) => { patch["bookings/" + x.id + "/" + k] = f[k]; });
+            });
+            await withTimeout(backend.updateChildren(patch), 22000);
+          } else {
+            await backend.updateBookingFields(chk.a.id, fields(chk.aNew));
+            await backend.updateBookingFields(chk.b.id, fields(chk.bNew));
+          }
+          Object.assign(chk.a, fields(chk.aNew)); Object.assign(chk.b, fields(chk.bNew));
+          res = { ok: true };
+        } catch (e) {
+          // גם הספר לא רשאי (נכנס בקוד ניהול, בלי חשבון הבעלים)
+          if (by === "owner") return { ok: false, reason: "אין הרשאה להזיז תורים — התחברו עם חשבון הבעלים (הגדרות ← אבטחת החשבון)" };
+          // לקוח במספרה מחמירה לא רשאי להזיז תורים — ממתינים לאישור הספר
+          await saveSwap(Object.assign({}, sw, { status: "accepted", decidedAt: stamp, by: "client" }));
+          return { ok: true, status: "accepted" };
+        }
+      }
+    } else if (backend.transactBooking) {
+      try { res = await withTimeout(backend.transactBooking((cur) => apply(cur)), 22000); }
+      catch (e) { return { ok: false, reason: bookingErrText(e) }; }
+    } else {
+      refreshLocal();
+      res = apply(state);
+      if (res.ok) await persistChildren(["bookings"]);
+    }
+    if (!res || !res.ok) {
+      // סוגרים את הבקשה רק אם היא באמת כבר לא אפשרית (תור זז/בוטל/אין זמן). כשל רגעי
+      // (רשת, התנגשות בטרנזקציה) — משאירים אותה פתוחה, כדי שאפשר יהיה לנסות שוב.
+      await freshForSwap();
+      if (!swapCheck(state, sw).ok) {
+        try { await saveSwap(Object.assign({}, sw, { status: "void", decidedAt: stamp })); } catch (e) {}
+      }
+      return res || { ok: false, reason: "ההחלפה נכשלה — נסו שוב" };
+    }
+    await saveSwap(Object.assign({}, sw, { status: "done", decidedAt: stamp, by: by || "client" }));
+    try { await withTimeout(reloadFromRemote(), 8000); } catch (e) {}
+    return { ok: true, status: "done" };
+  }
+
   /* מיזוג בטוח מול ברירת המחדל (למקרה של גרסאות ישנות בזיכרון) */
   function normalize(s) {
     const base = defaultState();
@@ -164,6 +363,7 @@ UG.Store = (function () {
     s.breaks = normBreaks(s.breaks);
     if (s.clientPrices) s.clientPrices = normPrices(s.clientPrices);
     s.vip = normVip(s.vip);
+    s.swaps = normSwaps(s.swaps);
     if (!Array.isArray(s.reviews)) s.reviews = [];
     if (!Array.isArray(s.shop.staff)) s.shop.staff = [];
     if (!s.shop.address) s.shop.address = base.shop.address;
@@ -266,6 +466,8 @@ UG.Store = (function () {
       setBooking(bkId, obj) { const s = readRaw() || {}; const arr = bookingsArr(s); const i = arr.findIndex((x) => x && x.id === bkId); if (i >= 0) arr[i] = obj; else arr.push(obj); s.bookings = arr; return writeRawState(s); },
       updateBookingFields(bkId, patch) { const s = readRaw() || {}; const arr = bookingsArr(s); const b = arr.find((x) => x && x.id === bkId); if (b) Object.assign(b, patch); s.bookings = arr; return writeRawState(s); },
       removeBooking(bkId) { const s = readRaw() || {}; s.bookings = bookingsArr(s).filter((x) => x && x.id !== bkId); return writeRawState(s); },
+      // בקשות להחלפת תור בין לקוחות — לפי מזהה (מקומית: בתוך המצב)
+      setSwap(id, obj) { const s = readRaw() || {}; s.swaps = normSwaps(s.swaps); s.swaps[id] = obj; return writeRawState(s); },
       // ספר הלקוחות (צומת פרטי, מוגן לבעלים בענן; מקומית — אחסון נפרד)
       onContacts(cb) { listeners.contacts.push(cb); cb(readC()); },
       saveContacts(arr) {
@@ -382,6 +584,8 @@ UG.Store = (function () {
       setBooking(bkId, obj) { return ref.child("bookings/" + bkId).set(clone(obj)); },
       updateBookingFields(bkId, patch) { return ref.child("bookings/" + bkId).update(clone(patch)); },
       removeBooking(bkId) { return ref.child("bookings/" + bkId).remove(); },
+      // בקשה להחלפת תור — נכתבת לפי מזהה, כדי ששני לקוחות שכותבים בו-זמנית לא ידרסו זה את זה
+      setSwap(id, obj) { return ref.child("swaps/" + id).set(clone(obj)); },
       // ספר הלקוחות — צומת מוגן לבעלים בלבד (קריאה+כתיבה לפי ownerUid). ללקוח
       // הקריאה נחסמת → מטמון ריק (ממילא רק הבעלים משתמש בספר הלקוחות).
       onContacts(cb) {
@@ -1618,7 +1822,7 @@ UG.Store = (function () {
 
   return {
     init, subscribe, get,
-    setDay, setBreaks, breaksOn, setWeekVariable, saveShop, upsertService, removeService, upsertProduct, removeProduct,
+    setDay, setBreaks, breaksOn, swapCheck, swapList, requestSwap, cancelSwap, answerSwap, approveSwap, setWeekVariable, saveShop, upsertService, removeService, upsertProduct, removeProduct,
     addContacts, removeContact, getClientPrices, setClientPrices, readVip, addBroadcast, addClosedDates, removeClosedDate,
     setSlotOpen, blockClient, unblockClient,
     createBooking, setBookingStatus, deleteBooking,

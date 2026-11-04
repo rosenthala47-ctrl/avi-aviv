@@ -268,6 +268,99 @@ async function nudgeSilentShops(db, shopsVal, now, sendToUid, trialDays) {
   return sent;
 }
 
+/* ---------- החלפת תורים בין לקוחות (v200 — try בלבד בצד הלקוח) ----------
+   פוש על בקשה חדשה (למי שהתור שלו מבוקש), על התשובה (למבקש), ועל החלפה שבוצעה או
+   שממתינה להשלמה (לספר). הבקשה עצמה מופיעה גם כבאנר באפליקציה — הפוש הוא תוספת,
+   ובגלל קצב הקרון (כל כמה שעות) הוא עלול להגיע באיחור.
+   אחרי החלפה מוחקים את שני התורים מרשימות "תזכורת כבר נשלחה" — המזהים נשארו אותם
+   מזהים, ובלי זה תזכורת שכבר יצאה לשעה הישנה הייתה חוסמת את התזכורת לשעה החדשה.
+   מצב: system/swapPush (מפתח = מספרה/בקשה[:מצב]). מבודד — כישלון כאן לא נוגע בשאר. */
+const SWAP_PUSH_MAX_AGE = 3 * 86400000;   // תשובה ישנה מזה (למשל בפריסה הראשונה) — לא שולחים
+async function notifySwaps(db, shopsVal, now, sendToUid, nameOf) {
+  // אין אף בקשה באף מספרה (המצב הרגיל כמעט תמיד) — לא קוראים ולא כותבים כלום
+  if (!Object.keys(shopsVal || {}).some((sid) => asArr(shopsVal[sid] && shopsVal[sid].swaps).length)) return 0;
+  const ref = db.ref("system/swapPush");
+  const prev = (await ref.once("value")).val() || {};
+  const req = new Set(prev.req || []), res = new Set(prev.res || []), own = new Set(prev.own || []);
+  let sent = 0, dirty = false;
+  const resetRem = {};   // sid → מזהי תורים שזזו
+  for (const sid of Object.keys(shopsVal || {})) {
+    const shop = shopsVal[sid];
+    const swaps = asArr(shop && shop.swaps);
+    if (!swaps.length) continue;
+    const shopName = (shop.shop && shop.shop.name) || "המספרה";
+    const byId = {};
+    asArr(shop.bookings).forEach((b) => { if (b && b.id) byId[b.id] = b; });
+    for (const sw of swaps) {
+      if (!sw || !sw.id || !sw.aDate || !sw.bDate) continue;
+      const key = sid + "/" + sw.id;
+      const fresh = (sw.decidedAt || sw.createdAt || 0) > now - SWAP_PUSH_MAX_AGE;
+      if (sw.status === "pending" && !req.has(key)) {
+        req.add(key); dirty = true;
+        const a = byId[sw.aBk], b = byId[sw.bBk];
+        const valid = a && b && a.status !== "cancelled" && b.status !== "cancelled" &&
+          a.date === sw.aDate && a.start === sw.aStart && b.date === sw.bDate && b.start === sw.bStart &&
+          Math.min(apptTs(sw.aDate, sw.aStart), apptTs(sw.bDate, sw.bStart)) > now;
+        if (valid && fresh && sw.bUser) {
+          sent += await sendToUid(sw.bUser, "🔄 בקשה להחלפת תור",
+            `לקוח אחר מציע להחליף את התור שלך ${relDay(sw.bDate)} בשעה ${sw.bStart} בתור שלו ${relDay(sw.aDate)} בשעה ${sw.aStart} · ${shopName}`,
+            "swapreq-" + sw.id);
+        }
+      }
+      const byOwner = sw.by === "owner";   // מספרה מחמירה: הספר הוא שאישר/דחה
+      if (["done", "declined", "accepted"].indexOf(sw.status) !== -1 && !res.has(key + ":" + sw.status)) {
+        res.add(key + ":" + sw.status); dirty = true;
+        if (fresh && sw.aUser) {
+          const m = sw.status === "done"
+            ? [byOwner ? "✅ הספר אישר את ההחלפה!" : "✅ ההחלפה בוצעה!", `התור שלך עכשיו ${relDay(sw.bDate)} בשעה ${sw.bStart} · ${shopName}`]
+            : sw.status === "declined"
+            ? [byOwner ? "הספר לא אישר את החלפת התורים" : "הבקשה להחלפת תור לא אושרה", `התור שלך נשאר ${relDay(sw.aDate)} בשעה ${sw.aStart} · ${shopName}`]
+            : ["👍 הלקוח הסכים להתחלף", `ממתין לאישור הספר — נעדכן אותך · ${shopName}`];
+          sent += await sendToUid(sw.aUser, m[0], m[1], "swapres-" + sw.id + "-" + sw.status);
+        }
+      }
+      // מי שהתור שלו התבקש כבר הסכים — אבל כשהספר החליט, גם הוא צריך לדעת
+      if (byOwner && (sw.status === "done" || sw.status === "declined") && !res.has(key + ":" + sw.status + ":b")) {
+        res.add(key + ":" + sw.status + ":b"); dirty = true;
+        if (fresh && sw.bUser) {
+          const m = sw.status === "done"
+            ? ["✅ הספר אישר את ההחלפה!", `התור שלך עכשיו ${relDay(sw.aDate)} בשעה ${sw.aStart} · ${shopName}`]
+            : ["הספר לא אישר את החלפת התורים", `התור שלך נשאר ${relDay(sw.bDate)} בשעה ${sw.bStart} · ${shopName}`];
+          sent += await sendToUid(sw.bUser, m[0], m[1], "swapres-" + sw.id + "-" + sw.status + "-b");
+        }
+      }
+      if ((sw.status === "done" || sw.status === "accepted") && !own.has(key + ":" + sw.status)) {
+        own.add(key + ":" + sw.status); dirty = true;
+        const a = byId[sw.aBk], b = byId[sw.bBk];
+        // הספר לא צריך הודעה על החלפה שהוא עצמו אישר
+        if (fresh && a && b && !(sw.status === "done" && byOwner)) {
+          sent += await sendToUid("owner_" + sid,
+            sw.status === "done" ? "🔄 לקוחות החליפו תורים" : "🔄 שני לקוחות רוצים להחליף תורים",
+            sw.status === "done"
+              ? `${nameOf(sid, a)} עבר ל${relDay(sw.bDate)} בשעה ${sw.bStart}, ${nameOf(sid, b)} עבר ל${relDay(sw.aDate)} בשעה ${sw.aStart}`
+              : `${nameOf(sid, a)} ו${nameOf(sid, b)} הסכימו להתחלף — ההחלפה מחכה לאישור שלך באפליקציה`,
+            "swapown-" + sw.id + "-" + sw.status);
+        }
+        if (sw.status === "done") (resetRem[sid] = resetRem[sid] || []).push(sw.aBk, sw.bBk);
+      }
+    }
+  }
+  // תזכורות לשעה החדשה: מוציאים את התורים שזזו מרשימות "כבר נשלח" של הקרון
+  for (const sid of Object.keys(resetRem)) {
+    const ids = new Set(resetRem[sid]);
+    const psRef = db.ref("system/pushState/shops/" + sid);
+    const ps = (await psRef.once("value")).val();
+    if (!ps) continue;
+    const patch = {};
+    ["remIds", "dayRemIds", "smsRemIds"].forEach((k) => {
+      if (Array.isArray(ps[k])) patch[k] = ps[k].filter((x) => !ids.has(x));
+    });
+    if (Object.keys(patch).length) await psRef.update(patch);
+  }
+  if (dirty) await ref.set({ req: [...req].slice(-500), res: [...res].slice(-500), own: [...own].slice(-500) });
+  return sent;
+}
+
 const DB_URL = process.env.DATABASE_URL ||
   "https://barbertor-default-rtdb.europe-west1.firebasedatabase.app";
 
@@ -604,6 +697,12 @@ function apptTs(date, start) {
     const nudged = await nudgeSilentShops(db, shopsVal, now, sendToUid, TRIAL_DAYS);
     if (nudged) console.log(`תזכורת "שלח ללקוחות": נשלחה ל-${nudged} מכשירים.`);
   } catch (e) { console.warn('תזכורת "שלח ללקוחות" נכשלה:', (e && e.message) || e); }
+
+  // החלפת תורים בין לקוחות — פושים לשני הצדדים ולספר. מבודד — כישלון לא פוגע בהתראות.
+  try {
+    const swapSent = await notifySwaps(db, shopsVal, now, sendToUid, bkNameOf);
+    if (swapSent) console.log(`החלפת תורים: נשלחו ${swapSent} פושים.`);
+  } catch (e) { console.warn("התראות החלפת תורים נכשלו:", (e && e.message) || e); }
 
   // הפעלת "תורים מחמירים" (כרגע "try" בלבד) — מניעת מחיקת תורים המונית. מבודד.
   try {
