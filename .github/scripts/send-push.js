@@ -303,8 +303,11 @@ async function notifySwaps(db, shopsVal, now, sendToUid, nameOf) {
           a.date === sw.aDate && a.start === sw.aStart && b.date === sw.bDate && b.start === sw.bStart &&
           Math.min(apptTs(sw.aDate, sw.aStart), apptTs(sw.bDate, sw.bStart)) > now;
         if (valid && fresh && sw.bUser) {
+          // המשפט שצירף המבקש — הוא מה שמשכנע, ולכן נכנס גם לפוש
+          const note = String(sw.note || "").replace(/\s+/g, " ").trim().slice(0, 120);
           sent += await sendToUid(sw.bUser, "🔄 בקשה להחלפת תור",
-            `לקוח אחר מציע להחליף את התור שלך ${relDay(sw.bDate)} בשעה ${sw.bStart} בתור שלו ${relDay(sw.aDate)} בשעה ${sw.aStart} · ${shopName}`,
+            `לקוח אחר מציע להחליף את התור שלך ${relDay(sw.bDate)} בשעה ${sw.bStart} בתור שלו ${relDay(sw.aDate)} בשעה ${sw.aStart}` +
+            (note ? `\n״${note}״` : "") + ` · ${shopName}`,
             "swapreq-" + sw.id);
         }
       }

@@ -156,7 +156,10 @@ UG.Store = (function () {
      **הספר מאשר ידנית** (approveSwap). לא אוטומטית בכוונה: את צומת הבקשות כל אחד יכול
      לכתוב, ואישור אוטומטי היה מאפשר לזייף "הסכמה" ולהזיז דרך המכשיר של הספר תורים
      של לקוחות אחרים — בדיוק מה שהמצב המחמיר נועד למנוע.
-     by = מי החליט: "client" (הלקוח שהתור שלו התבקש) או "owner" (הספר). */
+     by = מי החליט: "client" (הלקוח שהתור שלו התבקש) או "owner" (הספר).
+     note = משפט אחד שהמבקש צירף כדי לשכנע (v202). **הוא יושב בצומת הגלוי ולכן נקרא
+     בידי כל מי שרואה את המספרה** — ראו swapNoteOk ב-app.js, שחוסם כתיבת טלפון בתוכו. */
+  const SWAP_NOTE_MAX = 120;
   const SWAP_LEAD_MS = 60 * 60000;   // שני התורים חייבים להיות לפחות שעה קדימה
   const SWAP_MAX_PENDING = 3;        // בקשות פתוחות לכל לקוח
   const SWAP_STATUSES = ["pending", "accepted", "done", "declined", "cancelled", "void"];
@@ -170,6 +173,8 @@ UG.Store = (function () {
       r.createdAt = Number(x.createdAt) || 0;
       if (x.decidedAt) r.decidedAt = Number(x.decidedAt) || 0;
       if (x.by === "client" || x.by === "owner") r.by = x.by;
+      const note = String(x.note || "").replace(/\s+/g, " ").trim().slice(0, SWAP_NOTE_MAX);
+      if (note) r.note = note;
       out[r.id] = r;
     });
     return out;
@@ -240,6 +245,8 @@ UG.Store = (function () {
     if (!b.userId || String(b.userId).indexOf("owner:") === 0) return { ok: false, reason: "אי אפשר להציע החלפה על התור הזה" };
     const sw = { id: u.uid(), aBk: a.id, bBk: b.id, aUser: String(data.aUser || ""), bUser: b.userId,
       aDate: a.date, aStart: a.start, bDate: b.date, bStart: b.start, status: "pending", createdAt: Date.now() };
+    const note = String(data.note || "").replace(/\s+/g, " ").trim().slice(0, SWAP_NOTE_MAX);
+    if (note) sw.note = note;
     const chk = swapCheck(state, sw);
     if (!chk.ok) return chk;
     const open = swapList().filter((x) => x.aUser === sw.aUser && x.status === "pending" && swapCheck(state, x).ok);

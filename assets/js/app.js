@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "201";
+  const APP_VERSION = "202";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ----------
      אינסטגרם ופייסבוק מצמידים פרמטר מעקב לקישור שמשתפים בהם (igsh / igshid / fbclid),
@@ -2801,6 +2801,7 @@
         <div class="bn-title">לקוח אחר מבקש להתחלף איתך בתור</div>
         <div class="bn-sub">התור שלך: <b>${esc(swapWhen(sw.bDate, sw.bStart))}</b></div>
         <div class="bn-sub">במקומו: <b>${esc(swapWhen(sw.aDate, sw.aStart))}</b></div>
+        ${sw.note ? `<div class="bn-sub swap-note">״${esc(sw.note)}״</div>` : ""}
         <div class="bn-sub">אותו שירות, רק השעה מתחלפת. הפרטים שלך לא נחשפים לאף אחד.</div>
         ${list.length > 1 ? `<div class="bn-sub">ועוד ${list.length - 1} בקשות</div>` : ""}
       </div>
@@ -2897,15 +2898,26 @@
           ? `<button class="swap-opt" data-act="swap-request" data-a="${esc(m.id)}" data-b="${esc(target.id)}">
                <span>להציע את התור שלי: <b>${esc(swapWhen(m.date, m.start))}</b></span><small>${esc(m.serviceName)}</small></button>`
           : `<div class="swap-opt off"><span>התור שלך ${esc(swapWhen(m.date, m.start))}</span><small>${esc(chk.reason)}</small></div>`;
-      }).join("") + `<p class="hint swap-p">${st.shop && st.shop.strictBookings
-        ? "הבקשה נשלחת בלי השם והטלפון שלך. אם הוא יסכים — הספר יאשר את ההחלפה."
-        : "הבקשה נשלחת בלי השם והטלפון שלך. אם הוא יסכים — התורים מתחלפים מיד."}</p>`;
+      }).join("") + `
+        <label class="swap-note-lbl" for="swap-note">אפשר להוסיף משפט שישכנע אותו (לא חובה)</label>
+        <textarea class="input swap-note-in" id="swap-note" rows="2" maxlength="120"
+          placeholder="למשל: אני עובד עד 14:00, יעזור לי מאוד"></textarea>
+        <p class="hint swap-p">${st.shop && st.shop.strictBookings
+          ? "הבקשה נשלחת בלי השם והטלפון שלך. אם הוא יסכים — הספר יאשר את ההחלפה."
+          : "הבקשה נשלחת בלי השם והטלפון שלך. אם הוא יסכים — התורים מתחלפים מיד."}</p>`;
     }
     return `
       <div class="swap-box">
         <div class="swap-h">🔄 להתחלף עם מי שקבע ב-${esc(target.start)}</div>
         ${body}
       </div>`;
+  }
+  /* המשפט נשמר בצומת הגלוי של המספרה — כל מי שפותח את העמוד יכול לקרוא אותו. לכן
+     חוסמים רצף שנראה כמו טלפון (9+ ספרות, גם עם מקפים/רווחים/+). שעה כמו 14:00 או
+     "ב-2 בדצמבר" עוברות. זו הודעה ללקוח, לא חיתוך שקט של מה שכתב. */
+  function swapNoteOk(note) {
+    const digits = String(note || "").replace(/[\s()\-.+]/g, "");
+    return !/\d{9,}/.test(digits);
   }
   // ב"התורים שלי": בקשה ששלחתי על התור הזה, או סימון שהוא כבר הוחלף
   function swapMineLine(st, b) {
@@ -7552,8 +7564,15 @@
         case "client-detail": clientDetail(t.dataset.key); break;
         // החלפת תורים בין לקוחות (try)
         case "swap-request": {
+          const noteEl = $("#swap-note");
+          const note = noteEl ? noteEl.value.trim() : "";
+          if (!swapNoteOk(note)) {
+            toast("אל תכתבו כאן מספר טלפון — המשפט גלוי לכל מי שנכנס למספרה", "", "⚠️");
+            if (noteEl) noteEl.focus();
+            break;
+          }
           t.disabled = true;
-          const r = await Store.requestSwap({ aBk: t.dataset.a, bBk: t.dataset.b, aUser: identity.userId });
+          const r = await Store.requestSwap({ aBk: t.dataset.a, bBk: t.dataset.b, aUser: identity.userId, note });
           if (!r.ok) { t.disabled = false; toast(r.reason || "לא הצלחנו לשלוח את הבקשה", "", "⚠️"); break; }
           closeModal(); haptic(14);
           toast("הבקשה נשלחה! נעדכן אותך כשהוא יענה", "good", "🔄");

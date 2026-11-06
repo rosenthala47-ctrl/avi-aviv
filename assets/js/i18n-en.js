@@ -1390,6 +1390,9 @@ window.UG.I18N_DICT.en = Object.assign(
   "להתחלף עם מי שקבע ב-{0}": "Swap with whoever booked {0}",
   "✓ שלחת בקשה להתחלף עם התור שלך {0}. נעדכן אותך כשהוא יענה.": function (w) { return / at \d{1,2}:\d{2}$/.test(w) ? "✓ You offered to swap your appointment " + w.replace(/^(Today|Tomorrow)\b/, function (m) { return m.toLowerCase(); }) + ". We'll let you know when they answer." : null; },
   "ביטול הבקשה": "Cancel request",
+  "אפשר להוסיף משפט שישכנע אותו (לא חובה)": "You can add a line to persuade them (optional)",
+  "למשל: אני עובד עד 14:00, יעזור לי מאוד": "e.g. I work until 2pm, this would really help",
+  "אל תכתבו כאן מספר טלפון — המשפט גלוי לכל מי שנכנס למספרה": "Don't put a phone number here — the line is visible to anyone who opens this shop",
   "יש לך תור אחר אצלנו? אפשר להציע למי שקבע את השעה הזו להתחלף איתך. כדי להציע — קבעו קודם תור בשעה פנויה.":
     "Already have another appointment with us? You can offer whoever booked this time to swap with you. To offer one — first book a free time.",
   "להציע את התור שלי: <0/>": "Offer my appointment: <0/>",
