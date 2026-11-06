@@ -465,8 +465,8 @@ GitHub, לא מכסה. **אל תניח שתהיה ריצה בתוך חלון "60
 (`script.google.com`, פרויקט **BarberTor push**, הפונקציה `pokePush`): טריגר
 "טיימר לפי דקות · כל 5 דקות" שעושה `POST` ל-
 `api.github.com/repos/rosenthala47-ctrl/ori-grushko/actions/workflows/push-notify.yml/dispatches`
-עם `{"ref":"main"}` ו-PAT בשם `cron-push` (הרשאה אחת: `Actions: Read and write`
-על `ori-grushko` בלבד). תשובה תקינה = **204**.
+עם `{"ref":"main"}` ו-PAT בשם `cron-push-2` (הרשאה אחת: `Actions: Read and write`
+על `ori-grushko` בלבד, **פג ב-6.11.2027**). תשובה תקינה = **204**.
 
 - **למה Apps Script ולא cron-job.org:** ניסינו, ההרשמה שלהם נשברה. Apps Script
   חינמי, רץ עם החשבון שכבר קיים, ואין בו עוד סיסמה לנהל. המכסה החופשית (90 דק׳
@@ -480,7 +480,7 @@ GitHub, לא מכסה. **אל תניח שתהיה ריצה בתוך חלון "60
 - **המפתח פג תוקף.** כשזה יקרה הטריגר יחזיר 401, הקרון יחזור לקצב של GitHub
   (2–7 שעות) **בלי שום הודעת שגיאה באפליקציה** — התסמין יהיה "ההתראות שוב
   מאחרות". גוגל שולחת מייל יומי על כשלי טריגר, וזה הערוץ היחיד שיתריע.
-  תאריך התפוגה: `github.com/settings/personal-access-tokens`.
+  **6.11.2027** — לבדוק ב-`github.com/settings/personal-access-tokens`.
   לחידוש: מפתח חדש באותן הרשאות ← להדביק בשורה 2 של הסקריפט ← שמירה ← `הפעלה`
   ← לוודא 204 ← למחוק את הישן.
 - **אם צריך מיידיות אמיתית (שניות)** — Cloud Function ב-Firebase. דורש העברת
