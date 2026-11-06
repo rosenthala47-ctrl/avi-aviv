@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "200";
+  const APP_VERSION = "201";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ----------
      אינסטגרם ופייסבוק מצמידים פרמטר מעקב לקישור שמשתפים בהם (igsh / igshid / fbclid),
@@ -2771,9 +2771,12 @@
      מחמירה לקוח לא רשאי להזיז תורים — ההסכמה נשמרת והספר מאשר (ownerSwapBanner).
      נקודות כניסה: חלון השעה התפוסה (swapOfferHtml), באנר למי שהתור שלו מבוקש
      (swapInBanner), באנר תוצאה (swapOutBanner), שורה ב"התורים שלי" (swapMineLine).
-     להרחבה לשאר המספרות — להוסיף ל-SWAP_SHOPS, ורצוי מתג הפעלה בהגדרות של הספר. */
-  const SWAP_SHOPS = ["try"];
-  function swapFeature() { return SWAP_SHOPS.indexOf(SHOP) !== -1; }
+     מאז v201: פעיל בכל המספרות, ואפשר לכבות בהגדרות ← תורים ותזכורות (shop.swaps).
+     ברירת המחדל דלוקה — פיצ׳ר שכבוי כברירת מחדל פשוט לא קיים בפועל. */
+  function swapFeature(st) {
+    const sh = ((st || Store.get()) || {}).shop;
+    return !!sh && sh.clientSwaps !== false;
+  }
   const SWAP_SEEN = "ug_swap_seen__" + SHOP;
   function swapSeen() { try { return JSON.parse(localStorage.getItem(SWAP_SEEN) || "[]"); } catch (e) { return []; } }
   function markSwapSeen(key) {
@@ -2783,7 +2786,7 @@
   const swapWhen = (date, start) => u.relativeDay(date) + (LANG === "en" ? " at " : " בשעה ") + start;
   // בקשות שמחכות לתשובה שלי (התור שלי מבוקש), מהישנה לחדשה
   function swapsToMe(st) {
-    if (!swapFeature() || view.ownerPreview || !identity.userId) return [];
+    if (!swapFeature(st) || view.ownerPreview || !identity.userId) return [];
     return Store.swapList().filter((x) => x.status === "pending" && x.bUser === identity.userId && Store.swapCheck(st, x).ok)
       .sort((a, z) => a.createdAt - z.createdAt);
   }
@@ -2810,7 +2813,7 @@
   /* תשובה על החלפה — מוצגת פעם אחת (עד שסוגרים), לפי מזהה + מצב. למבקש תמיד; למי
      שהתור שלו התבקש — רק כשהספר הוא שהחליט (מספרה מחמירה), כי אחרת הוא עצמו לחץ. */
   function swapOutBanner(st) {
-    if (!swapFeature() || view.ownerPreview || !identity.userId) return "";
+    if (!swapFeature(st) || view.ownerPreview || !identity.userId) return "";
     const seen = swapSeen();
     const me = identity.userId;
     const sw = Store.swapList()
@@ -2841,7 +2844,7 @@
   }
   /* אצל הספר (מספרה מחמירה): שני לקוחות הסכימו להתחלף — ההחלפה מחכה לאישורו */
   function ownerSwapBanner(st) {
-    if (!swapFeature()) return "";
+    if (!swapFeature(st)) return "";
     const list = Store.swapList().filter((x) => x.status === "accepted" && Store.swapCheck(st, x).ok)
       .sort((a, z) => (a.decidedAt || 0) - (z.decidedAt || 0));
     if (!list.length) return "";
@@ -2867,7 +2870,7 @@
   /* בחלון של שעה תפוסה: הצעה להתחלף עם מי שקבע אותה. התור המבוקש = התור שתופס את
      הריבוע ברשת, לפי משך השירות שהלקוח בחר — בדיוק כמו שהרשת סימנה אותו "תפוס". */
   function swapOfferHtml(st, dateKey, start) {
-    if (!swapFeature() || !identity.userId) return "";
+    if (!swapFeature(st) || !identity.userId) return "";
     const svc = st.services.find((x) => x.id === view.selService);
     const dur = (svc && svc.durationMin) || st.shop.slotStep || 45;
     const slot = gridSlots(dateKey, dur).find((x) => x.start === start);
@@ -2906,7 +2909,7 @@
   }
   // ב"התורים שלי": בקשה ששלחתי על התור הזה, או סימון שהוא כבר הוחלף
   function swapMineLine(st, b) {
-    if (!swapFeature()) return "";
+    if (!swapFeature(st)) return "";
     const lines = Store.swapList()
       .filter((x) => x.status === "pending" && x.aUser === identity.userId && x.aBk === b.id && Store.swapCheck(st, x).ok)
       .map((x) => `<div class="swap-line">🔄 הצעת להתחלף עם ${esc(swapWhen(x.bDate, x.bStart))} · ממתין לתשובה
@@ -6303,6 +6306,8 @@
             card: editCard("⏰ תזכורת לפני התור", `<select class="input" id="set-remind">${[30, 60, 90, 120].map((n) => `<option value="${n}" ${st.shop.reminderMinutes === n ? "selected" : ""}>${n} דקות לפני</option>`).join("")}</select>`, "מתי תישלח ללקוח התראה על התור המתקרב.") },
           { id: "remindDay", type: "toggle", key: "remindDayBefore", ico: "📅", color: "#8b5cf6",
             label: "תזכורת יום לפני", sub: "תזכורת נוספת כיממה מראש — מקטינה ביטולים", on: st.shop.remindDayBefore !== false },
+          { id: "swaps", type: "toggle", key: "clientSwaps", ico: "🔄", color: "#14b8a6",
+            label: "החלפת תורים בין לקוחות", sub: "לקוח שרוצה שעה תפוסה יכול להציע למי שקבע אותה להתחלף", on: st.shop.clientSwaps !== false },
           { id: "hidefree", ico: "🚫", color: "#64748b", label: "סגירת ההרשמה", val: hideFreeLabel(st.shop.hideFreeBeforeMin),
             card: editCard("🚫 סגירת ההרשמה לפני התור",
               `<select class="input" id="set-hidefree"><option value="0" ${!Number(st.shop.hideFreeBeforeMin) ? "selected" : ""}>ללא — אפשר להזמין עד הרגע האחרון</option>${[30, 60, 90, 120, 180, 240, 360, 720].map((n) => `<option value="${n}" ${Number(st.shop.hideFreeBeforeMin) === n ? "selected" : ""}>${hideFreeLabel(n)}</option>`).join("")}</select>`,

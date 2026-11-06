@@ -287,7 +287,8 @@ async function notifySwaps(db, shopsVal, now, sendToUid, nameOf) {
   for (const sid of Object.keys(shopsVal || {})) {
     const shop = shopsVal[sid];
     const swaps = asArr(shop && shop.swaps);
-    if (!swaps.length) continue;
+    // הספר כיבה את הפיצ׳ר בהגדרות — בקשות שנשארו פתוחות לא מייצרות התראות
+    if (!swaps.length || (shop.shop && shop.shop.clientSwaps === false)) continue;
     const shopName = (shop.shop && shop.shop.name) || "המספרה";
     const byId = {};
     asArr(shop.bookings).forEach((b) => { if (b && b.id) byId[b.id] = b; });

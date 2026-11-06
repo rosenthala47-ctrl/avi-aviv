@@ -1370,6 +1370,8 @@ window.UG.I18N_DICT.en = Object.assign(
   /* התאריך מגיע כבר באנגלית (swapWhen: "Tomorrow at 12:00"). הפונקציות בודקות שזה אכן
      התאריך — אחרת תבנית כמו "התור שלך {0}" הייתה תופסת גם "התור שלך בוטל · …" — ומקטינות
      את Today/Tomorrow באמצע משפט. */
+  "החלפת תורים בין לקוחות": "Appointment swaps between clients",
+  "לקוח שרוצה שעה תפוסה יכול להציע למי שקבע אותה להתחלף": "A client who wants a taken time can offer whoever booked it to swap",
   "לקוח אחר מבקש להתחלף איתך בתור": "Another client is asking to swap appointments with you",
   "התור שלך: <0/>": "Your appointment: <0/>",
   "במקומו: <0/>": "Instead: <0/>",
