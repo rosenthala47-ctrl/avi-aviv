@@ -160,7 +160,13 @@ UG.Store = (function () {
      note = משפט אחד שהמבקש צירף כדי לשכנע (v202). **הוא יושב בצומת הגלוי ולכן נקרא
      בידי כל מי שרואה את המספרה** — ראו swapNoteOk ב-app.js, שחוסם כתיבת טלפון בתוכו. */
   const SWAP_NOTE_MAX = 120;
-  const SWAP_LEAD_MS = 60 * 60000;   // שני התורים חייבים להיות לפחות שעה קדימה
+  /* כמה זמן לפני התור עוד מותר להחליף. ברירת מחדל שעה; הספר משנה בהגדרות
+     (shop.swapLeadMin) — נריה שאל "למה דווקא שעה", והוא מכיר את הלקוחות שלו. */
+  const SWAP_LEAD_DEFAULT = 60;
+  function swapLeadMin(cur) {
+    const n = Number(((cur || state).shop || {}).swapLeadMin);
+    return n >= 10 && n <= 720 ? n : SWAP_LEAD_DEFAULT;
+  }
   const SWAP_MAX_PENDING = 3;        // בקשות פתוחות לכל לקוח
   const SWAP_STATUSES = ["pending", "accepted", "done", "declined", "cancelled", "void"];
   function normSwaps(v) {
@@ -195,8 +201,9 @@ UG.Store = (function () {
       return { ok: false, reason: "אחד התורים זז בינתיים — הבקשה לא רלוונטית" };
     }
     const ta = u.dateTime(a.date, a.start).getTime(), tb = u.dateTime(b.date, b.start).getTime();
-    if (ta - now < SWAP_LEAD_MS || tb - now < SWAP_LEAD_MS) {
-      return { ok: false, reason: "כבר מאוחר מדי להחליף — אחד התורים בעוד פחות משעה" };
+    const leadMs = swapLeadMin(cur) * 60000;
+    if (ta - now < leadMs || tb - now < leadMs) {
+      return { ok: false, reason: "כבר מאוחר מדי להחליף — אחד התורים קרוב מדי" };
     }
     const dur = (x) => Math.max(1, u.toMin(x.end) - u.toMin(x.start));
     const aEnd = u.toMin(b.start) + dur(a), bEnd = u.toMin(a.start) + dur(b);
@@ -241,8 +248,9 @@ UG.Store = (function () {
     const bks = state.bookings || [];
     const a = bks.find((x) => x && x.id === data.aBk), b = bks.find((x) => x && x.id === data.bBk);
     if (!a || !b) return { ok: false, reason: "התור כבר לא קיים" };
-    // תור שהספר רשם ידנית — אין מולו לקוח באפליקציה שיוכל לענות
-    if (!b.userId || String(b.userId).indexOf("owner:") === 0) return { ok: false, reason: "אי אפשר להציע החלפה על התור הזה" };
+    /* תור שהספר רשם ידנית: אין מולו לקוח באפליקציה שיענה, ולכן **הספר** מקבל את
+       הבקשה ומחליט (ownerSwapBanner). בלי userId בכלל — אין למי לשייך, ואין בקשה. */
+    if (!b.userId) return { ok: false, reason: "אי אפשר להציע החלפה על התור הזה" };
     const sw = { id: u.uid(), aBk: a.id, bBk: b.id, aUser: String(data.aUser || ""), bUser: b.userId,
       aDate: a.date, aStart: a.start, bDate: b.date, bStart: b.start, status: "pending", createdAt: Date.now() };
     const note = String(data.note || "").replace(/\s+/g, " ").trim().slice(0, SWAP_NOTE_MAX);
@@ -274,11 +282,15 @@ UG.Store = (function () {
     }
     return executeSwap(sw, "client");
   }
-  // הספר (מספרה מחמירה): אישור או דחייה של החלפה שהלקוחות כבר הסכימו עליה
+  // האם זו בקשה שהספר צריך לענות עליה (תור שרשם ידנית)
+  const swapForOwner = (sw) => !!sw && String(sw.bUser || "").indexOf("owner:") === 0;
+  /* הספר מחליט: במספרה מחמירה על החלפה שהלקוחות כבר הסכימו עליה (accepted),
+     ובכל מספרה על בקשה שהופנתה אליו כי התור השני נרשם ידנית (pending). */
   async function approveSwap(id, approve) {
     await freshForSwap();
     const sw = (state.swaps || {})[id];
-    if (!sw || sw.status !== "accepted") return { ok: false, reason: "הבקשה לא נמצאה" };
+    const mine = sw && (sw.status === "accepted" || (sw.status === "pending" && swapForOwner(sw)));
+    if (!mine) return { ok: false, reason: "הבקשה לא נמצאה" };
     if (!approve) {
       await saveSwap(Object.assign({}, sw, { status: "declined", decidedAt: Date.now(), by: "owner" }));
       return { ok: true, status: "declined" };
@@ -1829,7 +1841,7 @@ UG.Store = (function () {
 
   return {
     init, subscribe, get,
-    setDay, setBreaks, breaksOn, swapCheck, swapList, requestSwap, cancelSwap, answerSwap, approveSwap, setWeekVariable, saveShop, upsertService, removeService, upsertProduct, removeProduct,
+    setDay, setBreaks, breaksOn, swapCheck, swapList, swapLeadMin, swapForOwner, requestSwap, cancelSwap, answerSwap, approveSwap, setWeekVariable, saveShop, upsertService, removeService, upsertProduct, removeProduct,
     addContacts, removeContact, getClientPrices, setClientPrices, readVip, addBroadcast, addClosedDates, removeClosedDate,
     setSlotOpen, blockClient, unblockClient,
     createBooking, setBookingStatus, deleteBooking,

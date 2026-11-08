@@ -305,8 +305,13 @@ async function notifySwaps(db, shopsVal, now, sendToUid, nameOf) {
         if (valid && fresh && sw.bUser) {
           // המשפט שצירף המבקש — הוא מה שמשכנע, ולכן נכנס גם לפוש
           const note = String(sw.note || "").replace(/\s+/g, " ").trim().slice(0, 120);
-          sent += await sendToUid(sw.bUser, "🔄 בקשה להחלפת תור",
-            `לקוח אחר מציע להחליף את התור שלך ${relDay(sw.bDate)} בשעה ${sw.bStart} בתור שלו ${relDay(sw.aDate)} בשעה ${sw.aStart}` +
+          // תור שהספר רשם ידנית: אין מולו לקוח באפליקציה — הפוש הולך לספר, הוא שמחליט
+          const toOwner = String(sw.bUser).indexOf("owner:") === 0;
+          sent += await sendToUid(toOwner ? "owner_" + sid : sw.bUser,
+            toOwner ? "🔄 לקוח רוצה שעה שרשמת ידנית" : "🔄 בקשה להחלפת תור",
+            (toOwner
+              ? `${nameOf(sid, b)} רשום ${relDay(sw.bDate)} בשעה ${sw.bStart}, ולקוח אחר מציע לו במקום ${relDay(sw.aDate)} בשעה ${sw.aStart}`
+              : `לקוח אחר מציע להחליף את התור שלך ${relDay(sw.bDate)} בשעה ${sw.bStart} בתור שלו ${relDay(sw.aDate)} בשעה ${sw.aStart}`) +
             (note ? `\n״${note}״` : "") + ` · ${shopName}`,
             "swapreq-" + sw.id);
         }
@@ -324,7 +329,9 @@ async function notifySwaps(db, shopsVal, now, sendToUid, nameOf) {
         }
       }
       // מי שהתור שלו התבקש כבר הסכים — אבל כשהספר החליט, גם הוא צריך לדעת
-      if (byOwner && (sw.status === "done" || sw.status === "declined") && !res.has(key + ":" + sw.status + ":b")) {
+      // תור שהספר רשם ידנית — אין מולו לקוח באפליקציה שצריך לעדכן
+      const bIsOwner = String(sw.bUser || "").indexOf("owner:") === 0;
+      if (byOwner && !bIsOwner && (sw.status === "done" || sw.status === "declined") && !res.has(key + ":" + sw.status + ":b")) {
         res.add(key + ":" + sw.status + ":b"); dirty = true;
         if (fresh && sw.bUser) {
           const m = sw.status === "done"

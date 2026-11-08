@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "202";
+  const APP_VERSION = "203";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ----------
      אינסטגרם ופייסבוק מצמידים פרמטר מעקב לקישור שמשתפים בהם (igsh / igshid / fbclid),
@@ -2843,24 +2843,36 @@
       </div>
     </div>`;
   }
-  /* אצל הספר (מספרה מחמירה): שני לקוחות הסכימו להתחלף — ההחלפה מחכה לאישורו */
+  /* אצל הספר — שני מצבים שבהם הוא מחליט:
+     1. מספרה מחמירה: שני הלקוחות כבר הסכימו (accepted), וצריך את הביצוע שלו.
+     2. **תור שהוא רשם ידנית** (pending + bUser מתחיל ב-owner:): אין מול הלקוח
+        ההוא אפליקציה, אז הספר מרים טלפון ומחליט. נריה ביקש (נובמבר 2026). */
   function ownerSwapBanner(st) {
     if (!swapFeature(st)) return "";
-    const list = Store.swapList().filter((x) => x.status === "accepted" && Store.swapCheck(st, x).ok)
-      .sort((a, z) => (a.decidedAt || 0) - (z.decidedAt || 0));
+    const list = Store.swapList()
+      .filter((x) => (x.status === "accepted" || (x.status === "pending" && Store.swapForOwner(x))) && Store.swapCheck(st, x).ok)
+      .sort((a, z) => (a.decidedAt || a.createdAt || 0) - (z.decidedAt || z.createdAt || 0));
     if (!list.length) return "";
     const sw = list[0];
     const a = st.bookings.find((x) => x.id === sw.aBk), b = st.bookings.find((x) => x.id === sw.bBk);
+    const mineBk = Store.swapForOwner(sw);
+    const phone = mineBk ? waNumber(bkPhone(b)) : "";
     return `
     <div class="banner sky swap-banner">
       <span class="bn-ico">🔄</span>
       <div class="bn-body">
-        <div class="bn-title">שני לקוחות רוצים להחליף תורים</div>
-        <div class="bn-sub">${esc(bkName(a) || "לקוח")} עובר ל${esc(swapWhen(sw.bDate, sw.bStart))}</div>
-        <div class="bn-sub">${esc(bkName(b) || "לקוח")} עובר ל${esc(swapWhen(sw.aDate, sw.aStart))}</div>
+        <div class="bn-title">${mineBk ? "לקוח רוצה שעה שרשמת ידנית" : "שני לקוחות רוצים להחליף תורים"}</div>
+        ${mineBk
+          ? `<div class="bn-sub">${esc(bkName(b) || "הלקוח")} רשום ל${esc(swapWhen(sw.bDate, sw.bStart))}</div>
+             <div class="bn-sub">לקוח אחר מציע לו במקום את ${esc(swapWhen(sw.aDate, sw.aStart))}</div>
+             ${sw.note ? `<div class="bn-sub swap-note">״${esc(sw.note)}״</div>` : ""}
+             <div class="bn-sub">תתקשרו לשאול — ורק אם הוא מסכים, אשרו כאן.</div>`
+          : `<div class="bn-sub">${esc(bkName(a) || "לקוח")} עובר ל${esc(swapWhen(sw.bDate, sw.bStart))}</div>
+             <div class="bn-sub">${esc(bkName(b) || "לקוח")} עובר ל${esc(swapWhen(sw.aDate, sw.aStart))}</div>`}
         ${list.length > 1 ? `<div class="bn-sub">ועוד ${list.length - 1} בקשות</div>` : ""}
       </div>
       <div class="bn-actions">
+        ${phone ? `<a class="btn btn-sm" href="tel:${esc(phone)}">📞 חיוג</a>` : ""}
         <button class="btn btn-primary btn-sm" data-act="owner-swap-ok" data-id="${esc(sw.id)}">אישור ההחלפה</button>
         <button class="btn btn-ghost btn-sm" data-act="owner-swap-no" data-id="${esc(sw.id)}">דחייה</button>
       </div>
@@ -2876,7 +2888,9 @@
     const dur = (svc && svc.durationMin) || st.shop.slotStep || 45;
     const slot = gridSlots(dateKey, dur).find((x) => x.start === start);
     const target = slot && slot.booking;
-    if (!target || !target.userId || String(target.userId).indexOf("owner:") === 0 || target.userId === identity.userId) return "";
+    if (!target || !target.userId || target.userId === identity.userId) return "";
+    // תור שהספר רשם ידנית: אין מולו לקוח באפליקציה, ולכן הבקשה מגיעה לספר והוא מחליט
+    const toOwner = String(target.userId).indexOf("owner:") === 0;
     const now = Date.now();
     const mine = (st.bookings || [])
       .filter((b) => b && b.userId === identity.userId && b.status !== "cancelled" && b.status !== "noshow" &&
@@ -2902,7 +2916,9 @@
         <label class="swap-note-lbl" for="swap-note">אפשר להוסיף משפט שישכנע אותו (לא חובה)</label>
         <textarea class="input swap-note-in" id="swap-note" rows="2" maxlength="120"
           placeholder="למשל: אני עובד עד 14:00, יעזור לי מאוד"></textarea>
-        <p class="hint swap-p">${st.shop && st.shop.strictBookings
+        <p class="hint swap-p">${toOwner
+          ? "את השעה הזו הספר רשם בעצמו, ולכן הבקשה תגיע אליו והוא יבדוק מול הלקוח."
+          : st.shop && st.shop.strictBookings
           ? "הבקשה נשלחת בלי השם והטלפון שלך. אם הוא יסכים — הספר יאשר את ההחלפה."
           : "הבקשה נשלחת בלי השם והטלפון שלך. אם הוא יסכים — התורים מתחלפים מיד."}</p>`;
     }
@@ -2915,6 +2931,9 @@
   /* המשפט נשמר בצומת הגלוי של המספרה — כל מי שפותח את העמוד יכול לקרוא אותו. לכן
      חוסמים רצף שנראה כמו טלפון (9+ ספרות, גם עם מקפים/רווחים/+). שעה כמו 14:00 או
      "ב-2 בדצמבר" עוברות. זו הודעה ללקוח, לא חיתוך שקט של מה שכתב. */
+  const SWAP_LEAD_OPTS = [{ m: 30, t: "עד חצי שעה לפני" }, { m: 60, t: "עד שעה לפני" },
+    { m: 120, t: "עד שעתיים לפני" }, { m: 180, t: "עד 3 שעות לפני" }, { m: 360, t: "עד 6 שעות לפני" }];
+  const swapLeadLabel = (m) => (SWAP_LEAD_OPTS.find((o) => o.m === m) || { t: m + " דקות לפני" }).t;
   function swapNoteOk(note) {
     const digits = String(note || "").replace(/[\s()\-.+]/g, "");
     return !/\d{9,}/.test(digits);
@@ -6320,11 +6339,17 @@
             label: "תזכורת יום לפני", sub: "תזכורת נוספת כיממה מראש — מקטינה ביטולים", on: st.shop.remindDayBefore !== false },
           { id: "swaps", type: "toggle", key: "clientSwaps", ico: "🔄", color: "#14b8a6",
             label: "החלפת תורים בין לקוחות", sub: "לקוח שרוצה שעה תפוסה יכול להציע למי שקבע אותה להתחלף", on: st.shop.clientSwaps !== false },
+        ].concat(st.shop.clientSwaps === false ? [] : [
+          { id: "swaplead", ico: "⌛", color: "#06b6d4", label: "עד מתי אפשר להחליף", val: swapLeadLabel(Store.swapLeadMin(st)),
+            card: editCard("⌛ עד מתי אפשר להחליף תור",
+              `<select class="input" id="set-swaplead">${SWAP_LEAD_OPTS.map((o) => `<option value="${o.m}" ${Store.swapLeadMin(st) === o.m ? "selected" : ""}>${o.t}</option>`).join("")}</select>`,
+              "קרוב מדי לתור — לא מציעים החלפה, כדי שההתראה תספיק להגיע ושהלקוח יספיק להגיע.") },
+        ]).concat([
           { id: "hidefree", ico: "🚫", color: "#64748b", label: "סגירת ההרשמה", val: hideFreeLabel(st.shop.hideFreeBeforeMin),
             card: editCard("🚫 סגירת ההרשמה לפני התור",
               `<select class="input" id="set-hidefree"><option value="0" ${!Number(st.shop.hideFreeBeforeMin) ? "selected" : ""}>ללא — אפשר להזמין עד הרגע האחרון</option>${[30, 60, 90, 120, 180, 240, 360, 720].map((n) => `<option value="${n}" ${Number(st.shop.hideFreeBeforeMin) === n ? "selected" : ""}>${hideFreeLabel(n)}</option>`).join("")}</select>`,
               "תור שנשאר פנוי כשנותר פחות מהזמן הזה ייעלם ממסך הלקוחות. אצלכם ביומן הוא ממשיך להופיע, ותוכלו לרשום אליו לקוח מזדמן.") },
-        ],
+        ]),
         brand: [
           { id: "logo", ico: "🖼️", color: "#0ea5e9", label: "לוגו המספרה", val: shopLogo(st) ? "הועלה" : "—", card: cLogo },
           { id: "cover", ico: "🌄", color: "#22c55e", label: "תמונת נושא", val: shopCover(st) ? "הועלתה" : "—", card: cCover },
@@ -8345,6 +8370,7 @@
     put("#set-addr", "address", (el) => el.value.trim());
     put("#set-phone", "phone", (el) => el.value.trim());
     put("#set-horizon", "bookingDays", (el) => Number(el.value));
+    put("#set-swaplead", "swapLeadMin", (el) => Number(el.value));
     put("#set-step", "slotStep", (el) => Number(el.value));
     put("#set-remind", "reminderMinutes", (el) => Number(el.value));
     put("#set-remind-day", "remindDayBefore", (el) => !!el.checked);
