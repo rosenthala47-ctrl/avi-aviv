@@ -302,11 +302,13 @@ async function notifySwaps(db, shopsVal, now, sendToUid, nameOf) {
         const valid = a && b && a.status !== "cancelled" && b.status !== "cancelled" &&
           a.date === sw.aDate && a.start === sw.aStart && b.date === sw.bDate && b.start === sw.bStart &&
           Math.min(apptTs(sw.aDate, sw.aStart), apptTs(sw.bDate, sw.bStart)) > now;
-        if (valid && fresh && sw.bUser) {
+        // תור שהספר רשם ידנית: אין מולו לקוח באפליקציה. הפוש הולך לספר — אבל רק אם הוא
+        // בחר לקבל בקשות כאלה (shop.swapManual, כבוי כברירת מחדל מאז v204); אחרת שותקים.
+        const toOwner = String(sw.bUser || "").indexOf("owner:") === 0;
+        const ownerWants = !!(shop.shop && shop.shop.swapManual === true);
+        if (valid && fresh && sw.bUser && (!toOwner || ownerWants)) {
           // המשפט שצירף המבקש — הוא מה שמשכנע, ולכן נכנס גם לפוש
           const note = String(sw.note || "").replace(/\s+/g, " ").trim().slice(0, 120);
-          // תור שהספר רשם ידנית: אין מולו לקוח באפליקציה — הפוש הולך לספר, הוא שמחליט
-          const toOwner = String(sw.bUser).indexOf("owner:") === 0;
           sent += await sendToUid(toOwner ? "owner_" + sid : sw.bUser,
             toOwner ? "🔄 לקוח רוצה שעה שרשמת ידנית" : "🔄 בקשה להחלפת תור",
             (toOwner

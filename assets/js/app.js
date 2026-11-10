@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "203";
+  const APP_VERSION = "204";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ----------
      אינסטגרם ופייסבוק מצמידים פרמטר מעקב לקישור שמשתפים בהם (igsh / igshid / fbclid),
@@ -2882,20 +2882,32 @@
   function clientAlerts(st) { return swapInBanner(st) + swapOutBanner(st) + alertBanner(st); }
   /* בחלון של שעה תפוסה: הצעה להתחלף עם מי שקבע אותה. התור המבוקש = התור שתופס את
      הריבוע ברשת, לפי משך השירות שהלקוח בחר — בדיוק כמו שהרשת סימנה אותו "תפוס". */
-  function swapOfferHtml(st, dateKey, start) {
-    if (!swapFeature(st) || !identity.userId) return "";
+  function swapTargetOf(st, dateKey, start) {
     const svc = st.services.find((x) => x.id === view.selService);
     const dur = (svc && svc.durationMin) || st.shop.slotStep || 45;
     const slot = gridSlots(dateKey, dur).find((x) => x.start === start);
-    const target = slot && slot.booking;
+    return (slot && slot.booking) || null;
+  }
+  const swapMyUpcoming = (st) => (st.bookings || [])
+    .filter((b) => b && b.userId === identity.userId && b.status !== "cancelled" && b.status !== "noshow" &&
+      u.dateTime(b.date, b.start).getTime() > Date.now());
+  /* שעה שהספר רשם ידנית, והוא לא בחר לקבל בקשות כאלה: אין הצעה — אבל גם לא שתיקה.
+     שורה אחת מסבירה ללקוח (שיש לו מה להציע) למה כאן אין אפשרות, בניגוד לשעות אחרות. */
+  function swapManualHint(st, dateKey, start) {
+    if (!swapFeature(st) || !identity.userId || Store.swapManualOn(st)) return "";
+    const target = swapTargetOf(st, dateKey, start);
+    if (!target || String(target.userId || "").indexOf("owner:") !== 0 || !swapMyUpcoming(st).length) return "";
+    return `<p class="hint swap-manual-hint">🔄 את השעה הזו הספר רשם בעצמו, ולכן אי אפשר להציע עליה החלפה.</p>`;
+  }
+  function swapOfferHtml(st, dateKey, start) {
+    if (!swapFeature(st) || !identity.userId) return "";
+    const target = swapTargetOf(st, dateKey, start);
     if (!target || !target.userId || target.userId === identity.userId) return "";
-    // תור שהספר רשם ידנית: אין מולו לקוח באפליקציה, ולכן הבקשה מגיעה לספר והוא מחליט
+    // תור שהספר רשם ידנית: אין מולו לקוח באפליקציה. רק אם הספר בחר בכך (shop.swapManual)
+    // הבקשה מגיעה אליו והוא מחליט; אחרת אין הצעה (ראו swapManualHint).
     const toOwner = String(target.userId).indexOf("owner:") === 0;
-    const now = Date.now();
-    const mine = (st.bookings || [])
-      .filter((b) => b && b.userId === identity.userId && b.status !== "cancelled" && b.status !== "noshow" &&
-        u.dateTime(b.date, b.start).getTime() > now)
-      .sort((a, z) => u.dateTime(a.date, a.start) - u.dateTime(z.date, z.start));
+    if (toOwner && !Store.swapManualOn(st)) return "";
+    const mine = swapMyUpcoming(st).sort((a, z) => u.dateTime(a.date, a.start) - u.dateTime(z.date, z.start));
     const pending = Store.swapList().find((x) => x.status === "pending" && x.aUser === identity.userId &&
       x.bBk === target.id && Store.swapCheck(st, x).ok);
     let body;
@@ -2931,7 +2943,7 @@
   /* המשפט נשמר בצומת הגלוי של המספרה — כל מי שפותח את העמוד יכול לקרוא אותו. לכן
      חוסמים רצף שנראה כמו טלפון (9+ ספרות, גם עם מקפים/רווחים/+). שעה כמו 14:00 או
      "ב-2 בדצמבר" עוברות. זו הודעה ללקוח, לא חיתוך שקט של מה שכתב. */
-  const SWAP_LEAD_OPTS = [{ m: 30, t: "עד חצי שעה לפני" }, { m: 60, t: "עד שעה לפני" },
+  const SWAP_LEAD_OPTS = [{ m: 15, t: "עד רבע שעה לפני" }, { m: 30, t: "עד חצי שעה לפני" }, { m: 60, t: "עד שעה לפני" },
     { m: 120, t: "עד שעתיים לפני" }, { m: 180, t: "עד 3 שעות לפני" }, { m: 360, t: "עד 6 שעות לפני" }];
   const swapLeadLabel = (m) => (SWAP_LEAD_OPTS.find((o) => o.m === m) || { t: m + " דקות לפני" }).t;
   function swapNoteOk(note) {
@@ -3857,7 +3869,7 @@
       <div class="m-sub">${swapHtml ? "אפשר להציע החלפה, או להיכנס לרשימת ההמתנה" : "אם התור יתפנה, נודיע לכם מיד ותוכלו לתפוס אותו"}</div>
       <div class="summary-row"><span class="sr-k">תאריך</span><span class="sr-v">${esc(u.longDate(dateKey))}</span></div>
       <div class="summary-row"><span class="sr-k">שעה</span><span class="sr-v">${esc(start)}</span></div>
-      ${swapHtml ? swapHtml + `<div class="swap-or"><span>🔔 או: רשימת המתנה — נודיע לכם אם יתפנה</span></div>` : ""}
+      ${swapHtml ? swapHtml + `<div class="swap-or"><span>🔔 או: רשימת המתנה — נודיע לכם אם יתפנה</span></div>` : swapManualHint(st, dateKey, start)}
       <div style="height:16px"></div>
       <div class="field-row">
         <div class="field"><label>שם פרטי <span class="req">*</span></label>
@@ -6344,6 +6356,8 @@
             card: editCard("⌛ עד מתי אפשר להחליף תור",
               `<select class="input" id="set-swaplead">${SWAP_LEAD_OPTS.map((o) => `<option value="${o.m}" ${Store.swapLeadMin(st) === o.m ? "selected" : ""}>${o.t}</option>`).join("")}</select>`,
               "קרוב מדי לתור — לא מציעים החלפה, כדי שההתראה תספיק להגיע ושהלקוח יספיק להגיע.") },
+          { id: "swapManual", type: "toggle", key: "swapManual", ico: "📞", color: "#8b5cf6",
+            label: "החלפה גם על תורים שרשמתי ידנית", sub: "הבקשה תגיע אליכם — ותאשרו אחרי שבדקתם מול הלקוח", on: st.shop.swapManual === true },
         ]).concat([
           { id: "hidefree", ico: "🚫", color: "#64748b", label: "סגירת ההרשמה", val: hideFreeLabel(st.shop.hideFreeBeforeMin),
             card: editCard("🚫 סגירת ההרשמה לפני התור",

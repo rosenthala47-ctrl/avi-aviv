@@ -162,6 +162,10 @@ UG.Store = (function () {
   const SWAP_NOTE_MAX = 120;
   /* כמה זמן לפני התור עוד מותר להחליף. ברירת מחדל שעה; הספר משנה בהגדרות
      (shop.swapLeadMin) — נריה שאל "למה דווקא שעה", והוא מכיר את הלקוחות שלו. */
+  /* תור שהספר רשם ידנית: כברירת מחדל **אין עליו החלפה בכלל** (v204). ב-v203 הבקשה
+     הופנתה לספר, ונריה — שהציע את כל הפיצ׳ר — ענה: "אני לא רוצה להתעסק עם לקוחות,
+     בגלל זה ביקשתי… אפס קמצוץ". רק ספר שהדליק shop.swapManual מקבל בקשות כאלה. */
+  function swapManualOn(cur) { return ((cur || state).shop || {}).swapManual === true; }
   const SWAP_LEAD_DEFAULT = 60;
   function swapLeadMin(cur) {
     const n = Number(((cur || state).shop || {}).swapLeadMin);
@@ -196,6 +200,10 @@ UG.Store = (function () {
     if (!swapLive(a) || !swapLive(b)) return { ok: false, reason: "אחד התורים כבר לא קיים — הבקשה לא רלוונטית" };
     if (!a.userId || a.userId !== sw.aUser || !b.userId || b.userId !== sw.bUser || a.userId === b.userId) {
       return { ok: false, reason: "הבקשה לא רלוונטית יותר" };
+    }
+    // תור שהספר רשם ידנית — רק אם הספר בחר לקבל בקשות כאלה (גם בקשה ישנה נעלמת כשכיבה)
+    if (String(b.userId).indexOf("owner:") === 0 && !swapManualOn(cur)) {
+      return { ok: false, reason: "אי אפשר להציע החלפה על התור הזה" };
     }
     if (a.date !== sw.aDate || a.start !== sw.aStart || b.date !== sw.bDate || b.start !== sw.bStart) {
       return { ok: false, reason: "אחד התורים זז בינתיים — הבקשה לא רלוונטית" };
@@ -1841,7 +1849,7 @@ UG.Store = (function () {
 
   return {
     init, subscribe, get,
-    setDay, setBreaks, breaksOn, swapCheck, swapList, swapLeadMin, swapForOwner, requestSwap, cancelSwap, answerSwap, approveSwap, setWeekVariable, saveShop, upsertService, removeService, upsertProduct, removeProduct,
+    setDay, setBreaks, breaksOn, swapCheck, swapList, swapLeadMin, swapManualOn, swapForOwner, requestSwap, cancelSwap, answerSwap, approveSwap, setWeekVariable, saveShop, upsertService, removeService, upsertProduct, removeProduct,
     addContacts, removeContact, getClientPrices, setClientPrices, readVip, addBroadcast, addClosedDates, removeClosedDate,
     setSlotOpen, blockClient, unblockClient,
     createBooking, setBookingStatus, deleteBooking,
