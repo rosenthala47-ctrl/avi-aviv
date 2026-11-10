@@ -173,6 +173,32 @@ UG.Store = (function () {
   }
   const SWAP_MAX_PENDING = 3;        // בקשות פתוחות לכל לקוח
   const SWAP_STATUSES = ["pending", "accepted", "done", "declined", "cancelled", "void"];
+  /* שיחה בתוך בקשת החלפה (v205): msgs = { <mid>: { f: "a"|"b", t, at } }. נריה (והמשתמש,
+     פעם שלישית): "שידברו אחד עם השני… שהכל ביניהם". אנונימית — בלי שם ובלי טלפון; הספר
+     לא רואה אותה ולא מטפל בה. היא חיה רק כשהבקשה פתוחה, ומוגבלת באורך. */
+  const SWAP_MSG_MAX = 20;    // הודעות בשיחה אחת (כולל המשפט הראשון)
+  const SWAP_MSG_LEN = 200;
+  const swapText = (t, max) => String(t || "").replace(/\s+/g, " ").trim().slice(0, max);
+  function normSwapMsgs(v) {
+    const out = {};
+    if (!v || typeof v !== "object") return out;
+    Object.keys(v).slice(0, 60).forEach((k) => {
+      const m = v[k];
+      if (!m || typeof m !== "object") return;
+      const f = m.f === "a" || m.f === "b" ? m.f : "";
+      const t = swapText(m.t, SWAP_MSG_LEN);
+      if (f && t) out[String(k)] = { f, t, at: Number(m.at) || 0 };
+    });
+    return out;
+  }
+  // כל השיחה לפי סדר: המשפט שצורף לבקשה הוא ההודעה הראשונה של המבקש
+  function swapMsgs(sw) {
+    const list = [];
+    if (sw && sw.note) list.push({ id: "note", f: "a", t: sw.note, at: Number(sw.createdAt) || 0 });
+    const m = (sw && sw.msgs) || {};
+    Object.keys(m).forEach((k) => list.push({ id: k, f: m[k].f, t: m[k].t, at: m[k].at || 0 }));
+    return list.sort((x, y) => (x.at - y.at) || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+  }
   function normSwaps(v) {
     const out = {};
     asArray(v).forEach((x) => {
@@ -185,6 +211,8 @@ UG.Store = (function () {
       if (x.by === "client" || x.by === "owner") r.by = x.by;
       const note = String(x.note || "").replace(/\s+/g, " ").trim().slice(0, SWAP_NOTE_MAX);
       if (note) r.note = note;
+      const msgs = normSwapMsgs(x.msgs);
+      if (Object.keys(msgs).length) r.msgs = msgs;
       out[r.id] = r;
     });
     return out;
@@ -250,6 +278,32 @@ UG.Store = (function () {
     try { await withTimeout(reloadFromRemote(), 8000); } catch (e) { /* עובדים עם המצב הקיים */ }
     refreshLocal();
   }
+  // הצד השני כבר סירב בעצמו לאותה הצעה בדיוק — לא שולחים לו אותה שוב (וגם לא הודעות)
+  function swapDeclinedBefore(aBk, bBk, aUser) {
+    return swapList().some((x) => x.status === "declined" && x.by !== "owner" && x.aBk === aBk && x.bBk === bBk && x.aUser === aUser);
+  }
+  /* הודעה בשיחה. רק שני הצדדים, רק כשהבקשה פתוחה ותקפה, ולא בבקשה שהופנתה לספר
+     (תור ידני — שם אין צד שני באפליקציה). */
+  async function sendSwapMsg(id, userId, text) {
+    await freshForSwap();
+    const sw = (state.swaps || {})[id];
+    if (!sw || !userId || (sw.aUser !== userId && sw.bUser !== userId)) return { ok: false, reason: "הבקשה לא נמצאה" };
+    if (sw.status !== "pending" || !swapCheck(state, sw).ok) return { ok: false, reason: "הבקשה כבר נסגרה — אי אפשר לכתוב בה" };
+    if (String(sw.bUser || "").indexOf("owner:") === 0) return { ok: false, reason: "הבקשה כבר נסגרה — אי אפשר לכתוב בה" };
+    const t = swapText(text, SWAP_MSG_LEN);
+    if (!t) return { ok: false, reason: "ההודעה ריקה" };
+    if (swapMsgs(sw).length >= SWAP_MSG_MAX) return { ok: false, reason: "השיחה הגיעה לאורך המרבי" };
+    const mid = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const msg = { f: sw.aUser === userId ? "a" : "b", t, at: Date.now() };
+    const msgs = Object.assign({}, sw.msgs || {}); msgs[mid] = msg;
+    state.swaps[id] = Object.assign({}, sw, { msgs });
+    emit();
+    try {
+      if (backend.addSwapMsg) await backend.addSwapMsg(id, mid, msg);
+      else await persistChildren(["swaps"]);
+    } catch (e) { return { ok: false, reason: bookingErrText(e) }; }
+    return { ok: true };
+  }
   // לקוח a מציע את התור aBk שלו בתמורה לתור bBk של לקוח אחר
   async function requestSwap(data) {
     await freshForSwap();
@@ -265,6 +319,7 @@ UG.Store = (function () {
     if (note) sw.note = note;
     const chk = swapCheck(state, sw);
     if (!chk.ok) return chk;
+    if (swapDeclinedBefore(a.id, b.id, sw.aUser)) return { ok: false, reason: "הלקוח השני כבר ענה שלא על ההצעה הזו" };
     const open = swapList().filter((x) => x.aUser === sw.aUser && x.status === "pending" && swapCheck(state, x).ok);
     if (open.some((x) => x.aBk === a.id && x.bBk === b.id)) return { ok: false, reason: "כבר שלחת בקשה על התור הזה" };
     if (open.length >= SWAP_MAX_PENDING) return { ok: false, reason: "יש לך כבר " + SWAP_MAX_PENDING + " בקשות פתוחות — חכו לתשובה או בטלו אחת" };
@@ -495,6 +550,11 @@ UG.Store = (function () {
       removeBooking(bkId) { const s = readRaw() || {}; s.bookings = bookingsArr(s).filter((x) => x && x.id !== bkId); return writeRawState(s); },
       // בקשות להחלפת תור בין לקוחות — לפי מזהה (מקומית: בתוך המצב)
       setSwap(id, obj) { const s = readRaw() || {}; s.swaps = normSwaps(s.swaps); s.swaps[id] = obj; return writeRawState(s); },
+      addSwapMsg(id, mid, msg) {
+        const s = readRaw() || {}; s.swaps = normSwaps(s.swaps);
+        if (s.swaps[id]) { s.swaps[id].msgs = Object.assign({}, s.swaps[id].msgs || {}); s.swaps[id].msgs[mid] = msg; }
+        return writeRawState(s);
+      },
       // ספר הלקוחות (צומת פרטי, מוגן לבעלים בענן; מקומית — אחסון נפרד)
       onContacts(cb) { listeners.contacts.push(cb); cb(readC()); },
       saveContacts(arr) {
@@ -613,6 +673,8 @@ UG.Store = (function () {
       removeBooking(bkId) { return ref.child("bookings/" + bkId).remove(); },
       // בקשה להחלפת תור — נכתבת לפי מזהה, כדי ששני לקוחות שכותבים בו-זמנית לא ידרסו זה את זה
       setSwap(id, obj) { return ref.child("swaps/" + id).set(clone(obj)); },
+      // הודעה נכתבת לנתיב משלה: כתיבה של כל הרשומה הייתה עלולה לדרוס "מסכים" שנלחץ באותו רגע
+      addSwapMsg(id, mid, msg) { return ref.child("swaps/" + id + "/msgs/" + mid).set(clone(msg)); },
       // ספר הלקוחות — צומת מוגן לבעלים בלבד (קריאה+כתיבה לפי ownerUid). ללקוח
       // הקריאה נחסמת → מטמון ריק (ממילא רק הבעלים משתמש בספר הלקוחות).
       onContacts(cb) {
@@ -1849,7 +1911,7 @@ UG.Store = (function () {
 
   return {
     init, subscribe, get,
-    setDay, setBreaks, breaksOn, swapCheck, swapList, swapLeadMin, swapManualOn, swapForOwner, requestSwap, cancelSwap, answerSwap, approveSwap, setWeekVariable, saveShop, upsertService, removeService, upsertProduct, removeProduct,
+    setDay, setBreaks, breaksOn, swapCheck, swapList, swapLeadMin, swapManualOn, swapForOwner, swapMsgs, sendSwapMsg, swapDeclinedBefore, SWAP_MSG_MAX, requestSwap, cancelSwap, answerSwap, approveSwap, setWeekVariable, saveShop, upsertService, removeService, upsertProduct, removeProduct,
     addContacts, removeContact, getClientPrices, setClientPrices, readVip, addBroadcast, addClosedDates, removeClosedDate,
     setSlotOpen, blockClient, unblockClient,
     createBooking, setBookingStatus, deleteBooking,

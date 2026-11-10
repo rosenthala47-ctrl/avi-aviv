@@ -823,6 +823,16 @@ select.input {
 .swap-note { font-style: italic; opacity: .95; }
 .swap-note-lbl { display: block; margin: 12px 0 6px; font-size: 13px; color: var(--muted); }
 .swap-note-in { resize: vertical; min-height: 52px; line-height: 1.5; font-size: 14px; }
+.swap-chat { display: flex; flex-direction: column; gap: 8px; max-height: 38vh; overflow-y: auto; margin: 14px 0 12px; padding: 2px; }
+.swap-msg { max-width: 84%; padding: 8px 12px; border-radius: 14px; font-size: 14px; line-height: 1.5; background: var(--surface-3); align-self: flex-start; }
+.swap-msg.me { align-self: flex-end; background: rgba(56, 189, 248, .18); }
+.swap-msg small { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+.swap-msg span { white-space: pre-wrap; overflow-wrap: anywhere; }
+.swap-chat-empty { text-align: center; margin: 6px 0; }
+.swap-decide { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.swap-decide-h { font-size: 13px; font-weight: 800; color: var(--muted); margin-bottom: 8px; }
+.swap-acts { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.swap-x.new { color: var(--sky-2); font-weight: 800; }
 .swap-or { margin: 16px 0 0; text-align: center; font-size: 13px; color: var(--muted); font-weight: 700; }
 .swap-line { margin-top: 6px; font-size: 12.5px; color: var(--sky-2); font-weight: 600; }
 .swap-line.done { color: var(--muted); }

@@ -282,6 +282,7 @@ async function notifySwaps(db, shopsVal, now, sendToUid, nameOf) {
   const ref = db.ref("system/swapPush");
   const prev = (await ref.once("value")).val() || {};
   const req = new Set(prev.req || []), res = new Set(prev.res || []), own = new Set(prev.own || []);
+  const msgSeen = new Set(prev.msg || []);   // הודעות בשיחה שכבר נשלח עליהן פוש
   let sent = 0, dirty = false;
   const resetRem = {};   // sid → מזהי תורים שזזו
   for (const sid of Object.keys(shopsVal || {})) {
@@ -316,6 +317,20 @@ async function notifySwaps(db, shopsVal, now, sendToUid, nameOf) {
               : `לקוח אחר מציע להחליף את התור שלך ${relDay(sw.bDate)} בשעה ${sw.bStart} בתור שלו ${relDay(sw.aDate)} בשעה ${sw.aStart}`) +
             (note ? `\n״${note}״` : "") + ` · ${shopName}`,
             "swapreq-" + sw.id);
+        }
+      }
+      /* שיחה בין שני הלקוחות (v205): כל הודעה → פוש לצד השני, פעם אחת. הספר לא מקבל
+         עליה כלום. רק כשהבקשה עוד פתוחה, ורק הודעה טרייה (יממה) — לא מציפים בפריסה. */
+      if (sw.status === "pending" && sw.msgs && typeof sw.msgs === "object") {
+        for (const mid of Object.keys(sw.msgs)) {
+          const m = sw.msgs[mid], mk = key + "/" + mid;
+          if (!m || msgSeen.has(mk)) continue;
+          msgSeen.add(mk); dirty = true;
+          const to = m.f === "a" ? sw.bUser : m.f === "b" ? sw.aUser : "";
+          const text = String(m.t || "").replace(/\s+/g, " ").trim().slice(0, 200);
+          if (to && text && String(to).indexOf("owner:") !== 0 && (Number(m.at) || 0) > now - 86400000) {
+            sent += await sendToUid(to, "💬 הודעה על החלפת התור", `״${text}״ · ${shopName}`, "swapmsg-" + sw.id);
+          }
         }
       }
       const byOwner = sw.by === "owner";   // מספרה מחמירה: הספר הוא שאישר/דחה
@@ -370,7 +385,7 @@ async function notifySwaps(db, shopsVal, now, sendToUid, nameOf) {
     });
     if (Object.keys(patch).length) await psRef.update(patch);
   }
-  if (dirty) await ref.set({ req: [...req].slice(-500), res: [...res].slice(-500), own: [...own].slice(-500) });
+  if (dirty) await ref.set({ req: [...req].slice(-500), res: [...res].slice(-500), own: [...own].slice(-500), msg: [...msgSeen].slice(-1500) });
   return sent;
 }
 

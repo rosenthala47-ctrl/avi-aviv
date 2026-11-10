@@ -14,7 +14,7 @@
 
   /* גרסת האפליקציה — מוצגת בהגדרות כדי לוודא שקיבלתם את העדכון האחרון.
      יש לעדכן יחד עם CACHE ב-sw.js. */
-  const APP_VERSION = "204";
+  const APP_VERSION = "205";
 
   /* ---------- זיהוי המספרה מהקישור (רב-משתמשי) ----------
      אינסטגרם ופייסבוק מצמידים פרמטר מעקב לקישור שמשתפים בהם (igsh / igshid / fbclid),
@@ -2794,6 +2794,7 @@
     const list = swapsToMe(st);
     if (!list.length) return "";
     const sw = list[0];
+    const lastA = Store.swapMsgs(sw).filter((m) => m.f === "a").pop();
     return `
     <div class="banner sky swap-banner">
       <span class="bn-ico">🔄</span>
@@ -2801,15 +2802,111 @@
         <div class="bn-title">לקוח אחר מבקש להתחלף איתך בתור</div>
         <div class="bn-sub">התור שלך: <b>${esc(swapWhen(sw.bDate, sw.bStart))}</b></div>
         <div class="bn-sub">במקומו: <b>${esc(swapWhen(sw.aDate, sw.aStart))}</b></div>
-        ${sw.note ? `<div class="bn-sub swap-note">״${esc(sw.note)}״</div>` : ""}
+        ${lastA ? `<div class="bn-sub swap-note">״${esc(lastA.t)}״</div>` : ""}
         <div class="bn-sub">אותו שירות, רק השעה מתחלפת. הפרטים שלך לא נחשפים לאף אחד.</div>
         ${list.length > 1 ? `<div class="bn-sub">ועוד ${list.length - 1} בקשות</div>` : ""}
       </div>
       <div class="bn-actions">
         <button class="btn btn-primary btn-sm" data-act="swap-accept" data-id="${esc(sw.id)}">מסכים להחליף</button>
         <button class="btn btn-ghost btn-sm" data-act="swap-decline" data-id="${esc(sw.id)}">לא, תודה</button>
+        <button class="btn btn-ghost btn-sm" data-act="swap-chat" data-id="${esc(sw.id)}">💬 לכתוב לו</button>
       </div>
     </div>`;
+  }
+
+  /* ---------- שיחה בין שני הלקוחות בתוך בקשת ההחלפה (v205) ----------
+     "שידברו אחד עם השני… שהכל ביניהם" (נריה; המשתמש חזר על זה שלוש פעמים). שני הצדדים
+     כותבים ועונים בתוך הבקשה, אנונימית: "אני" / "הלקוח השני", בלי שם ובלי טלפון.
+     **הספר לא רואה את השיחה ולא מקבל עליה שום דבר** — אין לה מסך בצד שלו.
+     היא נסגרת כשהבקשה נענית/מתבטלת. "נקרא" נשמר במכשיר בלבד (SWAP_READ). */
+  const SWAP_READ = "ug_swap_read__" + SHOP;
+  function swapReadMap() { try { return JSON.parse(localStorage.getItem(SWAP_READ) || "{}") || {}; } catch (e) { return {}; } }
+  function markSwapRead(sw) {
+    try {
+      const m = swapReadMap(); m[sw.id] = Store.swapMsgs(sw).length;
+      const keys = Object.keys(m);
+      if (keys.length > 80) keys.slice(0, keys.length - 80).forEach((k) => { delete m[k]; });
+      localStorage.setItem(SWAP_READ, JSON.stringify(m));
+    } catch (e) {}
+  }
+  const swapSide = (sw) => !identity.userId ? "" : sw.aUser === identity.userId ? "a" : sw.bUser === identity.userId ? "b" : "";
+  // כמה הודעות של הצד השני עוד לא ראיתי
+  function swapUnread(sw) {
+    const me = swapSide(sw);
+    if (!me) return 0;
+    const seen = Number(swapReadMap()[sw.id]) || 0;
+    return Store.swapMsgs(sw).slice(seen).filter((m) => m.f !== me).length;
+  }
+  // למבקש: הצד השני כתב לו (בלי להחליט עדיין)
+  function swapReplyBanner(st) {
+    if (!swapFeature(st) || view.ownerPreview || !identity.userId) return "";
+    const sw = Store.swapList()
+      .filter((x) => x.status === "pending" && x.aUser === identity.userId && Store.swapCheck(st, x).ok && swapUnread(x) > 0)
+      .sort((a, z) => (z.createdAt || 0) - (a.createdAt || 0))[0];
+    if (!sw) return "";
+    const last = Store.swapMsgs(sw).filter((m) => m.f === "b").pop();
+    return `
+    <div class="banner sky swap-banner">
+      <span class="bn-ico">💬</span>
+      <div class="bn-body">
+        <div class="bn-title">הלקוח השני ענה לך</div>
+        <div class="bn-sub">על ההצעה להתחלף עם ${esc(swapWhen(sw.bDate, sw.bStart))}</div>
+        ${last ? `<div class="bn-sub swap-note">״${esc(last.t)}״</div>` : ""}
+      </div>
+      <div class="bn-actions">
+        <button class="btn btn-primary btn-sm" data-act="swap-chat" data-id="${esc(sw.id)}">פתיחת השיחה</button>
+      </div>
+    </div>`;
+  }
+  function swapChatHtml(st, sw) {
+    const me = swapSide(sw);
+    const msgs = Store.swapMsgs(sw);
+    const open = sw.status === "pending" && Store.swapCheck(st, sw).ok;
+    const full = msgs.length >= Store.SWAP_MSG_MAX;
+    return `
+      <div class="m-title">💬 שיחה על החלפת התור</div>
+      <div class="m-sub">השיחה אנונימית: הצד השני לא רואה את השם או הטלפון שלך.</div>
+      <div class="summary-row"><span class="sr-k">התור שלך</span><span class="sr-v">${esc(me === "a" ? swapWhen(sw.aDate, sw.aStart) : swapWhen(sw.bDate, sw.bStart))}</span></div>
+      <div class="summary-row"><span class="sr-k">התור שלו</span><span class="sr-v">${esc(me === "a" ? swapWhen(sw.bDate, sw.bStart) : swapWhen(sw.aDate, sw.aStart))}</span></div>
+      <div class="swap-chat" id="swap-chat-list">${msgs.length
+        ? msgs.map((m) => `<div class="swap-msg ${m.f === me ? "me" : "them"}"><small>${m.f === me ? "אני" : "הלקוח השני"}</small><span>${esc(m.t)}</span></div>`).join("")
+        : `<p class="hint swap-chat-empty">עוד אין הודעות — אפשר לכתוב ראשונים.</p>`}</div>
+      ${open && !full ? `
+        <textarea class="input swap-note-in" id="swap-msg" rows="2" maxlength="200" placeholder="כתבו הודעה…"></textarea>
+        <button class="btn btn-primary" data-act="swap-send" data-id="${esc(sw.id)}" style="margin-top:8px">שליחה</button>`
+        : `<p class="hint swap-chat-empty">${open ? "השיחה הגיעה לאורך המרבי." : "הבקשה נסגרה — אי אפשר לכתוב בה יותר."}</p>`}
+      ${open && me === "b" ? `
+        <div class="swap-decide"><div class="swap-decide-h">ההחלטה שלך</div>
+          <button class="btn btn-primary" data-act="swap-accept" data-id="${esc(sw.id)}">מסכים להחליף</button>
+          <button class="btn btn-ghost" data-act="swap-decline" data-id="${esc(sw.id)}" style="margin-top:8px">לא, תודה</button>
+        </div>` : ""}
+      ${open && me === "a" ? `<button class="btn btn-ghost" data-act="swap-cancel" data-id="${esc(sw.id)}" style="margin-top:14px">ביטול הבקשה</button>` : ""}
+      <button class="btn btn-ghost" data-act="close-modal" style="margin-top:8px">סגירה</button>`;
+  }
+  const swapChatSig = (sw) => Store.swapMsgs(sw).length + ":" + sw.status;
+  function openSwapChat(id) {
+    const sw = Store.swapList().find((x) => x.id === id);
+    if (!sw || !swapSide(sw)) return;
+    view.swapChat = id; view.swapChatSig = swapChatSig(sw);
+    openModal(swapChatHtml(Store.get(), sw));
+    markSwapRead(sw);
+    const box = $("#swap-chat-list"); if (box) box.scrollTop = box.scrollHeight;
+  }
+  /* הודעה חדשה (או תשובה) הגיעה כשהשיחה פתוחה: מרעננים את החלון — רק כשבאמת השתנה
+     משהו, ובלי למחוק את מה שהלקוח באמצע לכתוב. */
+  function refreshSwapChat() {
+    if (!view.swapChat) return;
+    if (!$("#modalBack").classList.contains("open") || !$("#swap-chat-list")) { view.swapChat = null; return; }
+    const sw = Store.swapList().find((x) => x.id === view.swapChat);
+    if (!sw || swapChatSig(sw) === view.swapChatSig) return;
+    const el = $("#swap-msg");
+    const draft = el ? el.value : "", focused = !!el && document.activeElement === el;
+    view.swapChatSig = swapChatSig(sw);
+    openModal(swapChatHtml(Store.get(), sw));
+    const el2 = $("#swap-msg");
+    if (el2) { el2.value = draft; if (focused) el2.focus(); }
+    markSwapRead(sw);
+    const box = $("#swap-chat-list"); if (box) box.scrollTop = box.scrollHeight;
   }
   /* תשובה על החלפה — מוצגת פעם אחת (עד שסוגרים), לפי מזהה + מצב. למבקש תמיד; למי
      שהתור שלו התבקש — רק כשהספר הוא שהחליט (מספרה מחמירה), כי אחרת הוא עצמו לחץ. */
@@ -2833,10 +2930,12 @@
       : sw.status === "accepted"
       ? { cls: "good", ico: "👍", t: "הלקוח הסכים להתחלף", s: "ממתין לאישור הספר — נעדכן אותך" }
       : { cls: "", ico: "🙂", t: byOwner ? "הספר לא אישר את ההחלפה" : "הבקשה להחלפה לא אושרה", s: "התור שלך נשאר " + wasAt };
+    // בסירוב של הצד השני: מה שהוא כתב אחרון (אם כתב) — זה ההסבר שלו
+    const lastOther = sw.status === "declined" && !byOwner ? Store.swapMsgs(sw).filter((x) => x.f !== (asA ? "a" : "b")).pop() : null;
     return `
     <div class="banner ${m.cls}">
       <span class="bn-ico">${m.ico}</span>
-      <div class="bn-body"><div class="bn-title">${esc(m.t)}</div><div class="bn-sub">${esc(m.s)}</div></div>
+      <div class="bn-body"><div class="bn-title">${esc(m.t)}</div><div class="bn-sub">${esc(m.s)}</div>${lastOther ? `<div class="bn-sub swap-note">״${esc(lastOther.t)}״</div>` : ""}</div>
       <div class="bn-actions">
         ${sw.status === "done" ? `<button class="btn btn-sm" data-act="add-cal" data-id="${esc(myBk)}">📅 ליומן</button>` : ""}
         <button class="btn btn-ghost btn-sm" data-act="swap-seen" data-id="${esc(sw.id + ":" + sw.status)}">סגירה</button>
@@ -2879,7 +2978,7 @@
     </div>`;
   }
   // כל ההתראות שבראש עמוד הלקוח. במספרה בלי החלפות — בדיוק alertBanner, כמו קודם
-  function clientAlerts(st) { return swapInBanner(st) + swapOutBanner(st) + alertBanner(st); }
+  function clientAlerts(st) { return swapInBanner(st) + swapReplyBanner(st) + swapOutBanner(st) + alertBanner(st); }
   /* בחלון של שעה תפוסה: הצעה להתחלף עם מי שקבע אותה. התור המבוקש = התור שתופס את
      הריבוע ברשת, לפי משך השירות שהלקוח בחר — בדיוק כמו שהרשת סימנה אותו "תפוס". */
   function swapTargetOf(st, dateKey, start) {
@@ -2913,13 +3012,16 @@
     let body;
     if (pending) {
       body = `<p class="swap-p">✓ שלחת בקשה להתחלף עם התור שלך ${esc(swapWhen(pending.aDate, pending.aStart))}. נעדכן אותך כשהוא יענה.</p>
+        ${toOwner ? "" : `<button class="btn btn-sm" data-act="swap-chat" data-id="${esc(pending.id)}">💬 שיחה</button>`}
         <button class="btn btn-ghost btn-sm" data-act="swap-cancel" data-id="${esc(pending.id)}">ביטול הבקשה</button>`;
     } else if (!mine.length) {
       body = `<p class="hint swap-p">יש לך תור אחר אצלנו? אפשר להציע למי שקבע את השעה הזו להתחלף איתך. כדי להציע — קבעו קודם תור בשעה פנויה.</p>`;
     } else {
       body = mine.map((m) => {
-        const chk = Store.swapCheck(st, { aBk: m.id, bBk: target.id, aUser: identity.userId, bUser: target.userId,
-          aDate: m.date, aStart: m.start, bDate: target.date, bStart: target.start });
+        const chk = Store.swapDeclinedBefore(m.id, target.id, identity.userId)
+          ? { ok: false, reason: "הלקוח השני כבר ענה שלא על ההצעה הזו" }
+          : Store.swapCheck(st, { aBk: m.id, bBk: target.id, aUser: identity.userId, bUser: target.userId,
+            aDate: m.date, aStart: m.start, bDate: target.date, bStart: target.start });
         return chk.ok
           ? `<button class="swap-opt" data-act="swap-request" data-a="${esc(m.id)}" data-b="${esc(target.id)}">
                <span>להציע את התור שלי: <b>${esc(swapWhen(m.date, m.start))}</b></span><small>${esc(m.serviceName)}</small></button>`
@@ -2946,6 +3048,7 @@
   const SWAP_LEAD_OPTS = [{ m: 15, t: "עד רבע שעה לפני" }, { m: 30, t: "עד חצי שעה לפני" }, { m: 60, t: "עד שעה לפני" },
     { m: 120, t: "עד שעתיים לפני" }, { m: 180, t: "עד 3 שעות לפני" }, { m: 360, t: "עד 6 שעות לפני" }];
   const swapLeadLabel = (m) => (SWAP_LEAD_OPTS.find((o) => o.m === m) || { t: m + " דקות לפני" }).t;
+  const SWAP_NO_PHONE = "אל תכתבו כאן מספר טלפון — השיחה אנונימית, ופרטים אישיים לא מוגנים בה";
   function swapNoteOk(note) {
     const digits = String(note || "").replace(/[\s()\-.+]/g, "");
     return !/\d{9,}/.test(digits);
@@ -2956,7 +3059,7 @@
     const lines = Store.swapList()
       .filter((x) => x.status === "pending" && x.aUser === identity.userId && x.aBk === b.id && Store.swapCheck(st, x).ok)
       .map((x) => `<div class="swap-line">🔄 הצעת להתחלף עם ${esc(swapWhen(x.bDate, x.bStart))} · ממתין לתשובה
-        <button type="button" class="swap-x" data-act="swap-cancel" data-id="${esc(x.id)}">ביטול</button></div>`);
+        <span class="swap-acts">${Store.swapForOwner(x) ? "" : `<button type="button" class="swap-x${swapUnread(x) ? " new" : ""}" data-act="swap-chat" data-id="${esc(x.id)}">${swapUnread(x) ? "💬 הודעה חדשה" : "💬 שיחה"}</button>`}<button type="button" class="swap-x" data-act="swap-cancel" data-id="${esc(x.id)}">ביטול</button></span></div>`);
     if (b.swapId && b.swappedAt) lines.push(`<div class="swap-line done">🔄 התור הוחלף עם לקוח אחר</div>`);
     return lines.join("");
   }
@@ -7606,7 +7709,7 @@
           const noteEl = $("#swap-note");
           const note = noteEl ? noteEl.value.trim() : "";
           if (!swapNoteOk(note)) {
-            toast("אל תכתבו כאן מספר טלפון — המשפט גלוי לכל מי שנכנס למספרה", "", "⚠️");
+            toast(SWAP_NO_PHONE, "", "⚠️");
             if (noteEl) noteEl.focus();
             break;
           }
@@ -7617,6 +7720,22 @@
           toast("הבקשה נשלחה! נעדכן אותך כשהוא יענה", "good", "🔄");
           render(); break;
         }
+        case "swap-chat": openSwapChat(t.dataset.id); render(); break;
+        case "swap-send": {
+          const el = $("#swap-msg");
+          const txt = el ? el.value.trim() : "";
+          if (!txt) { if (el) el.focus(); break; }
+          if (!swapNoteOk(txt)) { toast(SWAP_NO_PHONE, "", "⚠️"); el.focus(); break; }
+          el.value = "";   // מנקים לפני השליחה: החלון מתרענן באמצע, ושומר את מה שבשדה
+          const r = await Store.sendSwapMsg(t.dataset.id, identity.userId, txt);
+          if (!r.ok) {
+            toast(r.reason || "ההודעה לא נשלחה — נסו שוב", "", "⚠️");
+            view.swapChatSig = ""; refreshSwapChat();
+            const el2 = $("#swap-msg"); if (el2 && !el2.value) el2.value = txt;
+            break;
+          }
+          refreshSwapChat(); render(); break;
+        }
         case "swap-cancel": {
           await Store.cancelSwap(t.dataset.id, identity.userId);
           closeModal(); toast("הבקשה בוטלה", "", "🔄"); render(); break;
@@ -7626,6 +7745,7 @@
           const sw0 = Store.swapList().find((x) => x.id === t.dataset.id);
           const r = await Store.answerSwap(t.dataset.id, true, identity.userId);
           if (!r.ok) { toast(r.reason || "ההחלפה נכשלה — נסו שוב", "", "⚠️"); render(); break; }
+          if (view.swapChat) { view.swapChat = null; closeModal(); }
           haptic(18);
           if (r.status === "accepted") toast("הסכמת! ההחלפה תושלם אחרי שהספר יאשר", "good", "👍");
           else toast("התחלפתם! התור שלך עכשיו " + (sw0 ? swapWhen(sw0.aDate, sw0.aStart) : ""), "good", "✅");
@@ -7633,6 +7753,7 @@
         }
         case "swap-decline": {
           await Store.answerSwap(t.dataset.id, false, identity.userId);
+          if (view.swapChat) { view.swapChat = null; closeModal(); }
           toast("הבקשה נדחתה — התור שלך נשאר כמו שהיה", "", "🙂"); render(); break;
         }
         case "swap-seen": markSwapSeen(t.dataset.id); render(); break;
@@ -8562,6 +8683,7 @@
      תגובה לשינויים מהחנות (זמן אמת)
      =======================================================================*/
   function onStoreChange(st) {
+    refreshSwapChat();   // שיחת החלפה פתוחה — הודעה חדשה מופיעה מיד
     // התראת "תור חדש" לבעלים
     if (view.route === "owner") {
       if (!ownerSeen) {
